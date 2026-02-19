@@ -1,0 +1,1 @@
+Hosting Strategy: The application is hosted as a standalone Next.js instance on portal.kibali.com. We utilize Path-based routing for user roles. This simplifies the Supabase Auth session management, as a single JWT (JSON Web Token) can be used to authorize requests across Admin, Teacher, and Parent routes without complex cross-domain cookie handling.

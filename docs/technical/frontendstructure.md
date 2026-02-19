@@ -1,0 +1,1 @@
+Frontend Architecture: We utilize Next.js Route Groups to isolate the three user experiences (Admin, Teacher, Parent). Each group has a dedicated layout.tsx to handle role-specific navigation and state. Shared UI components are kept in @/components/ui for visual consistency across the entire Kibali ecosystem.

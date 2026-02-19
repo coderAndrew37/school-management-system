@@ -1,0 +1,3 @@
+Route Grouping Strategy: We use parenthesis-bound folders (group) to separate user experiences. This allows us to apply specific Middleware and Layouts based on the authenticated user's role (Admin vs. Teacher vs. Parent) while keeping a flat, clean URL structure.
+
+Root Level Traffic Control: The root page (/) acts as a server-side traffic controller. It uses the createSupabaseServerClient to identify the user's role and performs a server-side redirect() to the appropriate role-based directory. This ensures that the root URL always leads to the user's relevant dashboard without client-side navigation overhead.
