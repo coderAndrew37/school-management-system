@@ -1,28 +1,32 @@
 import Link from "next/link";
-import { GraduationCap, UserRoundPlus } from "lucide-react";
+import { GraduationCap, UserRoundPlus, ArrowRight } from "lucide-react";
+
 import {
   fetchStudents,
   fetchTeachers,
   fetchDashboardStats,
 } from "@/lib/data/dashboard";
 import { StatCard } from "@/app/_components/dashboard/StatCard";
-import { StudentGrid } from "@/app/_components/dashboard/StudentGrd";
 import { TeachersTable } from "@/app/_components/dashboard/TeachersTable";
+import { StudentGrid } from "@/app/_components/dashboard/StudentGrd";
 
 export const metadata = {
   title: "Dashboard | Kibera Academy",
   description: "Overview of students and teachers at Kibera Academy",
 };
 
-// Revalidate data every 60 seconds (ISR)
 export const revalidate = 60;
+
+const DASHBOARD_STUDENT_LIMIT = 8;
 
 export default async function DashboardPage() {
   const [students, teachers, stats] = await Promise.all([
-    fetchStudents(),
+    fetchStudents(DASHBOARD_STUDENT_LIMIT),
     fetchTeachers(),
     fetchDashboardStats(),
   ]);
+
+  const hasMoreStudents = stats.totalStudents > DASHBOARD_STUDENT_LIMIT;
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] font-[family-name:var(--font-body)]">
@@ -83,15 +87,44 @@ export default async function DashboardPage() {
 
         {/* ── Students Section ── */}
         <section>
-          <SectionHeader
-            title="Students"
-            count={students.length}
-            subtitle="All enrolled students"
-            accentColor="text-amber-400"
-          />
+          <div className="flex items-end justify-between">
+            <SectionHeader
+              title="Recent Students"
+              count={stats.totalStudents}
+              subtitle={
+                hasMoreStudents
+                  ? `Showing ${DASHBOARD_STUDENT_LIMIT} of ${stats.totalStudents} enrolled students`
+                  : "All enrolled students"
+              }
+              accentColor="text-amber-400"
+            />
+            <Link
+              href="/students"
+              className="flex items-center gap-1.5 text-xs font-semibold text-amber-400/70 hover:text-amber-400 transition-colors duration-200 group"
+            >
+              View all students
+              <ArrowRight className="h-3.5 w-3.5 group-hover:translate-x-0.5 transition-transform duration-200" />
+            </Link>
+          </div>
           <div className="mt-5">
             <StudentGrid students={students} />
           </div>
+
+          {/* "See all" footer card */}
+          {hasMoreStudents && (
+            <div className="mt-4">
+              <Link
+                href="/students"
+                className="flex items-center justify-center gap-2 w-full rounded-2xl border border-white/[0.07] border-dashed bg-white/[0.02] hover:bg-amber-400/[0.04] hover:border-amber-400/20 transition-all duration-300 py-5 text-sm font-medium text-white/30 hover:text-amber-400/70"
+              >
+                <span>
+                  View all {stats.totalStudents} students — search, filter &amp;
+                  sort
+                </span>
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+          )}
         </section>
 
         {/* ── Divider ── */}
@@ -137,16 +170,14 @@ function SectionHeader({
   accentColor,
 }: SectionHeaderProps) {
   return (
-    <div className="flex items-baseline justify-between">
-      <div>
-        <h2 className="text-lg font-bold text-white flex items-baseline gap-2">
-          {title}
-          <span className={`text-sm font-mono font-semibold ${accentColor}`}>
-            ({count})
-          </span>
-        </h2>
-        <p className="text-xs text-white/35 mt-0.5">{subtitle}</p>
-      </div>
+    <div>
+      <h2 className="text-lg font-bold text-white flex items-baseline gap-2">
+        {title}
+        <span className={`text-sm font-mono font-semibold ${accentColor}`}>
+          ({count})
+        </span>
+      </h2>
+      <p className="text-xs text-white/35 mt-0.5">{subtitle}</p>
     </div>
   );
 }
