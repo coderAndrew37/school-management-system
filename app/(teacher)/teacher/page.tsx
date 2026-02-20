@@ -1,10 +1,17 @@
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import {
+  BookOpen,
+  Calendar,
+  Users,
+  GraduationCap,
+  ClipboardList,
+} from "lucide-react";
 import { getSession } from "@/lib/actions/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+
 import type { TeacherSubjectAllocation } from "@/lib/types/allocation";
-import { BookOpen, Calendar, Users } from "lucide-react";
-import Link from "next/link";
-import { redirect } from "next/navigation";
-import { TopNav } from "../_components/nav/TopNav";
+import { TopNav } from "@/app/_components/nav/TopNav";
 
 export const metadata = {
   title: "Teacher Portal | Kibali Academy",
@@ -18,23 +25,17 @@ async function fetchTeacherAllocations(
     .from("teacher_subject_allocations")
     .select(
       `
-  id, teacher_id, subject_id, grade, academic_year, created_at,
-  teachers!inner (
-    id, full_name, email, tsc_number
-  ),
-  subjects!inner (
-    id, name, code, level, weekly_lessons
-  )
-`,
+      id, teacher_id, subject_id, grade, academic_year, created_at,
+      teachers ( id, full_name, email, tsc_number ),
+      subjects ( id, name, code, level, weekly_lessons )
+    `,
     )
-    .returns<TeacherSubjectAllocation[]>()
-
     .eq("teacher_id", teacherId)
     .eq("academic_year", 2026)
     .order("grade");
 
   if (error) return [];
-  return data ?? [];
+  return (data ?? []) as TeacherSubjectAllocation[];
 }
 
 async function fetchStudentCountsByGrade(
@@ -101,8 +102,8 @@ export default async function TeacherDashboard() {
       <TopNav profile={session.profile} email={session.user.email ?? ""} />
 
       <div className="pointer-events-none fixed inset-0 overflow-hidden -z-10">
-        <div className="absolute top-0 left-1/4 w-96 h-96 rounded-full bg-emerald-500/4 blur-[130px]" />
-        <div className="absolute bottom-0 right-0 w-80 h-80 rounded-full bg-amber-500/4 blur-[110px]" />
+        <div className="absolute top-0 left-1/4 w-96 h-96 rounded-full bg-emerald-500/[0.04] blur-[130px]" />
+        <div className="absolute bottom-0 right-0 w-80 h-80 rounded-full bg-amber-500/[0.04] blur-[110px]" />
       </div>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
@@ -119,13 +120,22 @@ export default async function TeacherDashboard() {
               Academic Year 2026 · Kibali Academy
             </p>
           </div>
-          <Link
-            href="/timetable"
-            className="flex items-center gap-2 rounded-xl border border-emerald-400/25 bg-emerald-400/10 hover:bg-emerald-400/20 px-4 py-2.5 text-xs font-semibold text-emerald-400 transition-all"
-          >
-            <Calendar className="h-4 w-4" />
-            View Timetable
-          </Link>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Link
+              href="/teacher/assess"
+              className="flex items-center gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 px-4 py-2.5 text-xs font-bold text-white transition-all shadow-lg shadow-emerald-500/20"
+            >
+              <ClipboardList className="h-4 w-4" />
+              Assess Students
+            </Link>
+            <Link
+              href="/timetable"
+              className="flex items-center gap-2 rounded-xl border border-emerald-400/25 bg-emerald-400/10 hover:bg-emerald-400/20 px-4 py-2.5 text-xs font-semibold text-emerald-400 transition-all"
+            >
+              <Calendar className="h-4 w-4" />
+              View Timetable
+            </Link>
+          </div>
         </header>
 
         {/* Stats */}
@@ -183,7 +193,7 @@ export default async function TeacherDashboard() {
                 return (
                   <div
                     key={alloc.id}
-                    className="rounded-2xl border border-white/[0.07] bg-white/[0.03] hover:bg-white/5 transition-colors p-5 flex flex-col gap-3"
+                    className="rounded-2xl border border-white/[0.07] bg-white/[0.03] hover:bg-white/[0.05] transition-colors p-5 flex flex-col gap-3"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -195,7 +205,7 @@ export default async function TeacherDashboard() {
                         </p>
                       </div>
                       <span
-                        className={`shrink-0 text-[10px] font-bold font-mono px-2 py-1 rounded-lg border ${LEVEL_COLORS[level]}`}
+                        className={`flex-shrink-0 text-[10px] font-bold font-mono px-2 py-1 rounded-lg border ${LEVEL_COLORS[level]}`}
                       >
                         {alloc.subjects?.code}
                       </span>
@@ -218,7 +228,7 @@ export default async function TeacherDashboard() {
           )}
         </section>
 
-        <footer className="pt-4 border-t border-white/5">
+        <footer className="pt-4 border-t border-white/[0.05]">
           <p className="text-center text-xs text-white/20">
             Kibali Academy Teacher Portal · Contact admin@kibali.ac.ke for
             support
