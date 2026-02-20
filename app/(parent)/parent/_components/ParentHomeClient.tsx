@@ -2,35 +2,39 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { BookOpen, ChevronRight, Star, User } from "lucide-react";
+import type {
+  CbcScore,
+  ChildDashboardProps,
+  ChildSwitcherProps,
+  ParentHomeClientProps,
+  ScoreBadgeProps,
+} from "@/lib/types/parent";
 import {
-  BookOpen,
-  ChevronRight,
-  GraduationCap,
-  Star,
-  User,
-} from "lucide-react";
-import { ChildWithAssessments } from "@/lib/data/parent-data";
-import {
-  calcAge,
-  getAvatarColor,
+  CBC_SCORES,
   getInitials,
+  getAvatarColor,
   getOverallLevel,
   getSubjectSummary,
-  CBC_SCORES,
-  CbcScore,
-} from "@/lib/utils/parent-helpers";
+  calcAge,
+} from "@/lib/helpers/parent";
 
-// ── Child Switcher pill row ────────────────────────────────────────────────────
+// ── Score badge ───────────────────────────────────────────────────────────────
 
-function ChildSwitcher({
-  children,
-  activeId,
-  onSelect,
-}: {
-  children: ChildWithAssessments[];
-  activeId: string;
-  onSelect: (id: string) => void;
-}) {
+function ScoreBadge({ score }: ScoreBadgeProps) {
+  const meta = CBC_SCORES[score];
+  return (
+    <span
+      className={`inline-block rounded-lg px-2.5 py-1 text-xs font-bold border ${meta.bg} ${meta.color} ${meta.border}`}
+    >
+      {score}
+    </span>
+  );
+}
+
+// ── Child switcher pill row ───────────────────────────────────────────────────
+
+function ChildSwitcher({ children, activeId, onSelect }: ChildSwitcherProps) {
   if (children.length <= 1) return null;
 
   return (
@@ -39,6 +43,7 @@ function ChildSwitcher({
         const isActive = child.id === activeId;
         const initials = getInitials(child.full_name);
         const color = getAvatarColor(child.full_name);
+        const firstName = child.full_name.split(" ")[0] ?? child.full_name;
 
         return (
           <button
@@ -55,7 +60,7 @@ function ChildSwitcher({
             >
               {initials}
             </div>
-            {child.full_name.split(" ")[0]}
+            {firstName}
           </button>
         );
       })}
@@ -63,22 +68,9 @@ function ChildSwitcher({
   );
 }
 
-// ── Score badge ───────────────────────────────────────────────────────────────
+// ── Single child dashboard ────────────────────────────────────────────────────
 
-function ScoreBadge({ score }: { score: CbcScore }) {
-  const meta = CBC_SCORES[score];
-  return (
-    <span
-      className={`inline-block rounded-lg px-2.5 py-1 text-xs font-bold border ${meta.bg} ${meta.color} ${meta.border}`}
-    >
-      {score}
-    </span>
-  );
-}
-
-// ── Single child dashboard card ───────────────────────────────────────────────
-
-function ChildDashboard({ child }: { child: ChildWithAssessments }) {
+function ChildDashboard({ child }: ChildDashboardProps) {
   const initials = getInitials(child.full_name);
   const avatarColor = getAvatarColor(child.full_name);
   const overall = getOverallLevel(child.assessments);
@@ -89,35 +81,32 @@ function ChildDashboard({ child }: { child: ChildWithAssessments }) {
     <div className="space-y-5 animate-in fade-in duration-300">
       {/* Hero card */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-amber-400 to-orange-500 p-6 text-white shadow-xl shadow-amber-200">
-        {/* decorative circles */}
         <div className="absolute -top-8 -right-8 h-40 w-40 rounded-full bg-white/10" />
         <div className="absolute -bottom-6 -left-6 h-32 w-32 rounded-full bg-white/10" />
 
-        <div className="relative flex items-start justify-between">
-          <div className="flex items-center gap-4">
-            <div
-              className={`h-16 w-16 rounded-2xl bg-gradient-to-br ${avatarColor} flex items-center justify-center text-xl font-bold text-white shadow-lg ring-4 ring-white/30`}
-            >
-              {initials}
-            </div>
-            <div>
-              <h2 className="text-xl font-bold leading-tight">
-                {child.full_name}
-              </h2>
-              <p className="text-amber-100 text-sm mt-0.5">
-                {child.current_grade} · Age {age}
-              </p>
-              <p className="font-mono text-xs text-amber-200 mt-1">
-                {child.readable_id ?? "ID pending"}
-              </p>
-            </div>
+        <div className="relative flex items-start gap-4">
+          <div
+            className={`h-16 w-16 rounded-2xl bg-gradient-to-br ${avatarColor} flex items-center justify-center text-xl font-bold text-white shadow-lg ring-4 ring-white/30 flex-shrink-0`}
+          >
+            {initials}
+          </div>
+          <div>
+            <h2 className="text-xl font-bold leading-tight">
+              {child.full_name}
+            </h2>
+            <p className="text-amber-100 text-sm mt-0.5">
+              {child.current_grade} · Age {age}
+            </p>
+            <p className="font-mono text-xs text-amber-200 mt-1">
+              {child.readable_id ?? "ID pending"}
+            </p>
           </div>
         </div>
 
-        <div className="relative mt-5 flex items-center gap-2">
+        <div className="relative mt-5 flex items-center gap-3">
           <span className="text-2xl">{overall.emoji}</span>
           <div>
-            <p className="text-xs text-amber-100 font-medium uppercase tracking-wider">
+            <p className="text-xs text-amber-100 font-semibold uppercase tracking-wider">
               Overall Performance
             </p>
             <p className="font-bold text-white">{overall.label}</p>
@@ -125,7 +114,7 @@ function ChildDashboard({ child }: { child: ChildWithAssessments }) {
         </div>
       </div>
 
-      {/* Quick actions */}
+      {/* Quick action tiles */}
       <div className="grid grid-cols-2 gap-3">
         <Link
           href={`/parent/child/${child.id}`}
@@ -157,7 +146,7 @@ function ChildDashboard({ child }: { child: ChildWithAssessments }) {
       {/* Subject snapshot */}
       {subjects.length > 0 ? (
         <div>
-          <h3 className="text-sm font-bold text-stone-500 uppercase tracking-wider mb-3">
+          <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">
             Subject Snapshot
           </h3>
           <div className="space-y-2">
@@ -167,7 +156,7 @@ function ChildDashboard({ child }: { child: ChildWithAssessments }) {
                 className="flex items-center justify-between rounded-2xl bg-white border border-stone-100 px-4 py-3 shadow-sm"
               >
                 <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-xl bg-stone-50 flex items-center justify-center">
+                  <div className="h-8 w-8 rounded-xl bg-stone-50 flex items-center justify-center flex-shrink-0">
                     <BookOpen className="h-4 w-4 text-stone-400" />
                   </div>
                   <p className="text-sm font-semibold text-stone-700">
@@ -175,7 +164,7 @@ function ChildDashboard({ child }: { child: ChildWithAssessments }) {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <ScoreBadge score={score} />
+                  <ScoreBadge score={score as CbcScore} />
                   <Link
                     href={`/parent/child/${child.id}/progress`}
                     className="text-stone-300 hover:text-amber-500 transition-colors"
@@ -202,21 +191,16 @@ function ChildDashboard({ child }: { child: ChildWithAssessments }) {
   );
 }
 
-// ── Main client component ─────────────────────────────────────────────────────
-
-interface ParentHomeClientProps {
-  children: ChildWithAssessments[];
-  parentName: string;
-}
+// ── Page-level client component ───────────────────────────────────────────────
 
 export function ParentHomeClient({
   children,
   parentName,
 }: ParentHomeClientProps) {
-  const [activeId, setActiveId] = useState(children[0]?.id ?? "");
-  const activeChild = children.find((c) => c.id === activeId) ?? children[0];
+  const [activeId, setActiveId] = useState<string>(children[0]?.id ?? "");
 
-  const firstName = parentName.split(" ")[0];
+  const activeChild = children.find((c) => c.id === activeId) ?? children[0];
+  const firstName = parentName.split(" ")[0] ?? parentName;
 
   if (children.length === 0) {
     return (
@@ -234,21 +218,18 @@ export function ParentHomeClient({
 
   return (
     <div className="space-y-6">
-      {/* Greeting */}
       <div>
         <p className="text-stone-400 text-sm font-medium">Welcome back,</p>
         <h1 className="text-2xl font-bold text-stone-800">{firstName} 👋</h1>
       </div>
 
-      {/* Child switcher */}
       <ChildSwitcher
         children={children}
         activeId={activeId}
         onSelect={setActiveId}
       />
 
-      {/* Active child content */}
-      {activeChild && <ChildDashboard child={activeChild} />}
+      {activeChild !== undefined && <ChildDashboard child={activeChild} />}
     </div>
   );
 }

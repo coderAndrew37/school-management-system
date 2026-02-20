@@ -9,42 +9,36 @@ import {
   Hash,
   User,
 } from "lucide-react";
-import { ChildWithAssessments } from "@/lib/data/parent-data";
+import type {
+  ChildProfileClientProps,
+  CbcScore,
+  ScoreBadgeProps,
+  StatTileProps,
+} from "@/lib/types/parent";
 import {
-  calcAge,
-  formatDOB,
-  getAvatarColor,
+  CBC_SCORES,
   getInitials,
+  getAvatarColor,
+  calcAge,
   getOverallLevel,
   getSubjectSummary,
-  CBC_SCORES,
-  CbcScore,
-} from "@/lib/utils/parent-helpers";
+  formatDOB,
+} from "@/lib/helpers/parent";
 
 // ── Stat tile ─────────────────────────────────────────────────────────────────
 
-function StatTile({
-  icon,
-  label,
-  value,
-  accent = "amber",
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  accent?: "amber" | "emerald" | "sky" | "rose";
-}) {
-  const accents = {
-    amber: "bg-amber-50 text-amber-600",
-    emerald: "bg-emerald-50 text-emerald-600",
-    sky: "bg-sky-50 text-sky-600",
-    rose: "bg-rose-50 text-rose-600",
-  };
+const ACCENT_CLASSES: Record<StatTileProps["accent"], string> = {
+  amber: "bg-amber-50 text-amber-600",
+  emerald: "bg-emerald-50 text-emerald-600",
+  sky: "bg-sky-50 text-sky-600",
+  rose: "bg-rose-50 text-rose-600",
+};
 
+function StatTile({ icon, label, value, accent }: StatTileProps) {
   return (
     <div className="rounded-2xl bg-white border border-stone-100 p-4 shadow-sm">
       <div
-        className={`h-9 w-9 rounded-xl flex items-center justify-center mb-3 ${accents[accent]}`}
+        className={`h-9 w-9 rounded-xl flex items-center justify-center mb-3 ${ACCENT_CLASSES[accent]}`}
       >
         {icon}
       </div>
@@ -56,27 +50,40 @@ function StatTile({
   );
 }
 
-// ── ID Card ───────────────────────────────────────────────────────────────────
+// ── Score badge ───────────────────────────────────────────────────────────────
 
-function DigitalIdCard({ child }: { child: ChildWithAssessments }) {
+function ScoreBadge({ score }: ScoreBadgeProps) {
+  const meta = CBC_SCORES[score];
+  return (
+    <span
+      className={`inline-block rounded-lg px-2.5 py-1 text-xs font-bold border ${meta.bg} ${meta.color} ${meta.border}`}
+    >
+      {score} — {meta.description}
+    </span>
+  );
+}
+
+// ── Digital ID card ───────────────────────────────────────────────────────────
+
+function DigitalIdCard({ child }: ChildProfileClientProps) {
   const initials = getInitials(child.full_name);
   const color = getAvatarColor(child.full_name);
 
   return (
     <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-stone-800 to-stone-900 p-6 text-white shadow-2xl shadow-stone-300">
-      {/* Card texture */}
+      {/* Dot-grid texture */}
       <div
-        className="absolute inset-0 opacity-5"
+        className="absolute inset-0 opacity-[0.04]"
         style={{
           backgroundImage: `radial-gradient(circle at 1px 1px, white 1px, transparent 0)`,
           backgroundSize: "24px 24px",
         }}
       />
-      {/* Gold stripe */}
+      {/* Gold top stripe */}
       <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-400" />
 
       <div className="relative">
-        {/* Header */}
+        {/* Card header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
             <div className="h-7 w-7 rounded-lg bg-amber-400/20 border border-amber-400/40 flex items-center justify-center">
@@ -110,7 +117,7 @@ function DigitalIdCard({ child }: { child: ChildWithAssessments }) {
           </div>
         </div>
 
-        {/* IDs */}
+        {/* ID numbers */}
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-xl bg-white/5 border border-white/10 px-3 py-2.5">
             <p className="text-[10px] text-stone-500 uppercase tracking-wider font-semibold mb-0.5">
@@ -134,32 +141,16 @@ function DigitalIdCard({ child }: { child: ChildWithAssessments }) {
   );
 }
 
-// ── Score badge ───────────────────────────────────────────────────────────────
-
-function ScoreBadge({ score }: { score: CbcScore }) {
-  const meta = CBC_SCORES[score];
-  return (
-    <span
-      className={`inline-block rounded-lg px-2.5 py-1 text-xs font-bold border ${meta.bg} ${meta.color} ${meta.border}`}
-    >
-      {score} — {meta.description}
-    </span>
-  );
-}
-
-// ── Main component ─────────────────────────────────────────────────────────────
-
-interface ChildProfileClientProps {
-  child: ChildWithAssessments;
-}
+// ── Main component ────────────────────────────────────────────────────────────
 
 export function ChildProfileClient({ child }: ChildProfileClientProps) {
   const overall = getOverallLevel(child.assessments);
   const subjects = getSubjectSummary(child.assessments);
+  const firstName = child.full_name.split(" ")[0] ?? child.full_name;
 
   return (
     <div className="space-y-6">
-      {/* Back */}
+      {/* Back nav */}
       <div className="flex items-center gap-3">
         <Link
           href="/parent"
@@ -169,16 +160,14 @@ export function ChildProfileClient({ child }: ChildProfileClientProps) {
         </Link>
         <div>
           <p className="text-xs text-stone-400 font-medium">Student Profile</p>
-          <h1 className="text-lg font-bold text-stone-800">
-            {child.full_name.split(" ")[0]}'s ID
-          </h1>
+          <h1 className="text-lg font-bold text-stone-800">{firstName}'s ID</h1>
         </div>
       </div>
 
-      {/* Digital ID card */}
+      {/* Digital ID */}
       <DigitalIdCard child={child} />
 
-      {/* Bio data tiles */}
+      {/* Bio data */}
       <div>
         <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">
           Bio Data
@@ -211,15 +200,15 @@ export function ChildProfileClient({ child }: ChildProfileClientProps) {
         </div>
       </div>
 
-      {/* Parent / Guardian */}
-      {child.parents && (
+      {/* Parent / guardian */}
+      {child.parents !== null && (
         <div>
           <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">
             Parent / Guardian
           </h2>
           <div className="rounded-2xl bg-white border border-stone-100 p-4 shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-amber-50 flex items-center justify-center">
+              <div className="h-10 w-10 rounded-xl bg-amber-50 flex items-center justify-center flex-shrink-0">
                 <User className="h-5 w-5 text-amber-500" />
               </div>
               <div>
@@ -237,7 +226,7 @@ export function ChildProfileClient({ child }: ChildProfileClientProps) {
         </div>
       )}
 
-      {/* Subject scores */}
+      {/* Latest scores */}
       {subjects.length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-3">
@@ -246,7 +235,7 @@ export function ChildProfileClient({ child }: ChildProfileClientProps) {
             </h2>
             <Link
               href={`/parent/child/${child.id}/progress`}
-              className="text-xs font-semibold text-amber-600 hover:text-amber-700"
+              className="text-xs font-semibold text-amber-600 hover:text-amber-700 transition-colors"
             >
               Full Report →
             </Link>
@@ -260,7 +249,7 @@ export function ChildProfileClient({ child }: ChildProfileClientProps) {
                 <p className="text-sm font-semibold text-stone-700">
                   {subject}
                 </p>
-                <ScoreBadge score={score} />
+                <ScoreBadge score={score as CbcScore} />
               </div>
             ))}
           </div>

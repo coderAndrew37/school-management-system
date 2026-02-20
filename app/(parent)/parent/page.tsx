@@ -4,7 +4,7 @@ import { BookOpen, GraduationCap, Users, CalendarDays } from "lucide-react";
 import { getSession } from "@/lib/actions/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Student } from "@/lib/types/dashboard";
-import { TopNav } from "../_components/nav/TopNav";
+import { TopNav } from "../../_components/nav/TopNav";
 
 export const metadata = {
   title: "Parent Portal | Kibali Academy",
