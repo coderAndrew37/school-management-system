@@ -70,18 +70,21 @@ export default async function DashboardPage() {
             value={stats.totalStudents}
             icon="🎒"
             accent="amber"
+            link="/students"
           />
           <StatCard
             label="Teaching Staff"
             value={stats.totalTeachers}
             icon="📋"
             accent="emerald"
+            link="/teachers"
           />
           <StatCard
             label="Registered Parents"
             value={stats.totalParents}
             icon="👪"
             accent="sky"
+            link="/parents"
           />
         </section>
 

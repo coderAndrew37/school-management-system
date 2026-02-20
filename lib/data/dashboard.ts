@@ -1,5 +1,10 @@
 import { createServerClient } from "@/lib/supabase/client";
-import { Student, Teacher, DashboardStats } from "@/lib/types/dashboard";
+import {
+  Student,
+  Teacher,
+  DashboardStats,
+  Parent,
+} from "@/lib/types/dashboard";
 
 export async function fetchStudents(limit?: number): Promise<Student[]> {
   const supabase = createServerClient();
@@ -113,6 +118,21 @@ export async function fetchTeachers(): Promise<Teacher[]> {
   }
 
   return (data ?? []) as Teacher[];
+}
+
+export async function fetchParents(): Promise<Parent[]> {
+  const supabase = createServerClient();
+
+  const { data, error } = await supabase
+    .from("parents")
+    .select("id, full_name, email, phone_number, created_at")
+    .order("full_name", { ascending: true });
+
+  if (error) {
+    console.error("fetchParents error:", error);
+    return [];
+  }
+  return (data ?? []) as Parent[];
 }
 
 export async function fetchDashboardStats(): Promise<DashboardStats> {

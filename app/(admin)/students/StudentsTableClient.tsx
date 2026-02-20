@@ -1,18 +1,15 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
-import Link from "next/link";
+import { Student } from "@/lib/types/dashboard";
 import {
-  GraduationCap,
-  ArrowLeft,
-  Search,
-  ChevronUp,
   ChevronDown,
   ChevronsUpDown,
-  X,
+  ChevronUp,
   Filter,
+  Search,
+  X,
 } from "lucide-react";
-import { Student } from "@/lib/types/dashboard";
+import { useCallback, useMemo, useState } from "react";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 

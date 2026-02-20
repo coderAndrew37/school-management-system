@@ -30,7 +30,10 @@ export const PROTECTED_PREFIXES: Record<string, UserRole[]> = {
   "/reports": ["admin"],
   "/admission": ["admin"],
   "/teacher": ["teacher", "admin"],
+  "/teacher/assess": ["admin", "teacher"],
   "/parent": ["parent"],
+  "/parents": ["admin"],
+  "/teachers": ["admin"],
 };
 
 // Zod schemas for auth forms
