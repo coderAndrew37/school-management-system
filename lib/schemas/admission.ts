@@ -46,6 +46,20 @@ export const admissionSchema = z.object({
       /^(\+?254|0)[17]\d{8}$/,
       "Enter a valid Kenyan phone number (e.g. 0712345678)",
     ),
+
+  parentEmail: z
+    .string()
+    .min(1, "Email is required")
+    .email("Enter a valid email address"),
+
+  parentName: z
+    .string()
+    .min(2, "Full name must be at least 2 characters")
+    .max(100, "Full name must be under 100 characters")
+    .regex(
+      /^[a-zA-Z\s'-]+$/,
+      "Name can only contain letters, spaces, hyphens, and apostrophes",
+    ),
 });
 
 export type AdmissionFormValues = z.infer<typeof admissionSchema>;

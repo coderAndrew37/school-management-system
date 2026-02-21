@@ -24,14 +24,14 @@ CREATE INDEX idx_profiles_role ON profiles(role);
 CREATE INDEX idx_profiles_teacher_id ON profiles(teacher_id);
 
 -- 3. AUTO-CREATE PROFILE ON SIGNUP
-CREATE OR REPLACE FUNCTION handle_new_user()
+CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO profiles (id, full_name, role)
+  INSERT INTO public.profiles (id, full_name, role)
   VALUES (
     NEW.id,
     COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email),
-    COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'parent')
+    COALESCE((NEW.raw_user_meta_data->>'role')::public.user_role, 'parent'::public.user_role)
   );
   RETURN NEW;
 END;

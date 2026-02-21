@@ -12,6 +12,8 @@ import {
   GraduationCap,
   Users,
   Loader2,
+  Mail,
+  User,
 } from "lucide-react";
 import { admitStudentAction } from "@/lib/actions/admit";
 
@@ -80,10 +82,15 @@ export default function AdmissionForm() {
   const onSubmit = (values: AdmissionFormValues) => {
     startTransition(async () => {
       const formData = new FormData();
+      // Student Data
       formData.append("studentName", values.studentName);
       formData.append("dateOfBirth", values.dateOfBirth);
       formData.append("gender", values.gender);
       formData.append("currentGrade", values.currentGrade);
+
+      // Parent Data
+      formData.append("parentName", values.parentName);
+      formData.append("parentEmail", values.parentEmail);
       formData.append("parentPhone", values.parentPhone);
 
       const result = await admitStudentAction(formData);
@@ -105,7 +112,7 @@ export default function AdmissionForm() {
   };
 
   const inputBase =
-    "w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/25 outline-none transition-all duration-200 focus:border-amber-400/60 focus:bg-white/10 focus:ring-2 focus:ring-amber-400/20";
+    "w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/25 outline-none transition-all duration-200 focus:border-amber-400/60 focus:bg-white/10 focus:ring-2 focus:ring-amber-400/20 disabled:opacity-50 disabled:cursor-not-allowed";
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] flex items-center justify-center p-4 font-[family-name:var(--font-body)]">
@@ -133,7 +140,6 @@ export default function AdmissionForm() {
 
         {/* Card */}
         <div className="rounded-2xl border border-white/[0.08] bg-white/[0.04] backdrop-blur-xl shadow-2xl shadow-black/40">
-          {/* Card header stripe */}
           <div className="h-px w-full bg-gradient-to-r from-transparent via-amber-400/40 to-transparent" />
 
           <form
@@ -141,56 +147,87 @@ export default function AdmissionForm() {
             noValidate
             className="p-7 space-y-6"
           >
-            {/* Student Name */}
-            <div>
-              <Label
-                htmlFor="studentName"
-                icon={<UserRoundPlus className="h-3.5 w-3.5" />}
-              >
-                Student Full Name
-              </Label>
-              <input
-                aria-label="student name"
-                id="studentName"
-                type="text"
-                placeholder="e.g. Amani Wanjiku Otieno"
-                className={inputBase}
-                {...register("studentName")}
-                disabled={isPending}
-              />
-              <FieldError message={errors.studentName?.message} />
-            </div>
-
-            {/* Date of Birth + Gender row */}
-            <div className="grid grid-cols-2 gap-4">
+            {/* --- SECTION: STUDENT INFO --- */}
+            <div className="space-y-6">
               <div>
                 <Label
-                  htmlFor="dateOfBirth"
-                  icon={<CalendarDays className="h-3.5 w-3.5" />}
+                  htmlFor="studentName"
+                  icon={<UserRoundPlus className="h-3.5 w-3.5" />}
                 >
-                  Date of Birth
+                  Student Full Name
                 </Label>
                 <input
-                  id="dateOfBirth"
-                  type="date"
-                  className={`${inputBase} [color-scheme:dark]`}
-                  {...register("dateOfBirth")}
+                  id="studentName"
+                  type="text"
+                  placeholder="e.g. Amani Wanjiku Otieno"
+                  className={inputBase}
+                  {...register("studentName")}
                   disabled={isPending}
                 />
-                <FieldError message={errors.dateOfBirth?.message} />
+                <FieldError message={errors.studentName?.message} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label
+                    htmlFor="dateOfBirth"
+                    icon={<CalendarDays className="h-3.5 w-3.5" />}
+                  >
+                    Date of Birth
+                  </Label>
+                  <input
+                    id="dateOfBirth"
+                    type="date"
+                    className={`${inputBase} [color-scheme:dark]`}
+                    {...register("dateOfBirth")}
+                    disabled={isPending}
+                  />
+                  <FieldError message={errors.dateOfBirth?.message} />
+                </div>
+
+                <div>
+                  <Label
+                    htmlFor="gender"
+                    icon={<Users className="h-3.5 w-3.5" />}
+                  >
+                    Gender
+                  </Label>
+                  <select
+                    id="gender"
+                    className={`${inputBase} cursor-pointer`}
+                    {...register("gender")}
+                    disabled={isPending}
+                    defaultValue=""
+                  >
+                    <option
+                      value=""
+                      disabled
+                      className="bg-[#0c0f1a] text-white/40"
+                    >
+                      Select…
+                    </option>
+                    <option value="Male" className="bg-[#0c0f1a] text-white">
+                      Male
+                    </option>
+                    <option value="Female" className="bg-[#0c0f1a] text-white">
+                      Female
+                    </option>
+                  </select>
+                  <FieldError message={errors.gender?.message} />
+                </div>
               </div>
 
               <div>
                 <Label
-                  htmlFor="gender"
-                  icon={<Users className="h-3.5 w-3.5" />}
+                  htmlFor="currentGrade"
+                  icon={<GraduationCap className="h-3.5 w-3.5" />}
                 >
-                  Gender
+                  Current Grade / Class
                 </Label>
                 <select
-                  id="gender"
+                  id="currentGrade"
                   className={`${inputBase} cursor-pointer`}
-                  {...register("gender")}
+                  {...register("currentGrade")}
                   disabled={isPending}
                   defaultValue=""
                 >
@@ -199,79 +236,95 @@ export default function AdmissionForm() {
                     disabled
                     className="bg-[#0c0f1a] text-white/40"
                   >
-                    Select…
+                    Select grade…
                   </option>
-                  <option value="Male" className="bg-[#0c0f1a] text-white">
-                    Male
-                  </option>
-                  <option value="Female" className="bg-[#0c0f1a] text-white">
-                    Female
-                  </option>
+                  {GRADES.map((grade) => (
+                    <option
+                      key={grade}
+                      value={grade}
+                      className="bg-[#0c0f1a] text-white"
+                    >
+                      {grade}
+                    </option>
+                  ))}
                 </select>
-                <FieldError message={errors.gender?.message} />
+                <FieldError message={errors.currentGrade?.message} />
               </div>
             </div>
 
-            {/* Current Grade */}
-            <div>
-              <Label
-                htmlFor="currentGrade"
-                icon={<GraduationCap className="h-3.5 w-3.5" />}
-              >
-                Current Grade / Class
-              </Label>
-              <select
-                id="currentGrade"
-                className={`${inputBase} cursor-pointer`}
-                {...register("currentGrade")}
-                disabled={isPending}
-                defaultValue=""
-              >
-                <option
-                  value=""
-                  disabled
-                  className="bg-[#0c0f1a] text-white/40"
-                >
-                  Select grade…
-                </option>
-                {GRADES.map((grade) => (
-                  <option
-                    key={grade}
-                    value={grade}
-                    className="bg-[#0c0f1a] text-white"
-                  >
-                    {grade}
-                  </option>
-                ))}
-              </select>
-              <FieldError message={errors.currentGrade?.message} />
+            {/* Divider with Label */}
+            <div className="flex items-center gap-4 py-2">
+              <div className="h-px flex-1 bg-white/[0.06]" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-white/20">
+                Parent / Guardian
+              </span>
+              <div className="h-px flex-1 bg-white/[0.06]" />
             </div>
 
-            {/* Parent Phone */}
-            <div>
-              <Label
-                htmlFor="parentPhone"
-                icon={<Phone className="h-3.5 w-3.5" />}
-              >
-                Parent / Guardian Phone
-              </Label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-4 flex items-center text-sm text-white/30 pointer-events-none select-none">
-                  🇰🇪
-                </span>
+            {/* --- SECTION: PARENT INFO --- */}
+            <div className="space-y-6">
+              <div>
+                <Label
+                  htmlFor="parentName"
+                  icon={<User className="h-3.5 w-3.5" />}
+                >
+                  Parent Full Name
+                </Label>
                 <input
-                  id="parentPhone"
-                  type="tel"
-                  placeholder="0712 345 678"
-                  className={`${inputBase} pl-10`}
-                  {...register("parentPhone")}
+                  id="parentName"
+                  type="text"
+                  placeholder="e.g. David Otieno"
+                  className={inputBase}
+                  {...register("parentName")}
                   disabled={isPending}
                 />
+                <FieldError message={errors.parentName?.message} />
               </div>
-              <FieldError message={errors.parentPhone?.message} />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label
+                    htmlFor="parentEmail"
+                    icon={<Mail className="h-3.5 w-3.5" />}
+                  >
+                    Email Address
+                  </Label>
+                  <input
+                    id="parentEmail"
+                    type="email"
+                    placeholder="parent@example.com"
+                    className={inputBase}
+                    {...register("parentEmail")}
+                    disabled={isPending}
+                  />
+                  <FieldError message={errors.parentEmail?.message} />
+                </div>
+
+                <div>
+                  <Label
+                    htmlFor="parentPhone"
+                    icon={<Phone className="h-3.5 w-3.5" />}
+                  >
+                    Phone Number
+                  </Label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-4 flex items-center text-sm text-white/30 pointer-events-none select-none">
+                      🇰🇪
+                    </span>
+                    <input
+                      id="parentPhone"
+                      type="tel"
+                      placeholder="0712 345 678"
+                      className={`${inputBase} pl-10`}
+                      {...register("parentPhone")}
+                      disabled={isPending}
+                    />
+                  </div>
+                  <FieldError message={errors.parentPhone?.message} />
+                </div>
+              </div>
             </div>
 
-            {/* Divider */}
             <div className="h-px bg-white/[0.06]" />
 
             {/* Submit */}
@@ -291,7 +344,6 @@ export default function AdmissionForm() {
                   Admit Student
                 </span>
               )}
-              {/* Shine effect */}
               <span className="absolute inset-0 -skew-x-12 translate-x-[-200%] bg-white/20 transition-transform duration-500 group-hover:translate-x-[200%]" />
             </button>
 
