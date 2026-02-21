@@ -59,13 +59,10 @@ export async function admitStudentAction(
       throw new Error(`Database lookup failed: ${lookupError.message}`);
 
     let parentUserId: string;
-    let isNewParent = false;
 
     if (existingParent) {
       parentUserId = existingParent.id;
     } else {
-      isNewParent = true;
-
       // 2. Create Auth User for the Parent (No password set yet)
       const { data: newAuthUser, error: authError } =
         await supabaseAdmin.auth.admin.createUser({
@@ -102,41 +99,41 @@ export async function admitStudentAction(
         );
       }
 
-      // 4. Generate Professional Setup Link (Recovery Link)
+      // 4. Generate invite link — admin links always produce implicit flow tokens
+      //    so we redirect to /auth/confirm (a client component) which can read
+      //    the #fragment from window.location and establish the session properly.
       const { data: linkData, error: linkError } =
         await supabaseAdmin.auth.admin.generateLink({
           type: "recovery",
           email: parentEmail,
           options: {
-            // Redirects to the PKCE callback route
-            redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback?type=recovery`,
+            // IMPORTANT: Must point to the CLIENT-SIDE confirm page, not the
+            // server callback. The server cannot read URL fragments (#).
+            redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
           },
         });
 
       if (linkError)
         throw new Error(`Setup link generation failed: ${linkError.message}`);
 
-      // 5. CRITICAL FIX: Convert Fragment (#) to Query (?)
-      // This ensures your server-side callback route can read the code.
-      let setupLink = linkData.properties.action_link;
-      if (setupLink.includes("#")) {
-        setupLink = setupLink.replace("#", "?");
-      }
+      // Use action_link as-is — do NOT replace # with ?
+      // The fragment is intentional and will be handled client-side.
+      const setupLink = linkData.properties.action_link;
 
-      // 6. Send Welcome Email via Resend
+      // 5. Send Welcome Email via Resend
       try {
         await sendWelcomeEmail({
           parentEmail,
           parentName,
           studentName,
-          setupLink: setupLink,
+          setupLink,
         });
       } catch (mailErr) {
         console.error("Mail Delivery Failed:", mailErr);
       }
     }
 
-    // 7. Insert Student linked to the Parent
+    // 6. Insert Student linked to the Parent
     const { error: studentError } = await supabaseAdmin
       .from("students")
       .insert({
@@ -182,23 +179,21 @@ export async function resendInviteAction(parentId: string) {
         type: "recovery",
         email: parent.email,
         options: {
-          redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback?type=recovery`,
+          // Same as above — client-side confirm page handles the fragment
+          redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
         },
       });
 
     if (linkError) throw linkError;
 
-    // Apply the Fragment to Query fix here as well
-    let setupLink = linkData.properties.action_link;
-    if (setupLink.includes("#")) {
-      setupLink = setupLink.replace("#", "?");
-    }
+    // Use action_link as-is — do NOT replace # with ?
+    const setupLink = linkData.properties.action_link;
 
     await sendWelcomeEmail({
       parentEmail: parent.email,
       parentName: parent.full_name,
       studentName: parent.students?.[0]?.full_name || "your child",
-      setupLink: setupLink,
+      setupLink,
     });
 
     return { success: true, message: "A new secure invite has been sent." };

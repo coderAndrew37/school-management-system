@@ -60,3 +60,32 @@ export default async function StudentsPage() {
     </div>
   );
 }
+
+// import ListPageShell from "@/app/_components/shared/ListPageShell";
+// import { fetchAllStudents } from "@/lib/data/dashboard";
+// import { GraduationCap } from "lucide-react";
+// import { StudentsTableClient } from "./StudentsTableClient";
+
+// export const metadata = {
+//   title: "Students | Kibali Academy",
+//   description: "Full student register with search, filter and sort",
+// };
+// export const revalidate = 60;
+
+// export default async function StudentsPage() {
+//   const students = await fetchAllStudents();
+//   const uniqueGrades = [
+//     ...new Set(students.map((s) => s.current_grade)),
+//   ].sort();
+
+//   return (
+//     <ListPageShell
+//       icon={<GraduationCap className="h-6 w-6 text-amber-400" />}
+//       iconBg="bg-amber-400/10 border-amber-400/20"
+//       subtitle="Students"
+//       title="Student Register"
+//     >
+//       <StudentsTableClient students={students} uniqueGrades={uniqueGrades} />
+//     </ListPageShell>
+//   );
+// }

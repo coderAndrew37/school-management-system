@@ -25,6 +25,7 @@ export const ROLE_ROUTES: Record<UserRole, string> = {
 
 export const PROTECTED_PREFIXES: Record<string, UserRole[]> = {
   "/dashboard": ["admin"],
+  "/students": ["admin", "teacher"],
   "/allocation": ["admin"],
   "/timetable": ["admin", "teacher"],
   "/reports": ["admin"],

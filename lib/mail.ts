@@ -28,7 +28,7 @@ export async function sendWelcomeEmail({
       to:
         process.env.NODE_ENV === "production"
           ? parentEmail
-          : "flochi254@gmail.com",
+          : "relistkenya@gmail.com",
       subject: `Admission Successful: Welcome ${studentName} to Kibali Academy`,
       html: `
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; padding: 40px; border-radius: 16px; color: #1a202c;">

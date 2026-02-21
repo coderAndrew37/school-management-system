@@ -91,14 +91,19 @@ export async function middleware(request: NextRequest) {
 
     const role = (profile?.role ?? "parent") as UserRole;
 
-    // Find which protected prefix this route falls under
-    for (const [prefix, allowedRoles] of Object.entries(PROTECTED_PREFIXES)) {
-      if (pathname.startsWith(prefix)) {
-        if (!allowedRoles.includes(role)) {
-          // Redirect to the user's correct dashboard
-          return NextResponse.redirect(new URL(ROLE_ROUTES[role], request.url));
-        }
-        break;
+    // 1. Identify all prefixes that match the current path
+    // Sort prefixes by length (longest first) to match specific routes before general ones
+    const matchingPrefixes = Object.keys(PROTECTED_PREFIXES)
+      .filter((prefix) => pathname.startsWith(prefix))
+      .sort((a, b) => b.length - a.length);
+
+    if (matchingPrefixes.length > 0) {
+      const primaryPrefix = matchingPrefixes[0];
+      const allowedRoles = PROTECTED_PREFIXES[primaryPrefix];
+
+      if (!allowedRoles.includes(role)) {
+        console.warn(`Access denied: ${role} tried to access ${pathname}`);
+        return NextResponse.redirect(new URL(ROLE_ROUTES[role], request.url));
       }
     }
   }
