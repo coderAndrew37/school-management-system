@@ -2,23 +2,20 @@
 
 import { Parent } from "@/lib/types/dashboard";
 import { DataTable, ColumnDef } from "@/app/_components/shared/DataTable";
+import { formatDistanceToNow } from "date-fns";
+import { CheckCircle2, Clock } from "lucide-react";
+import { ResendInviteButton } from "./ResendEmailButton";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-/**
- * Formats date strings to a consistent Kenyan locale format.
- */
-function formatDate(dt: string): string {
-  return new Date(dt).toLocaleDateString("en-KE", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
+// function formatDate(dt: string): string {
+//   return new Date(dt).toLocaleDateString("en-KE", {
+//     day: "numeric",
+//     month: "short",
+//     year: "numeric",
+//   });
+// }
 
-/**
- * Extracts initials from the full name (max 2 characters).
- */
 function getInitials(name: string): string {
   return name
     .split(" ")
@@ -37,9 +34,6 @@ const avatarColors = [
   "from-cyan-400 to-blue-400",
 ];
 
-/**
- * Generates a stable gradient color based on the string hash of the name.
- */
 function getAvatarColor(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++)
@@ -57,7 +51,7 @@ const columns: ColumnDef<Parent>[] = [
     render: (p) => (
       <div className="flex items-center gap-3">
         <div
-          className={`flex-shrink-0 h-8 w-8 rounded-lg bg-gradient-to-br ${getAvatarColor(p.full_name)} flex items-center justify-center text-xs font-bold text-white shadow-sm`}
+          className={`shrink-0 h-8 w-8 rounded-lg bg-linear-to-br ${getAvatarColor(p.full_name)} flex items-center justify-center text-xs font-bold text-white shadow-sm`}
         >
           {getInitials(p.full_name)}
         </div>
@@ -79,26 +73,40 @@ const columns: ColumnDef<Parent>[] = [
     ),
   },
   {
-    key: "phone_number",
-    label: "Phone",
+    key: "invite_accepted",
+    label: "Portal Status",
     sortable: true,
-    render: (p) => (
-      <a
-        href={`tel:${p.phone_number}`}
-        className="font-mono text-xs text-sky-400/70 hover:text-sky-400 transition-colors duration-150"
-      >
-        {p.phone_number}
-      </a>
-    ),
+    render: (p) =>
+      p.invite_accepted ? (
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-1.5 text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
+            <CheckCircle2 className="h-3 w-3" />
+            Active
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-1.5 text-amber-500/80 text-[10px] font-bold uppercase tracking-wider">
+            <Clock className="h-3 w-3" />
+            Pending
+          </div>
+          {p.last_invite_sent && (
+            <span className="text-[10px] text-white/20">
+              Sent {formatDistanceToNow(new Date(p.last_invite_sent))} ago
+            </span>
+          )}
+        </div>
+      ),
   },
   {
-    key: "created_at",
-    label: "Registered",
-    sortable: true,
-    // Forces sorting by timestamp instead of string alphabetical order
-    sortValue: (p) => new Date(p.created_at).getTime(),
+    key: "actions",
+    label: "Actions",
     render: (p) => (
-      <span className="text-white/30 text-xs">{formatDate(p.created_at)}</span>
+      <div className="flex items-center gap-2">
+        {!p.invite_accepted && (
+          <ResendInviteButton parentId={p.id} parentEmail={p.email} />
+        )}
+      </div>
     ),
   },
 ];

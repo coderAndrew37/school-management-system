@@ -13,6 +13,8 @@ export interface Parent {
   email: string;
   phone_number: string;
   created_at: string;
+  invite_accepted: boolean;
+  last_invite_sent: string;
 }
 
 export interface Student {
