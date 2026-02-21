@@ -32,7 +32,7 @@ export async function loginAction(
   if (!parsed.success) {
     return {
       success: false,
-      message: parsed.error.errors[0]?.message ?? "Invalid input",
+      message: parsed.error.issues[0]?.message ?? "Invalid input",
     };
   }
 
@@ -102,7 +102,7 @@ export async function forgotPasswordAction(
   if (!parsed.success) {
     return {
       success: false,
-      message: parsed.error.errors[0]?.message ?? "Invalid email",
+      message: parsed.error.issues[0]?.message ?? "Invalid email",
     };
   }
 
@@ -144,7 +144,7 @@ export async function resetPasswordAction(
   if (!parsed.success) {
     return {
       success: false,
-      message: parsed.error.errors[0]?.message ?? "Invalid password",
+      message: parsed.error.issues[0]?.message ?? "Invalid password",
     };
   }
 

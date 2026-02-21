@@ -11,8 +11,8 @@ import { TeachersTable } from "@/app/_components/dashboard/TeachersTable";
 import { StudentGrid } from "@/app/_components/dashboard/StudentGrd";
 
 export const metadata = {
-  title: "Dashboard | Kibera Academy",
-  description: "Overview of students and teachers at Kibera Academy",
+  title: "Dashboard | Kibali Academy",
+  description: "Overview of students and teachers at Kibali Academy",
 };
 
 export const revalidate = 60;
@@ -46,7 +46,7 @@ export default async function DashboardPage() {
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-widest text-amber-400/70">
-                Kibera Academy
+                Kibali Academy
               </p>
               <h1 className="text-2xl font-bold tracking-tight text-white">
                 School Dashboard
@@ -149,7 +149,7 @@ export default async function DashboardPage() {
         {/* ── Footer ── */}
         <footer className="pt-4 border-t border-white/[0.05]">
           <p className="text-center text-xs text-white/20">
-            Kibera Academy Portal · Data refreshes every 60 seconds
+            Kibali Academy Portal · Data refreshes every 60 seconds
           </p>
         </footer>
       </div>

@@ -123,7 +123,7 @@ export default function AdmissionForm() {
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-amber-400/70">
-              Kibera Academy
+              Kibali Academy
             </p>
             <h1 className="text-xl font-bold tracking-tight text-white">
               New Student Admission
