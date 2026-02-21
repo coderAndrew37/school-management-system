@@ -4,7 +4,7 @@ import { StudentsTableClient } from "./StudentsTableClient";
 import Link from "next/link";
 
 export const metadata = {
-  title: "Students | Kibera Academy",
+  title: "Students | Kibali Academy",
   description: "Full student register with search, filter and sort",
 };
 
@@ -39,7 +39,7 @@ export default async function StudentsPage() {
               </div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-widest text-amber-400/70">
-                  Kibera Academy
+                  Kibali Academy
                 </p>
                 <h1 className="text-2xl font-bold tracking-tight text-white">
                   Student Register
@@ -53,7 +53,7 @@ export default async function StudentsPage() {
 
         <footer className="pt-4 border-t border-white/[0.05]">
           <p className="text-center text-xs text-white/20">
-            Kibera Academy Portal · Data refreshes every 60 seconds
+            Kibali Academy Portal · Data refreshes every 60 seconds
           </p>
         </footer>
       </div>

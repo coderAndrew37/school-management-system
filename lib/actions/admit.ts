@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { AdmissionActionResult, admissionSchema } from "../schemas/admission";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { sendWelcomeEmail } from "@/lib/mail";
 
 // Administrative client to bypass RLS and create Auth Users
 const supabaseAdmin = createClient(
@@ -20,8 +21,8 @@ export async function admitStudentAction(
     gender: formData.get("gender"),
     currentGrade: formData.get("currentGrade"),
     parentPhone: formData.get("parentPhone"),
-    parentEmail: formData.get("parentEmail"), // Added this to your schema/form
-    parentName: formData.get("parentName"), // Added this to your schema/form
+    parentEmail: formData.get("parentEmail"),
+    parentName: formData.get("parentName"),
   };
 
   const parsed = admissionSchema.safeParse(raw);
@@ -43,33 +44,32 @@ export async function admitStudentAction(
   } = parsed.data;
 
   try {
-    // 1. Check if Parent already exists in Auth/Profiles
-    const { data: existingProfile } = await supabaseAdmin
-      .from("profiles")
+    // 1. Check if Parent already exists (Look up by email for reliability)
+    const { data: existingParent, error: lookupError } = await supabaseAdmin
+      .from("parents")
       .select("id")
-      .eq("role", "parent")
-      .filter(
-        "id",
-        "in",
-        supabaseAdmin
-          .from("parents")
-          .select("id")
-          .eq("phone_number", parentPhone),
-      )
-      .single();
+      .eq("email", parentEmail)
+      .maybeSingle();
+
+    if (lookupError)
+      throw new Error(`Database lookup failed: ${lookupError.message}`);
 
     let parentUserId: string;
+    let isNewParent = false;
+    const tempPassword = "Parent" + parentPhone.slice(-4);
 
-    if (existingProfile) {
-      parentUserId = existingProfile.id;
+    if (existingParent) {
+      parentUserId = existingParent.id;
     } else {
+      isNewParent = true;
+
       // 2. Create actual Auth User for the Parent
       // This triggers your SQL 'handle_new_user()' function automatically
       const { data: newAuthUser, error: authError } =
         await supabaseAdmin.auth.admin.createUser({
           email: parentEmail,
           phone: parentPhone,
-          password: "Parent" + parentPhone.slice(-4), // Temporary password: Parent + last 4 digits
+          password: tempPassword,
           email_confirm: true,
           user_metadata: {
             full_name: parentName,
@@ -79,19 +79,26 @@ export async function admitStudentAction(
 
       if (authError)
         throw new Error(`Auth creation failed: ${authError.message}`);
+
       parentUserId = newAuthUser.user.id;
 
-      // 3. Insert into the Parents table (linked by ID)
+      // 3. Insert into the Parents table (linked by Auth ID)
       const { error: parentError } = await supabaseAdmin
         .from("parents")
         .insert({
-          id: parentUserId, // Use the Auth ID as the PK
+          id: parentUserId,
           full_name: parentName,
           email: parentEmail,
           phone_number: parentPhone,
         });
 
-      if (parentError) throw parentError;
+      if (parentError) {
+        // Cleanup Auth user if DB insert fails to prevent orphaned accounts
+        await supabaseAdmin.auth.admin.deleteUser(parentUserId);
+        throw new Error(
+          `Parent profile creation failed: ${parentError.message}`,
+        );
+      }
     }
 
     // 4. Insert Student linked to the Parent's ID
@@ -105,10 +112,27 @@ export async function admitStudentAction(
         parent_id: parentUserId,
       });
 
-    if (studentError) throw studentError;
+    if (studentError)
+      throw new Error(`Student registration failed: ${studentError.message}`);
 
-    revalidatePath("/dashboard/students");
-    revalidatePath("/dashboard/parents");
+    // 5. Send Welcome Email via Resend if it's a new account
+    if (isNewParent) {
+      try {
+        await sendWelcomeEmail({
+          parentEmail,
+          parentName,
+          studentName,
+          tempPassword,
+        });
+      } catch (mailErr) {
+        // We log mail errors but don't stop the process since the DB is already updated
+        console.error("Mail Delivery Failed:", mailErr);
+      }
+    }
+
+    // Revalidate paths to refresh dashboard data
+    revalidatePath("/students");
+    revalidatePath("/parents");
   } catch (err: any) {
     console.error("Admission Error:", err.message);
     return {
@@ -117,5 +141,6 @@ export async function admitStudentAction(
     };
   }
 
-  redirect("/dashboard/students");
+  // Redirect to students list on success
+  redirect("/students");
 }
