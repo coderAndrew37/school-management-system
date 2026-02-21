@@ -36,7 +36,8 @@ export async function GET(request: NextRequest) {
 
   // For password recovery — redirect to the reset password page
   if (type === "recovery") {
-    return NextResponse.redirect(`${origin}/reset-password`);
+    // Ensure this matches where you create the reset-password page
+    return NextResponse.redirect(`${origin}/auth/reset-password`);
   }
 
   // For all other cases — load the user's role and redirect to their dashboard
