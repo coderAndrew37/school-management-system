@@ -9,6 +9,7 @@ import {
 import { StatCard } from "@/app/_components/dashboard/StatCard";
 import { TeachersTable } from "@/app/_components/dashboard/TeachersTable";
 import { StudentGrid } from "@/app/_components/dashboard/StudentGrd";
+import RegisterTeacherModal from "@/app/_components/teachers/RegisterTeacherModal";
 
 export const metadata = {
   title: "Dashboard | Kibali Academy",
@@ -39,13 +40,14 @@ export default async function DashboardPage() {
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-10">
         {/* ── Header ── */}
-        <header className="flex items-center justify-between">
+        {/* ── Header ── */}
+        <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
           <div className="flex items-center gap-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-400/10 border border-amber-400/20 shadow-lg shadow-amber-400/5">
               <GraduationCap className="h-6 w-6 text-amber-400" />
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-amber-400/70">
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-400/70">
                 Kibali Academy
               </p>
               <h1 className="text-2xl font-bold tracking-tight text-white">
@@ -54,13 +56,19 @@ export default async function DashboardPage() {
             </div>
           </div>
 
-          <Link
-            href="/admission"
-            className="flex items-center gap-2 rounded-xl bg-amber-400 hover:bg-amber-300 active:scale-95 transition-all duration-200 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#0c0f1a] shadow-lg shadow-amber-400/20"
-          >
-            <UserRoundPlus className="h-4 w-4" />
-            Admit Student
-          </Link>
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            {/* NEW: Register Teacher Modal */}
+            <RegisterTeacherModal />
+
+            {/* Admit Student Link */}
+            <Link
+              href="/admission"
+              className="flex items-center gap-2 rounded-xl bg-amber-400 hover:bg-amber-300 active:scale-95 transition-all duration-200 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#0c0f1a] shadow-lg shadow-amber-400/20"
+            >
+              <UserRoundPlus className="h-4 w-4" />
+              Admit Student
+            </Link>
+          </div>
         </header>
 
         {/* ── Stat Cards ── */}

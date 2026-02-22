@@ -28,7 +28,7 @@ export async function sendWelcomeEmail({
       to:
         process.env.NODE_ENV === "production"
           ? parentEmail
-          : "relistkenya@gmail.com",
+          : "omollondrw@gmail.com",
       subject: `Admission Successful: Welcome ${studentName} to Kibali Academy`,
       html: `
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; padding: 40px; border-radius: 16px; color: #1a202c;">
@@ -78,6 +78,76 @@ export async function sendWelcomeEmail({
     return { success: true, data };
   } catch (err) {
     console.error("Mail Dispatcher Crash:", err);
+    return { success: false, error: err };
+  }
+}
+
+/**
+ * TEACHER WELCOME EMAIL
+ * Sent when a new staff member is registered by the Admin.
+ */
+export async function sendTeacherWelcomeEmail({
+  teacherEmail,
+  teacherName,
+  setupLink,
+}: {
+  teacherEmail: string;
+  teacherName: string;
+  setupLink: string;
+}) {
+  try {
+    const { data, error } = await resend.emails.send({
+      from: `Kibali Academy Staff <${SENDER_EMAIL}>`,
+      to:
+        process.env.NODE_ENV === "production"
+          ? teacherEmail
+          : "omollondrw@gmail.com",
+      subject: `Staff Onboarding: Welcome to Kibali Academy, ${teacherName}`,
+      html: `
+        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; padding: 40px; border-radius: 16px; color: #1a202c;">
+          <div style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #10b981; margin: 0; font-size: 24px;">Staff Account Created</h1>
+            <p style="color: #718096; margin-top: 8px;">Teacher Management Portal</p>
+          </div>
+
+          <p>Dear <strong>${teacherName}</strong>,</p>
+          
+          <p>Welcome to the teaching staff at Kibali Academy. Your professional account has been set up in our school management system.</p>
+          
+          <div style="background: #ecfdf5; border: 1px solid #d1fae5; padding: 20px; border-radius: 12px; margin: 25px 0; text-align: center;">
+            <p style="margin-top: 0; font-weight: 600; color: #065f46;">Portal Activation</p>
+            <p style="font-size: 14px; color: #047857; margin-bottom: 20px;">To begin recording CBC assessments and managing your timetable, please activate your account and set a password:</p>
+            
+            <a href="${setupLink}" 
+               style="display: inline-block; background: #10b981; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+               Set Up Staff Account
+            </a>
+          </div>
+
+          <p style="font-size: 14px; color: #4a5568;">
+            <strong>Official Email:</strong> ${teacherEmail}<br>
+            <strong>Access Level:</strong> Teaching Staff<br>
+            <strong>Link Expiry:</strong> 24 hours
+          </p>
+
+          <p style="font-size: 13px; color: #a0aec0; line-height: 1.6; margin-top: 30px;">
+            If you have any issues accessing the portal, please contact the IT Administrator. 
+          </p>
+
+          <hr style="border: 0; border-top: 1px solid #edf2f7; margin: 30px 0;" />
+          
+          <footer style="text-align: center; font-size: 12px; color: #a0aec0;">
+            <p>Kibali Academy Administration<br>
+            Nairobi, Kenya</p>
+          </footer>
+        </div>
+      `,
+    });
+
+    if (error) throw error;
+    return { success: true };
+  } catch (err) {
+    console.error("Teacher Mail Error:", err);
     return { success: false, error: err };
   }
 }
