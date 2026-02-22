@@ -20,6 +20,18 @@ export async function fetchSubjects(): Promise<Subject[]> {
   return (data ?? []) as Subject[];
 }
 
+/**
+ * Helper to transform Supabase array-based joins into single objects
+ */
+function mapAllocationRow(row: any): TeacherSubjectAllocation {
+  return {
+    ...row,
+    // Supabase returns these as arrays if it's not sure about the relationship cardinality
+    teachers: Array.isArray(row.teachers) ? row.teachers[0] : row.teachers,
+    subjects: Array.isArray(row.subjects) ? row.subjects[0] : row.subjects,
+  };
+}
+
 export async function fetchAllocations(
   academicYear = 2026,
 ): Promise<TeacherSubjectAllocation[]> {
@@ -36,11 +48,14 @@ export async function fetchAllocations(
     .eq("academic_year", academicYear)
     .order("grade")
     .order("created_at");
+
   if (error) {
     console.error("fetchAllocations:", error);
     return [];
   }
-  return (data ?? []) as TeacherSubjectAllocation[];
+
+  // Transform data to fix the array vs object mismatch
+  return (data ?? []).map(mapAllocationRow);
 }
 
 export async function fetchAllocationsByTeacher(
@@ -60,11 +75,14 @@ export async function fetchAllocationsByTeacher(
     .eq("teacher_id", teacherId)
     .eq("academic_year", academicYear)
     .order("grade");
+
   if (error) {
     console.error("fetchAllocationsByTeacher:", error);
     return [];
   }
-  return (data ?? []) as TeacherSubjectAllocation[];
+
+  // Transform data to fix the array vs object mismatch
+  return (data ?? []).map(mapAllocationRow);
 }
 
 export async function fetchTimetableForGrade(
@@ -93,16 +111,35 @@ export async function fetchTimetableForGrade(
   }
 
   const grid: TimetableGrid = {};
-  for (const slot of (data ?? []) as TimetableSlot[]) {
-    const key = `${slot.day_of_week}-${slot.period}`;
-    const alloc = slot.teacher_subject_allocations;
-    if (alloc?.subjects && alloc?.teachers) {
-      grid[key] = {
-        teacherName: alloc.teachers.full_name,
-        subjectName: alloc.subjects.name,
-        subjectCode: alloc.subjects.code,
-        allocationId: slot.allocation_id,
-      };
+
+  // Cast to any first to handle the potential array wrapping in nested objects
+  const rawSlots = (data ?? []) as any[];
+
+  for (const rawSlot of rawSlots) {
+    // Correctly handle the potential array wrapping in nested join
+    let alloc = rawSlot.teacher_subject_allocations;
+    if (Array.isArray(alloc)) {
+      alloc = alloc[0];
+    }
+
+    if (alloc) {
+      // Further flatten nested teachers/subjects if they came back as arrays
+      const teacher = Array.isArray(alloc.teachers)
+        ? alloc.teachers[0]
+        : alloc.teachers;
+      const subject = Array.isArray(alloc.subjects)
+        ? alloc.subjects[0]
+        : alloc.subjects;
+
+      if (teacher && subject) {
+        const key = `${rawSlot.day_of_week}-${rawSlot.period}`;
+        grid[key] = {
+          teacherName: teacher.full_name,
+          subjectName: subject.name,
+          subjectCode: subject.code,
+          allocationId: rawSlot.allocation_id,
+        };
+      }
     }
   }
   return grid;

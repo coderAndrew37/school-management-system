@@ -63,30 +63,43 @@ export async function fetchStudentsForReports(
     return [];
   }
 
-  return ((data ?? []) as RawStudent[]).map(
-    (s): ReportStudent => ({
+  // Use 'any' to handle the incoming data which has arrays for joins
+  const rawData = (data ?? []) as any[];
+
+  return rawData.map((s): ReportStudent => {
+    // 1. Flatten parents array
+    const parent = Array.isArray(s.parents) ? s.parents[0] : s.parents;
+
+    // 2. Flatten teachers array inside each assessment
+    const rawAssessments = (s.assessments ?? []) as any[];
+
+    const processedAssessments = rawAssessments
+      .filter((a) => a.term === term && a.academic_year === academicYear)
+      .map((a): ReportAssessment => {
+        const teacher = Array.isArray(a.teachers) ? a.teachers[0] : a.teachers;
+
+        return {
+          subject_name: a.subject_name,
+          strand_id: a.strand_id,
+          score: a.score,
+          teacher_remarks: a.teacher_remarks,
+          teacher_name: teacher?.full_name ?? null,
+          term: a.term,
+          academic_year: a.academic_year,
+        };
+      });
+
+    return {
       full_name: s.full_name,
       readable_id: s.readable_id,
       date_of_birth: s.date_of_birth,
       gender: s.gender,
       current_grade: s.current_grade,
-      parent_name: s.parents?.full_name ?? null,
-      parent_phone: s.parents?.phone_number ?? null,
-      assessments: (s.assessments ?? [])
-        .filter((a) => a.term === term && a.academic_year === academicYear)
-        .map(
-          (a): ReportAssessment => ({
-            subject_name: a.subject_name,
-            strand_id: a.strand_id,
-            score: a.score,
-            teacher_remarks: a.teacher_remarks,
-            teacher_name: a.teachers?.full_name ?? null,
-            term: a.term,
-            academic_year: a.academic_year,
-          }),
-        ),
-    }),
-  );
+      parent_name: parent?.full_name ?? null,
+      parent_phone: parent?.phone_number ?? null,
+      assessments: processedAssessments,
+    };
+  });
 }
 
 export async function fetchAllGrades(): Promise<string[]> {
@@ -103,7 +116,6 @@ export async function fetchAllGrades(): Promise<string[]> {
     ),
   ];
 
-  // Sort by CBC order
   const cbcOrder = [
     "PP1",
     "PP2",

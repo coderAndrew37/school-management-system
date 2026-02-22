@@ -4,10 +4,10 @@ import path from "path";
 import { fetchStudentsForReports } from "@/lib/data/reports";
 import { ReportGenerationPayload } from "@/lib/types/reports";
 
-// This route runs the Python report generator as a subprocess.
-// POST /api/reports/generate
-// Body: { grade: string, term: number, academic_year: number, mode: "bulk"|"single", student_id?: string }
-
+/**
+ * POST /api/reports/generate
+ * Body: { grade: string, term: number, academic_year: number, mode: "bulk" | "single" }
+ */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = (await req.json()) as {
@@ -19,6 +19,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const { grade, term, academic_year, mode } = body;
 
+    // 1. Validation
     if (!term || !academic_year) {
       return NextResponse.json(
         { error: "term and academic_year are required" },
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Fetch students from Supabase
+    // 2. Data Fetching
     const students = await fetchStudentsForReports(
       grade ?? null,
       term,
@@ -40,7 +41,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Build payload for Python script
+    // 3. Prepare Subprocess
     const payload: ReportGenerationPayload = {
       students,
       term,
@@ -48,15 +49,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       mode: mode ?? "bulk",
     };
 
-    // Resolve script path relative to project root
     const scriptPath = path.join(
       process.cwd(),
       "scripts",
       "generate_reports.py",
     );
 
-    // Run Python subprocess
-    const pdfBytes = await new Promise<Buffer>((resolve, reject) => {
+    // 4. Execute Python Generator
+    const pdfBuffer = await new Promise<Buffer>((resolve, reject) => {
+      // Use 'python3' for Linux/macOS or 'python' for Windows depending on your environment
       const py = spawn("python3", [scriptPath], {
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -80,22 +81,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
       py.on("error", (err: Error) => reject(err));
 
-      // Send payload to stdin
+      // Send JSON payload to Python via stdin
       py.stdin.write(JSON.stringify(payload));
       py.stdin.end();
     });
 
-    // Build filename
+    // 5. Response Construction
     const gradeSlug =
       grade && grade !== "all" ? grade.replace(/[\s\/]/g, "_") : "All_Grades";
+
     const filename = `Kibali_Academy_Reports_Term${term}_${academic_year}_${gradeSlug}.pdf`;
 
-    return new NextResponse(pdfBytes, {
+    /**
+     * FIX: We wrap the Node.js Buffer in a Uint8Array.
+     * This satisfies the Web Standard 'BodyInit' type required by NextResponse.
+     */
+    return new NextResponse(new Uint8Array(pdfBuffer), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Length": String(pdfBytes.length),
+        "Content-Length": String(pdfBuffer.length),
         "X-Student-Count": String(students.length),
       },
     });

@@ -41,9 +41,6 @@ async function requireTeacher(): Promise<{
 }
 
 // ── 1. Batch upsert assessments ───────────────────────────────────────────────
-// Receives a flat list of {studentId, subjectName, strandId, score} rows
-// and upserts them using the unique constraint on
-// (student_id, subject_name, strand_id, term, academic_year)
 
 const rowSchema = z.object({
   studentId: z.string().uuid(),
@@ -71,14 +68,12 @@ export async function batchUpsertAssessmentsAction(
     return { success: true, message: "Nothing to save.", savedCount: 0 };
   }
 
-  // Validate each row
   const validated = rows.map((r) => rowSchema.safeParse(r));
   const invalid = validated.filter((v) => !v.success);
   if (invalid.length > 0) {
     return { success: false, message: "Some rows failed validation." };
   }
 
-  // Only upsert rows where score is not null
   const upsertRows = validated
     .filter((v) => v.success && (v as any).data.score !== null)
     .map((v) => {
@@ -94,7 +89,6 @@ export async function batchUpsertAssessmentsAction(
       };
     });
 
-  // Delete rows that were explicitly set to null (cleared)
   const clearRows = validated
     .filter((v) => v.success && (v as any).data.score === null)
     .map((v) => (v as any).data);
@@ -114,7 +108,6 @@ export async function batchUpsertAssessmentsAction(
     savedCount = upsertRows.length;
   }
 
-  // Handle cleared scores (delete them)
   for (const r of clearRows) {
     await supabase.from("assessments").delete().match({
       student_id: r.studentId,
@@ -134,8 +127,6 @@ export async function batchUpsertAssessmentsAction(
 }
 
 // ── 2. Generate AI narrative remark ──────────────────────────────────────────
-// Given a student's assessment scores for a subject, asks Claude for
-// a grade-appropriate narrative remark, then caches it in assessment_narratives
 
 export async function generateNarrativeAction(
   fd: FormData,
@@ -153,7 +144,6 @@ export async function generateNarrativeAction(
     10,
   );
 
-  // Build a summary of the student's strand scores for this subject
   const { data: assessData } = await supabase
     .from("assessments")
     .select("strand_id, score")
@@ -171,7 +161,6 @@ export async function generateNarrativeAction(
     };
   }
 
-  // Format scores for the prompt
   const scoreSummary = scores
     .map(
       (s) =>
@@ -198,7 +187,6 @@ Do not use bullet points or lists. Write in flowing prose.
 Do not mention letter codes like EE/ME/AE/BE — describe performance naturally.
 Respond with ONLY the narrative remark text, no preamble.`;
 
-  // Call Claude API
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -230,7 +218,6 @@ Respond with ONLY the narrative remark text, no preamble.`;
       return { success: false, message: "No narrative returned." };
     }
 
-    // Cache the narrative in the DB
     await supabase.from("assessment_narratives").upsert(
       {
         student_id: studentId,
@@ -244,7 +231,12 @@ Respond with ONLY the narrative remark text, no preamble.`;
     );
 
     revalidatePath("/teacher/assess");
-    return { success: true, narrative };
+    // FIXED: Added missing 'message' property required by NarrativeResult
+    return {
+      success: true,
+      narrative,
+      message: "Narrative generated successfully.",
+    };
   } catch (err) {
     console.error("[generateNarrative]", err);
     return { success: false, message: "Failed to generate narrative." };

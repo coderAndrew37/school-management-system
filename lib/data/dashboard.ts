@@ -6,6 +6,19 @@ import {
   Parent,
 } from "@/lib/types/dashboard";
 
+/**
+ * Helper function to flatten the parent object from Supabase's array return
+ */
+function mapStudentRow(row: any): Student {
+  return {
+    ...row,
+    // Flatten parents: if it's an array, take the first element; otherwise use as-is
+    parents: Array.isArray(row.parents)
+      ? row.parents[0] || null
+      : row.parents || null,
+  };
+}
+
 export async function fetchStudents(limit?: number): Promise<Student[]> {
   const supabase = createServerClient();
 
@@ -41,7 +54,8 @@ export async function fetchStudents(limit?: number): Promise<Student[]> {
     return [];
   }
 
-  return (data ?? []) as Student[];
+  // Use the helper to transform the array join into a single object
+  return (data ?? []).map(mapStudentRow);
 }
 
 export async function fetchAllStudents({
@@ -101,7 +115,8 @@ export async function fetchAllStudents({
     return [];
   }
 
-  return (data ?? []) as Student[];
+  // Use the helper to transform the array join into a single object
+  return (data ?? []).map(mapStudentRow);
 }
 
 export async function fetchTeachers(): Promise<Teacher[]> {

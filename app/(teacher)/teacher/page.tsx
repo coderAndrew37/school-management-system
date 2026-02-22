@@ -10,17 +10,46 @@ import {
 import { getSession } from "@/lib/actions/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-import type { TeacherSubjectAllocation } from "@/lib/types/allocation";
+import type {
+  SubjectLevel,
+  TeacherSubjectAllocation,
+} from "@/lib/types/allocation";
 import { TopNav } from "@/app/_components/nav/TopNav";
 
 export const metadata = {
   title: "Teacher Portal | Kibali Academy",
 };
 
+// 1. Define the raw shape coming from the database join
+interface RawAllocationRow {
+  id: string;
+  teacher_id: string;
+  subject_id: string;
+  grade: string;
+  academic_year: number;
+  created_at: string;
+  // Supabase returns joins as arrays by default
+  teachers: {
+    id: string;
+    full_name: string;
+    email: string;
+    tsc_number: string | null;
+  }[];
+  subjects: {
+    id: string;
+    name: string;
+    code: string;
+    level: SubjectLevel;
+    weekly_lessons: number;
+  }[];
+}
+
 async function fetchTeacherAllocations(
   teacherId: string,
 ): Promise<TeacherSubjectAllocation[]> {
   const supabase = await createSupabaseServerClient();
+
+  // Use .returns<RawAllocationRow[]>() to tell Supabase the expected shape
   const { data, error } = await supabase
     .from("teacher_subject_allocations")
     .select(
@@ -32,10 +61,25 @@ async function fetchTeacherAllocations(
     )
     .eq("teacher_id", teacherId)
     .eq("academic_year", 2026)
-    .order("grade");
+    .order("grade")
+    .returns<RawAllocationRow[]>();
 
-  if (error) return [];
-  return (data ?? []) as TeacherSubjectAllocation[];
+  if (error || !data) return [];
+
+  // 2. Map the data safely without 'any'
+  return data.map(
+    (row): TeacherSubjectAllocation => ({
+      id: row.id,
+      teacher_id: row.teacher_id,
+      subject_id: row.subject_id,
+      grade: row.grade,
+      academic_year: row.academic_year,
+      created_at: row.created_at,
+      // Safely extract the first element or null
+      teachers: row.teachers?.[0] ?? null,
+      subjects: row.subjects?.[0] ?? null,
+    }),
+  );
 }
 
 async function fetchStudentCountsByGrade(

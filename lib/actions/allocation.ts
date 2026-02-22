@@ -45,7 +45,7 @@ export async function createAllocationAction(
   const { teacherId, subjectId, grade, academicYear } = parsed.data;
   const supabase = createServerClient();
 
-  // --- ADDED: Fetch teacher and subject info for the email ---
+  // --- Fetch teacher and subject info for the email ---
   const [{ data: info }, { data: sub }] = await Promise.all([
     supabase
       .from("teachers")
@@ -77,7 +77,6 @@ export async function createAllocationAction(
     };
   }
 
-  // --- Now 'info' and 'sub' are defined and can be used ---
   if (info && sub) {
     try {
       await sendAllocationEmail({
@@ -91,7 +90,6 @@ export async function createAllocationAction(
         "Email failed to send, but allocation was saved:",
         mailError,
       );
-      // We don't return an error here because the DB transaction succeeded
     }
   }
 
@@ -99,6 +97,7 @@ export async function createAllocationAction(
   revalidatePath("/timetable");
   return { success: true, message: "Subject allocated and teacher notified." };
 }
+
 // ── 2. Delete allocation ──────────────────────────────────────────────────────
 
 export async function deleteAllocationAction(
@@ -124,15 +123,6 @@ export async function deleteAllocationAction(
 }
 
 // ── 3. Generate timetable ─────────────────────────────────────────────────────
-//
-// Algorithm (constraint-based greedy):
-//  1. Load all allocations for the given year
-//  2. Group by grade
-//  3. For each grade, spread each allocation's weekly_lessons across Mon–Fri
-//     avoiding:
-//       - same grade, same slot (no double-booking)
-//       - same teacher, same slot (teacher conflict)
-//  4. Wipe existing slots for the year, then bulk-insert new ones
 
 export async function generateTimetableAction(
   academicYear = 2026,
@@ -162,7 +152,16 @@ export async function generateTimetableAction(
     subjects: { weekly_lessons: number } | null;
   };
 
-  const allocations: RawAllocation[] = allocationsRaw;
+  /**
+   * FIX: Supabase returns joined data as an array 'subjects: [{ weekly_lessons }]'.
+   * We map it here to ensure it matches the RawAllocation object structure.
+   */
+  const allocations: RawAllocation[] = (allocationsRaw as any[]).map((row) => ({
+    id: row.id,
+    teacher_id: row.teacher_id,
+    grade: row.grade,
+    subjects: Array.isArray(row.subjects) ? row.subjects[0] : row.subjects,
+  }));
 
   if (allocations.length === 0) {
     return {
@@ -172,12 +171,11 @@ export async function generateTimetableAction(
     };
   }
 
-  const DAYS_COUNT = DAYS.length; // 5
-  const PERIODS_PER_DAY = PERIODS.length; // 8
+  const DAYS_COUNT = DAYS.length;
+  const PERIODS_PER_DAY = PERIODS.length;
 
-  // Track occupied slots: grade+day+period and teacher+day+period
-  const gradeSlots = new Set<string>(); // `${grade}-${day}-${period}`
-  const teacherSlots = new Set<string>(); // `${teacherId}-${day}-${period}`
+  const gradeSlots = new Set<string>();
+  const teacherSlots = new Set<string>();
 
   type SlotInsert = {
     allocation_id: string;
@@ -189,7 +187,6 @@ export async function generateTimetableAction(
 
   const slotsToInsert: SlotInsert[] = [];
 
-  // Group allocations by grade so we can interleave subjects nicely
   const byGrade = new Map<string, RawAllocation[]>();
   for (const alloc of allocations) {
     const existing = byGrade.get(alloc.grade) ?? [];
@@ -198,14 +195,12 @@ export async function generateTimetableAction(
   }
 
   for (const [grade, gradeAllocs] of byGrade) {
-    // Build a flat list of lessons needed: repeat allocationId by weekly_lessons
     const lessonQueue: RawAllocation[] = [];
     for (const alloc of gradeAllocs) {
       const count = alloc.subjects?.weekly_lessons ?? 5;
       for (let i = 0; i < count; i++) lessonQueue.push(alloc);
     }
 
-    // Shuffle lessons for a natural spread (deterministic seed from grade name)
     let seed = grade.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
     const rng = () => {
       seed = (seed * 1664525 + 1013904223) & 0xffffffff;
@@ -213,7 +208,6 @@ export async function generateTimetableAction(
     };
     lessonQueue.sort(() => rng() - 0.5);
 
-    // Assign each lesson to the next free slot
     let lessonIdx = 0;
     outer: for (let day = 1; day <= DAYS_COUNT; day++) {
       for (let period = 1; period <= PERIODS_PER_DAY; period++) {
@@ -224,7 +218,7 @@ export async function generateTimetableAction(
         const teacherKey = `${alloc.teacher_id}-${day}-${period}`;
 
         if (gradeSlots.has(gradeKey) || teacherSlots.has(teacherKey)) {
-          continue; // slot taken, try next
+          continue;
         }
 
         gradeSlots.add(gradeKey);
@@ -241,7 +235,6 @@ export async function generateTimetableAction(
     }
   }
 
-  // Wipe existing timetable for the year
   const { error: deleteError } = await supabase
     .from("timetable_slots")
     .delete()
@@ -252,7 +245,6 @@ export async function generateTimetableAction(
     return { success: false, message: "Failed to clear existing timetable." };
   }
 
-  // Bulk insert
   const { error: insertError } = await supabase
     .from("timetable_slots")
     .insert(slotsToInsert);
