@@ -4,6 +4,7 @@ import { createServerClient } from "@/lib/supabase/client";
 import { DAYS, PERIODS } from "@/lib/types/allocation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { sendAllocationEmail } from "../mail";
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -44,6 +45,16 @@ export async function createAllocationAction(
   const { teacherId, subjectId, grade, academicYear } = parsed.data;
   const supabase = createServerClient();
 
+  // --- ADDED: Fetch teacher and subject info for the email ---
+  const [{ data: info }, { data: sub }] = await Promise.all([
+    supabase
+      .from("teachers")
+      .select("full_name, email")
+      .eq("id", teacherId)
+      .single(),
+    supabase.from("subjects").select("name").eq("id", subjectId).single(),
+  ]);
+
   const { error } = await supabase.from("teacher_subject_allocations").insert({
     teacher_id: teacherId,
     subject_id: subjectId,
@@ -66,11 +77,28 @@ export async function createAllocationAction(
     };
   }
 
+  // --- Now 'info' and 'sub' are defined and can be used ---
+  if (info && sub) {
+    try {
+      await sendAllocationEmail({
+        teacherEmail: info.email,
+        teacherName: info.full_name,
+        subjectName: sub.name,
+        grade: grade,
+      });
+    } catch (mailError) {
+      console.error(
+        "Email failed to send, but allocation was saved:",
+        mailError,
+      );
+      // We don't return an error here because the DB transaction succeeded
+    }
+  }
+
   revalidatePath("/allocation");
   revalidatePath("/timetable");
-  return { success: true, message: "Subject allocated successfully." };
+  return { success: true, message: "Subject allocated and teacher notified." };
 }
-
 // ── 2. Delete allocation ──────────────────────────────────────────────────────
 
 export async function deleteAllocationAction(

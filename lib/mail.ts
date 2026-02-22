@@ -11,6 +11,8 @@ const SENDER_EMAIL =
     ? "admissions@yourdomain.com" // Update this after domain verification
     : "onboarding@resend.dev";
 
+const DEV_EMAIL = "omollondrw@gmail.com";
+
 export async function sendWelcomeEmail({
   parentEmail,
   parentName,
@@ -25,10 +27,7 @@ export async function sendWelcomeEmail({
   try {
     const { data, error } = await resend.emails.send({
       from: `Kibali Academy <${SENDER_EMAIL}>`,
-      to:
-        process.env.NODE_ENV === "production"
-          ? parentEmail
-          : "omollondrw@gmail.com",
+      to: process.env.NODE_ENV === "production" ? parentEmail : DEV_EMAIL,
       subject: `Admission Successful: Welcome ${studentName} to Kibali Academy`,
       html: `
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; padding: 40px; border-radius: 16px; color: #1a202c;">
@@ -98,10 +97,7 @@ export async function sendTeacherWelcomeEmail({
   try {
     const { data, error } = await resend.emails.send({
       from: `Kibali Academy Staff <${SENDER_EMAIL}>`,
-      to:
-        process.env.NODE_ENV === "production"
-          ? teacherEmail
-          : "omollondrw@gmail.com",
+      to: process.env.NODE_ENV === "production" ? teacherEmail : DEV_EMAIL,
       subject: `Staff Onboarding: Welcome to Kibali Academy, ${teacherName}`,
       html: `
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; padding: 40px; border-radius: 16px; color: #1a202c;">
@@ -150,4 +146,37 @@ export async function sendTeacherWelcomeEmail({
     console.error("Teacher Mail Error:", err);
     return { success: false, error: err };
   }
+}
+
+export async function sendAllocationEmail({
+  teacherEmail,
+  teacherName,
+  subjectName,
+  grade,
+}: {
+  teacherEmail: string;
+  teacherName: string;
+  subjectName: string;
+  grade: string;
+}) {
+  return await resend.emails.send({
+    from: `Kibali Academy <${SENDER_EMAIL}>`,
+    to: process.env.NODE_ENV === "production" ? teacherEmail : DEV_EMAIL,
+    subject: `New Subject Allocation: ${subjectName} (${grade})`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 12px;">
+        <h2 style="color: #10b981;">Subject Allocated</h2>
+        <p>Hello <strong>${teacherName}</strong>,</p>
+        <p>You have been officially allocated the following subject for the 2026 academic year:</p>
+        <div style="background: #f0fdf4; padding: 15px; border-radius: 8px; border-left: 4px solid #10b981;">
+          <strong>Subject:</strong> ${subjectName}<br>
+          <strong>Grade:</strong> ${grade}
+        </div>
+        <p style="margin-top: 20px;">You can now view your updated timetable and prepare your lesson strands in the staff portal.</p>
+        <footer style="margin-top: 30px; font-size: 12px; color: #999;">
+          Kibali Academy Administration
+        </footer>
+      </div>
+    `,
+  });
 }
