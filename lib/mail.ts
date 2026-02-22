@@ -11,7 +11,7 @@ const SENDER_EMAIL =
     ? "admissions@yourdomain.com" // Update this after domain verification
     : "onboarding@resend.dev";
 
-const DEV_EMAIL = "omollondrw@gmail.com";
+const DEV_EMAIL = process.env.DEV_EMAIL!;
 
 export async function sendWelcomeEmail({
   parentEmail,

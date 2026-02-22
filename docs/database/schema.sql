@@ -66,3 +66,86 @@ BEFORE INSERT ON students
 FOR EACH ROW
 WHEN (NEW.readable_id IS NULL)
 EXECUTE FUNCTION generate_readable_id();
+
+CREATE TABLE communication_book (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  student_id UUID REFERENCES students(id),
+  sender_id UUID,
+  sender_name TEXT,
+  sender_role TEXT, -- 'parent', 'teacher', or 'admin'
+  category TEXT,    -- 'general', 'urgent', etc.
+  subject TEXT,
+  body TEXT,
+  thread_id UUID,
+  is_read BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 6. ATTENDANCE (Powers the AttendancePanel)
+CREATE TABLE attendance (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  student_id UUID REFERENCES students(id) ON DELETE CASCADE,
+  status TEXT CHECK (status IN ('Present', 'Absent', 'Late')),
+  date DATE NOT NULL DEFAULT CURRENT_DATE,
+  remarks TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. DIARY / HOMEWORK (Powers the DiaryView)
+CREATE TABLE student_diary (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  student_id UUID REFERENCES students(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  content TEXT,
+  homework BOOLEAN DEFAULT false,
+  due_date DATE,
+  is_completed BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8. TALENT GALLERY (Powers the TalentGallery)
+CREATE TABLE talent_gallery (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  student_id UUID REFERENCES students(id) ON DELETE CASCADE,
+  media_url TEXT NOT NULL,
+  media_type TEXT CHECK (media_type IN ('image', 'video')),
+  title TEXT,
+  description TEXT,
+  tags TEXT[], -- e.g., ['Music', 'Art']
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 9. JSS PATHWAYS (Powers the JssPathwayPanel)
+CREATE TABLE jss_pathways (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  student_id UUID REFERENCES students(id) UNIQUE,
+  recommended_pathway TEXT, -- 'Social Sciences', 'STEM', 'Arts and Sports'
+  strengths TEXT[],
+  interests TEXT[],
+  teacher_notes TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 10. NOTIFICATIONS (Powers the NotificationsPanel)
+CREATE TABLE notifications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  student_id UUID REFERENCES students(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  type TEXT DEFAULT 'info', -- 'info', 'warning', 'success'
+  is_read BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+
+
+ALTER TABLE jss_pathways 
+ADD COLUMN IF NOT EXISTS interest_areas TEXT[],
+ADD COLUMN IF NOT EXISTS strong_subjects TEXT[],
+ADD COLUMN IF NOT EXISTS career_interests TEXT[],
+ADD COLUMN IF NOT EXISTS learning_style TEXT,
+ADD COLUMN IF NOT EXISTS pathway_cluster TEXT,
+ADD COLUMN IF NOT EXISTS ai_guidance TEXT,
+ADD COLUMN IF NOT EXISTS guidance_date DATE DEFAULT CURRENT_DATE;
+
+ALTER TABLE notifications RENAME COLUMN message TO body;

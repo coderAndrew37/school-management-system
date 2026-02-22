@@ -113,10 +113,17 @@ function CompetencyRadar({ data }: CompetencyRadarProps) {
             dot={{ fill: "#f59e0b", r: 4, strokeWidth: 0 }}
           />
           <Tooltip
-            formatter={(value: number) => [
-              RADAR_SCORE_LABELS[value as 1 | 2 | 3 | 4] ?? value,
-              "Level",
-            ]}
+            formatter={(value: number | undefined) => {
+              // 1. Handle undefined or invalid values gracefully
+              if (value === undefined) return ["N/A", "Level"];
+
+              // 2. Map the numeric score to the CBC Label
+              const label =
+                RADAR_SCORE_LABELS[value as 1 | 2 | 3 | 4] ?? value.toString();
+
+              // 3. Return as a tuple that satisfies the Tooltip's expected return type
+              return [label, "Level"] as [string, string];
+            }}
             contentStyle={{
               borderRadius: "12px",
               border: "1px solid #e7e5e4",

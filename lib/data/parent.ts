@@ -1,10 +1,30 @@
 import { createServerClient } from "@/lib/supabase/client";
 import type { Parent } from "@/lib/types/dashboard";
-import type { Assessment, ChildWithAssessments } from "@/lib/types/parent";
+import type {
+  Assessment,
+  AttendanceRecord,
+  ChildWithAssessments,
+  CommMessage,
+  DiaryEntry,
+  GalleryItem,
+  JssPathway,
+  StudentNotification,
+  TalentCompetency,
+} from "@/lib/types/parent";
 
 // ── Internal Supabase response shapes ─────────────────────────────────────────
 // These mirror exactly what Supabase returns for each query.
 // We cast ONCE here so every consumer is fully typed.
+
+export interface ChildPortalData {
+  notifications: StudentNotification[];
+  diary: DiaryEntry[];
+  attendance: AttendanceRecord[];
+  messages: CommMessage[];
+  competencies: TalentCompetency[];
+  gallery: GalleryItem[];
+  pathway: JssPathway | null;
+}
 
 type AssessmentRow = {
   id: string;
@@ -156,4 +176,76 @@ export async function fetchChild(
   }
 
   return data ? mapStudentRow(data) : null;
+}
+
+/**
+ * Aggregates all data required for the Parent Portal Hub view.
+ */
+export async function fetchAllChildData(
+  studentId: string,
+  grade: string,
+): Promise<ChildPortalData & { unreadCount: number }> {
+  const supabase = createServerClient();
+
+  // Parallel fetching for better performance
+  const [
+    { data: notifications },
+    { data: diary },
+    { data: attendance },
+    { data: messages },
+    { data: competencies },
+    { data: gallery },
+    { data: pathway },
+  ] = await Promise.all([
+    supabase
+      .from("notifications")
+      .select("*")
+      .eq("student_id", studentId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("diary_entries")
+      .select("*")
+      .eq("student_id", studentId)
+      .order("date", { ascending: false }),
+    supabase
+      .from("attendance")
+      .select("*")
+      .eq("student_id", studentId)
+      .order("date", { ascending: false }),
+    supabase
+      .from("communication_book")
+      .select("*")
+      .eq("student_id", studentId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("talent_competencies")
+      .select("*")
+      .eq("student_id", studentId),
+    supabase
+      .from("student_gallery")
+      .select("*")
+      .eq("student_id", studentId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("jss_pathways")
+      .select("*")
+      .eq("student_id", studentId)
+      .maybeSingle(),
+  ]);
+
+  const unreadNotifs = notifications?.filter((n) => !n.is_read).length ?? 0;
+  const unreadMessages =
+    messages?.filter((m) => !m.is_read && m.sender_role !== "parent").length ??
+    0;
+
+  return {
+    notifications: notifications ?? [],
+    diary: diary ?? [],
+    attendance: attendance ?? [],
+    messages: messages ?? [],
+    competencies: competencies ?? [],
+    gallery: gallery ?? [],
+    pathway: pathway ?? null,
+    unreadCount: unreadNotifs + unreadMessages,
+  };
 }

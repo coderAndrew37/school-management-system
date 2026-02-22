@@ -279,3 +279,63 @@ $$;
 
 -- Only superadmin (service role) can call this function — RLS does not apply to SECURITY DEFINER functions
 -- called via the Supabase dashboard or server-side service role key.
+
+ALTER TABLE attendance         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE student_diary      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE talent_gallery     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE jss_pathways       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE communication_book ENABLE ROW LEVEL SECURITY;
+
+-- ATTENDANCE
+CREATE POLICY "attendance: parent read own" ON attendance
+  FOR SELECT USING (student_id IN (SELECT id FROM students WHERE parent_id = current_parent_id()));
+
+CREATE POLICY "attendance: teacher/admin all" ON attendance
+  FOR ALL USING (is_teacher() OR is_admin());
+
+-- STUDENT DIARY (Homework)
+CREATE POLICY "diary: parent read own" ON student_diary
+  FOR SELECT USING (student_id IN (SELECT id FROM students WHERE parent_id = current_parent_id()));
+
+CREATE POLICY "diary: teacher/admin all" ON student_diary
+  FOR ALL USING (is_teacher() OR is_admin());
+
+-- TALENT GALLERY
+CREATE POLICY "gallery: parent read own" ON talent_gallery
+  FOR SELECT USING (student_id IN (SELECT id FROM students WHERE parent_id = current_parent_id()));
+
+CREATE POLICY "gallery: teacher/admin all" ON talent_gallery
+  FOR ALL USING (is_teacher() OR is_admin());
+
+  -- COMMUNICATION BOOK
+-- 1. Everyone can read messages if they are part of the thread
+CREATE POLICY "comm_book: read own threads" ON communication_book
+  FOR SELECT USING (
+    -- If parent: student must be theirs
+    (auth_role() = 'parent' AND student_id IN (SELECT id FROM students WHERE parent_id = current_parent_id()))
+    OR 
+    -- If teacher/admin: full access
+    (is_teacher() OR is_admin())
+  );
+
+-- 2. Insert: Parents can only insert for their own children
+CREATE POLICY "comm_book: parent insert" ON communication_book
+  FOR INSERT WITH CHECK (
+    auth_role() = 'parent' 
+    AND student_id IN (SELECT id FROM students WHERE parent_id = current_parent_id())
+    AND sender_id = auth.uid()
+  );
+
+-- 3. Update: Primarily used for "Mark as Read"
+CREATE POLICY "comm_book: update is_read" ON communication_book
+  FOR UPDATE USING (
+    (auth_role() = 'parent' AND student_id IN (SELECT id FROM students WHERE parent_id = current_parent_id()))
+    OR (is_teacher() OR is_admin())
+  )
+  WITH CHECK (
+    -- Ensure only the is_read column is being updated (conceptually)
+    -- In Supabase RLS, we usually restrict this via the action logic, 
+    -- but this policy allows the update to proceed.
+    true 
+  );
