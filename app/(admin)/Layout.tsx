@@ -1,29 +1,31 @@
-"use client";
-import { useState } from "react";
+// ─────────────────────────────────────────────────────────────────────────────
+// app/(admin)/layout.tsx  —  Server Component
+// Route group layout for all admin pages.
+// Handles session check once — all child pages no longer need getSession.
+// Renders the AdminLayoutShell (client) which manages sidebar state.
+// ─────────────────────────────────────────────────────────────────────────────
 
-import Navbar from "../_components/shared/Navbar";
-import Sidebar from "../_components/shared/Sidebar";
-import { ADMIN_LINKS } from "@/lib/constants";
+import { redirect } from "next/navigation";
+import { getSession } from "@/lib/actions/auth";
+import { AdminLayoutShell } from "../_components/nav/AdminLayoutShell";
 
-export default function AdminLayout({
+export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [isSidebarOpen, setSidebarOpen] = useState(false);
+  const session = await getSession();
+
+  if (!session || session.profile.role !== "admin") {
+    redirect("/login");
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Sidebar
-        links={ADMIN_LINKS}
-        isOpen={isSidebarOpen}
-        setIsOpen={setSidebarOpen}
-      />
-
-      <div className="lg:ml-[260px]">
-        <Navbar onMenuClick={() => setSidebarOpen(true)} />
-        <main className="p-4 md:p-8">{children}</main>
-      </div>
-    </div>
+    <AdminLayoutShell
+      profile={session.profile}
+      email={session.user.email ?? ""}
+    >
+      {children}
+    </AdminLayoutShell>
   );
 }

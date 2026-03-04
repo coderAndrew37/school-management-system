@@ -6,16 +6,6 @@ import { formatDistanceToNow } from "date-fns";
 import { CheckCircle2, Clock } from "lucide-react";
 import { ResendInviteButton } from "./ResendEmailButton";
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-// function formatDate(dt: string): string {
-//   return new Date(dt).toLocaleDateString("en-KE", {
-//     day: "numeric",
-//     month: "short",
-//     year: "numeric",
-//   });
-// }
-
 function getInitials(name: string): string {
   return name
     .split(" ")

@@ -5,7 +5,7 @@ interface StatCardProps {
   value: number;
   icon: string;
   accent: "amber" | "sky" | "emerald";
-  link: string;
+  href?: string;
 }
 
 const accentMap = {
@@ -29,30 +29,39 @@ const accentMap = {
   },
 };
 
-export function StatCard({ label, value, icon, accent, link }: StatCardProps) {
+export function StatCard({ label, value, icon, accent, href }: StatCardProps) {
   const styles = accentMap[accent];
 
-  return (
-    <Link href={link}>
-      <div
-        className={`rounded-2xl border ${styles.border} bg-white/[0.04] backdrop-blur-sm p-5 shadow-lg ${styles.glow}`}
-      >
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-white/40 mb-1">
-              {label}
-            </p>
-            <p className={`text-4xl font-bold tabular-nums ${styles.text}`}>
-              {value.toLocaleString()}
-            </p>
-          </div>
-          <div
-            className={`flex h-10 w-10 items-center justify-center rounded-xl ${styles.bg} border ${styles.border} text-xl`}
-          >
-            {icon}
-          </div>
-        </div>
+  const inner = (
+    <div className="flex items-start justify-between">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-widest text-white/40 mb-1">
+          {label}
+        </p>
+        <p className={`text-4xl font-bold tabular-nums ${styles.text}`}>
+          {value.toLocaleString()}
+        </p>
       </div>
-    </Link>
+      <div
+        className={`flex h-10 w-10 items-center justify-center rounded-xl ${styles.bg} border ${styles.border} text-xl`}
+      >
+        {icon}
+      </div>
+    </div>
   );
+
+  const cls = `rounded-2xl border ${styles.border} bg-white/[0.04] backdrop-blur-sm p-5 shadow-lg ${styles.glow} transition-all duration-200`;
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className={`${cls} hover:bg-white/[0.07] hover:scale-[1.01] block`}
+      >
+        {inner}
+      </Link>
+    );
+  }
+
+  return <div className={cls}>{inner}</div>;
 }

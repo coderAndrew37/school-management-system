@@ -1,11 +1,13 @@
+import Link from "next/link";
+import { LogOut, Menu } from "lucide-react";
 import { logoutAction } from "@/lib/actions/auth";
 import type { Profile } from "@/lib/types/auth";
-import { LogOut } from "lucide-react";
-import Link from "next/link";
 
 interface TopNavProps {
   profile: Profile;
   email: string;
+  /** When provided, a hamburger is rendered (sidebar layout). */
+  onMenuClick?: React.ComponentProps<"button">["onClick"];
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -20,6 +22,12 @@ const ROLE_COLORS: Record<string, string> = {
   parent: "bg-sky-400/10 text-sky-400 border-sky-400/25",
 };
 
+const AVATAR_COLORS: Record<string, string> = {
+  admin: "bg-amber-400/15 border-amber-400/20 text-amber-400",
+  teacher: "bg-emerald-400/15 border-emerald-400/20 text-emerald-400",
+  parent: "bg-sky-400/15 border-sky-400/20 text-sky-400",
+};
+
 function getInitials(name: string | null, email: string): string {
   if (name) {
     return name
@@ -32,36 +40,49 @@ function getInitials(name: string | null, email: string): string {
   return email[0]?.toUpperCase() ?? "?";
 }
 
-export function TopNav({ profile, email }: TopNavProps) {
+export function TopNav({ profile, email, onMenuClick }: TopNavProps) {
   const initials = getInitials(profile.full_name, email);
   const roleLabel = ROLE_LABELS[profile.role] ?? profile.role;
-  const roleColor = ROLE_COLORS[profile.role] ?? ROLE_COLORS.parent;
+  const roleColor = ROLE_COLORS[profile.role] ?? ROLE_COLORS["parent"]!;
+  const avatarColor = AVATAR_COLORS[profile.role] ?? AVATAR_COLORS["parent"]!;
 
   return (
-    <nav className="sticky top-0 z-40 w-full border-b border-white/[0.06] bg-[#0c0f1a]/80 backdrop-blur-xl">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-4">
-        {/* Logo */}
-        <Link href="/" className="flex items-center gap-2.5 flex-shrink-0">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-400/10 border border-amber-400/25">
-            <span className="text-xs font-bold text-amber-400">KA</span>
-          </div>
-          <span className="text-sm font-bold text-white/80 hidden sm:block">
-            Kibali Academy
-          </span>
-        </Link>
-
-        {/* Right: user info + logout */}
+    <nav className="sticky top-0 z-40 w-full h-14 border-b border-white/[0.06] bg-[#0c0f1a]/80 backdrop-blur-xl flex items-center">
+      <div className="w-full px-4 sm:px-6 flex items-center justify-between gap-4">
+        {/* Left: hamburger (mobile sidebar) or standalone logo */}
         <div className="flex items-center gap-3">
-          {/* Role badge */}
+          {onMenuClick ? (
+            <button
+              onClick={onMenuClick}
+              className="lg:hidden flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.07] bg-white/[0.03] text-white/40 hover:text-white hover:bg-white/[0.07] transition-all"
+              aria-label="Open navigation"
+            >
+              <Menu className="h-4 w-4" />
+            </button>
+          ) : (
+            <Link href="/" className="flex items-center gap-2.5 flex-shrink-0">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-400/10 border border-amber-400/25">
+                <span className="text-xs font-bold text-amber-400">KA</span>
+              </div>
+              <span className="text-sm font-bold text-white/80 hidden sm:block">
+                Kibali Academy
+              </span>
+            </Link>
+          )}
+        </div>
+
+        {/* Right: role badge + avatar + logout */}
+        <div className="flex items-center gap-3">
           <span
             className={`hidden md:inline-flex items-center rounded-lg border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider ${roleColor}`}
           >
             {roleLabel}
           </span>
 
-          {/* Avatar + name */}
           <div className="flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-1.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-400/15 border border-amber-400/20 text-xs font-bold text-amber-400 flex-shrink-0">
+            <div
+              className={`flex h-7 w-7 items-center justify-center rounded-lg border text-xs font-bold flex-shrink-0 ${avatarColor}`}
+            >
               {initials}
             </div>
             <div className="hidden sm:block min-w-0">
@@ -74,7 +95,6 @@ export function TopNav({ profile, email }: TopNavProps) {
             </div>
           </div>
 
-          {/* Logout */}
           <form action={logoutAction}>
             <button
               type="submit"
