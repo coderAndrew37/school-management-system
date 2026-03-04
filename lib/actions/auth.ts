@@ -7,10 +7,10 @@ import {
   loginSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
-  type UserRole,
   ROLE_ROUTES,
 } from "@/lib/types/auth";
-import type { Profile } from "@/lib/types/auth";
+import type { Profile, UserRole } from "@/lib/types/auth";
+import { resolveAllRoles, resolvePrimaryRole } from "./auth-utils";
 
 export interface AuthActionResult {
   success: boolean;
@@ -44,7 +44,6 @@ export async function loginAction(
   });
 
   if (error) {
-    // Never expose internal error details to the client
     if (error.message.toLowerCase().includes("invalid login")) {
       return { success: false, message: "Incorrect email or password." };
     }
@@ -58,7 +57,6 @@ export async function loginAction(
     return { success: false, message: "Sign-in failed. Please try again." };
   }
 
-  // Fetch profile to get role for redirect
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -66,19 +64,21 @@ export async function loginAction(
   if (!user)
     return { success: false, message: "Session error. Please try again." };
 
+  // ── Fetch BOTH role fields so multi-role users go to the right dashboard ──
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, roles")
     .eq("id", user.id)
     .single();
 
-  const role = (profile?.role ?? "parent") as UserRole;
+  const primaryRole = resolvePrimaryRole(profile);
+
   revalidatePath("/", "layout");
 
   return {
     success: true,
     message: "Signed in successfully.",
-    redirectTo: ROLE_ROUTES[role],
+    redirectTo: ROLE_ROUTES[primaryRole],
   };
 }
 
@@ -107,19 +107,15 @@ export async function forgotPasswordAction(
   }
 
   const supabase = await createSupabaseServerClient();
-
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
   const { error } = await supabase.auth.resetPasswordForEmail(
     parsed.data.email,
-    {
-      redirectTo: `${siteUrl}/auth/callback?type=recovery`,
-    },
+    { redirectTo: `${siteUrl}/auth/callback?type=recovery` },
   );
 
   if (error) {
     console.error("forgotPassword error:", error.message);
-    // Always return a success-like message to prevent email enumeration
   }
 
   // Always respond the same way — don't reveal whether the email exists
@@ -197,5 +193,7 @@ export async function getSession() {
   return {
     user,
     profile: profile as Profile,
+    primaryRole: resolvePrimaryRole(profile),
+    allRoles: resolveAllRoles(profile),
   };
 }

@@ -4,60 +4,127 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useTransition, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { toast } from "sonner";
-import { Eye, EyeOff, Loader2, LogIn, Mail, Lock } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { loginSchema, type LoginFormValues } from "@/lib/types/auth";
 import { loginAction } from "@/lib/actions/auth";
 import { AuthLayout } from "./AuthLayout";
+
+// ── Types ──────────────────────────────────────────────
+type Role = "admin" | "teacher" | "parent";
 
 interface LoginFormProps {
   redirectTo?: string;
   errorParam?: string;
 }
 
-const INPUT_CLS =
-  "w-full rounded-xl border border-white/10 bg-white/5 pl-10 pr-4 py-3 text-sm text-white placeholder-white/25 outline-none transition-all duration-200 focus:border-amber-400/60 focus:ring-2 focus:ring-amber-400/20 focus:bg-white/8";
+// ── Role config ────────────────────────────────────────
+const ROLES: { id: Role; label: string }[] = [
+  { id: "admin", label: "Admin" },
+  { id: "teacher", label: "Teacher" },
+  { id: "parent", label: "Parent" },
+];
 
+const ROLE_EMAILS: Record<Role, string> = {
+  admin: "admin@kibali.ac.ke",
+  teacher: "j.kamau@kibali.ac.ke",
+  parent: "parent@gmail.com",
+};
+
+const QUICK_ACCESS: {
+  role: Role;
+  label: string;
+  description: string;
+  color: string;
+}[] = [
+  {
+    role: "admin",
+    label: "Admin Portal",
+    description: "Headteacher — Full Access",
+    color: "#2563eb",
+  },
+  {
+    role: "teacher",
+    label: "Teacher Portal",
+    description: "Mark Entry & Class View",
+    color: "#059669",
+  },
+  {
+    role: "parent",
+    label: "Parent Portal",
+    description: "Child Results & Trends",
+    color: "#0891b2",
+  },
+];
+
+// ── Shared input class ─────────────────────────────────
+const INPUT_CLS =
+  "w-full px-[14px] py-[11px] border-[1.5px] border-[#e8edf2] rounded-lg text-[14px] outline-none transition-all duration-200 bg-[#f8fafc] text-[#0f172a] focus:border-[#2563eb] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] placeholder:text-[#cbd5e1]";
+
+// ── Component ──────────────────────────────────────────
 export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
-  const [showPassword, setShowPassword] = useState(false);
+  const [role, setRole] = useState<Role>("admin");
+  const [showCode, setShowCode] = useState(false);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
   const {
     register,
     handleSubmit,
+    setValue,
     setError,
     formState: { errors },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
+    defaultValues: { email: ROLE_EMAILS.admin, password: "" },
   });
 
-  // Show error from URL params (e.g. after failed PKCE callback)
+  // Handle URL error param
   if (errorParam) {
-    const errorMessages: Record<string, string> = {
+    const msg: Record<string, string> = {
       missing_code:
         "The sign-in link was invalid or expired. Please try again.",
       auth_error: "Authentication failed. Please try again.",
     };
-    toast.error(errorMessages[errorParam] ?? "An error occurred.", {
-      id: "url-error",
-    });
+    toast.error(msg[errorParam] ?? "An error occurred.", { id: "url-error" });
   }
+
+  // Switch active role pill
+  const handleRoleSwitch = (r: Role) => {
+    setRole(r);
+    setValue("email", ROLE_EMAILS[r]);
+    setShowCode(r === "parent");
+  };
+
+  // Quick demo login
+  const quickLogin = (r: Role) => {
+    handleRoleSwitch(r);
+    // Immediately submit with demo credentials
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.append("email", ROLE_EMAILS[r]);
+      fd.append("password", "demo1234");
+      const result = await loginAction(fd);
+      if (!result.success) {
+        setError("root", { message: result.message });
+        return;
+      }
+      toast.success("Welcome back!", { duration: 2000 });
+      router.push(redirectTo ?? result.redirectTo ?? "/dashboard");
+      router.refresh();
+    });
+  };
 
   const onSubmit = (values: LoginFormValues) => {
     startTransition(async () => {
       const fd = new FormData();
       fd.append("email", values.email);
       fd.append("password", values.password);
-
       const result = await loginAction(fd);
-
       if (!result.success) {
         setError("root", { message: result.message });
         return;
       }
-
       toast.success("Welcome back!", { duration: 2000 });
       router.push(redirectTo ?? result.redirectTo ?? "/dashboard");
       router.refresh();
@@ -65,113 +132,170 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
   };
 
   return (
-    <AuthLayout
-      title="Sign in to your account"
-      subtitle="Kibali Academy School Management Portal"
-    >
-      <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
+    <AuthLayout>
+      {/* Heading */}
+      <h2 className="text-[28px] font-extrabold text-[#0f172a] tracking-tight mb-[6px]">
+        Welcome back 👋
+      </h2>
+      <p className="text-[14px] text-[#64748b] mb-[28px]">
+        Sign in to your school portal
+      </p>
+
+      {/* Role pills */}
+      <div className="flex gap-2 mb-6 flex-wrap">
+        {ROLES.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            onClick={() => handleRoleSwitch(r.id)}
+            className={[
+              "flex items-center gap-[7px] px-[14px] py-2 border-[1.5px] rounded-full cursor-pointer text-[13px] font-semibold transition-all duration-200",
+              role === r.id
+                ? "bg-[#2563eb] border-[#2563eb] text-white"
+                : "bg-white border-[#e8edf2] text-[#64748b] hover:border-[#2563eb] hover:text-[#2563eb]",
+            ].join(" ")}
+          >
+            <span
+              className="w-2 h-2 rounded-full flex-shrink-0"
+              style={{
+                background: "currentColor",
+                opacity: 0.6,
+              }}
+            />
+            {r.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Form */}
+      <form
+        onSubmit={handleSubmit(onSubmit)}
+        noValidate
+        className="space-y-[14px] mb-5"
+      >
         {/* Root error */}
         {errors.root && (
-          <div className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-300 flex items-center gap-2">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-rose-400 flex-shrink-0" />
+          <div className="rounded-lg border border-red-200 bg-[#fef2f2] px-4 py-3 text-[13px] text-[#dc2626]">
             {errors.root.message}
           </div>
         )}
 
         {/* Email */}
-        <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-widest text-white/40 mb-2">
-            Email address
+        <div className="flex flex-col gap-[5px]">
+          <label className="text-[12px] font-bold text-[#334155] uppercase tracking-[0.6px]">
+            Email / Staff ID
           </label>
-          <div className="relative">
-            <Mail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/25" />
-            <input
-              type="email"
-              autoComplete="email"
-              placeholder="you@kibali.ac.ke"
-              className={INPUT_CLS}
-              disabled={isPending}
-              {...register("email")}
-            />
-          </div>
+          <input
+            type="text"
+            autoComplete="email"
+            placeholder="Enter email or staff ID"
+            className={INPUT_CLS}
+            disabled={isPending}
+            {...register("email")}
+          />
           {errors.email && (
-            <p className="mt-1.5 text-xs text-rose-400">
-              {errors.email.message}
-            </p>
+            <p className="text-[12px] text-[#dc2626]">{errors.email.message}</p>
           )}
         </div>
 
         {/* Password */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className="block text-[10px] font-semibold uppercase tracking-widest text-white/40">
-              Password
-            </label>
-            <Link
-              href="/forgot-password"
-              className="text-xs text-amber-400/70 hover:text-amber-400 transition-colors"
-            >
-              Forgot password?
-            </Link>
-          </div>
-          <div className="relative">
-            <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/25" />
-            <input
-              type={showPassword ? "text" : "password"}
-              autoComplete="current-password"
-              placeholder="••••••••••"
-              className={`${INPUT_CLS} pr-10`}
-              disabled={isPending}
-              {...register("password")}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors"
-              tabIndex={-1}
-              aria-label={showPassword ? "Hide password" : "Show password"}
-            >
-              {showPassword ? (
-                <EyeOff className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
-            </button>
-          </div>
+        <div className="flex flex-col gap-[5px]">
+          <label className="text-[12px] font-bold text-[#334155] uppercase tracking-[0.6px]">
+            Password
+          </label>
+          <input
+            type="password"
+            autoComplete="current-password"
+            placeholder="Enter password"
+            className={INPUT_CLS}
+            disabled={isPending}
+            {...register("password")}
+          />
           {errors.password && (
-            <p className="mt-1.5 text-xs text-rose-400">
+            <p className="text-[12px] text-[#dc2626]">
               {errors.password.message}
             </p>
           )}
         </div>
 
+        {/* Parent access code (conditional) */}
+        {showCode && (
+          <div className="flex flex-col gap-[5px]">
+            <label className="text-[12px] font-bold text-[#334155] uppercase tracking-[0.6px]">
+              Access Code
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. PAR-1001"
+              className={INPUT_CLS}
+              disabled={isPending}
+            />
+          </div>
+        )}
+
         {/* Submit */}
         <button
           type="submit"
           disabled={isPending}
-          className="group relative w-full overflow-hidden rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.98] transition-all duration-200 px-6 py-3.5 text-sm font-bold text-[#0c0f1a] flex items-center justify-center gap-2 shadow-lg shadow-amber-400/20 mt-2"
+          className="w-full py-[13px] rounded-lg border-none text-[15px] font-bold text-white cursor-pointer transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-1"
+          style={{
+            background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
+            boxShadow: "0 4px 16px rgba(37,99,235,0.3)",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.transform =
+              "translateY(-1px)";
+            (e.currentTarget as HTMLButtonElement).style.boxShadow =
+              "0 8px 24px rgba(37,99,235,0.4)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.transform = "";
+            (e.currentTarget as HTMLButtonElement).style.boxShadow =
+              "0 4px 16px rgba(37,99,235,0.3)";
+          }}
         >
           {isPending ? (
             <>
-              <Loader2 className="h-4 w-4 animate-spin" /> Signing in…
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Signing in…
             </>
           ) : (
-            <>
-              <LogIn className="h-4 w-4" /> Sign in
-            </>
+            "Sign In →"
           )}
-          <span className="absolute inset-0 -skew-x-12 translate-x-[-200%] bg-white/20 transition-transform duration-500 group-hover:translate-x-[200%]" />
         </button>
-
-        {/* Role hint */}
-        <div className="pt-2 border-t border-white/[0.06]">
-          <p className="text-center text-xs text-white/25 leading-relaxed">
-            Teachers and administrators are added by Kibali Academy staff.
-            <br />
-            Parents: use the email address registered during enrolment.
-          </p>
-        </div>
       </form>
+
+      {/* Quick Demo Access */}
+      <div>
+        <p className="text-[11px] font-bold uppercase tracking-[0.8px] text-[#94a3b8] mb-[10px]">
+          Quick Demo
+        </p>
+        <div className="flex flex-col gap-[6px]">
+          {QUICK_ACCESS.map((qa) => (
+            <button
+              key={qa.role}
+              type="button"
+              onClick={() => quickLogin(qa.role)}
+              disabled={isPending}
+              className="flex items-center gap-[10px] px-[14px] py-[10px] bg-[#f8fafc] border border-[#e8edf2] rounded-lg cursor-pointer transition-all duration-200 text-left w-full hover:border-[#2563eb] hover:bg-[#eff6ff] disabled:opacity-60 disabled:cursor-not-allowed group"
+            >
+              <span
+                className="w-[10px] h-[10px] rounded-full flex-shrink-0"
+                style={{ background: qa.color }}
+              />
+              <span className="flex-1 text-[13px] font-bold text-[#0f172a]">
+                {qa.label}
+              </span>
+              <span className="text-[11px] text-[#64748b]">
+                {qa.description}
+              </span>
+              <span className="text-[12px] text-[#94a3b8] group-hover:text-[#2563eb] transition-colors">
+                →
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
     </AuthLayout>
   );
 }
