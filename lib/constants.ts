@@ -1,18 +1,17 @@
 import {
-  LayoutDashboard,
-  Users,
-  GraduationCap,
+  BarChart3,
+  Bell,
   BookMarked,
   Calendar,
-  FileText,
-  UserRoundPlus,
-  BarChart3,
-  Mail,
-  Landmark,
-  ClipboardList,
   ClipboardCheck,
-  BookOpen,
-  Bell,
+  ClipboardList,
+  FileText,
+  GraduationCap,
+  Landmark,
+  LayoutDashboard,
+  Mail,
+  UserRoundPlus,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 
@@ -56,6 +55,12 @@ export const ADMIN_LINKS: NavLink[] = [
   },
   { name: "Timetable", href: "/timetable", icon: Calendar, group: "Academic" },
   { name: "Report Cards", href: "/reports", icon: FileText, group: "Academic" },
+  {
+    name: "Promote Students",
+    href: "/promotion",
+    icon: UserRoundPlus,
+    group: "Academic",
+  },
 
   // Admin
   {
