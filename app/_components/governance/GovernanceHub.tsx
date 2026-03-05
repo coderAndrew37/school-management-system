@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import {
   Megaphone,
   CalendarDays,
@@ -8,7 +8,6 @@ import {
   Banknote,
   CalendarCheck,
 } from "lucide-react";
-// Make sure to run 'npm install tailwind-merge clsx'
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -29,8 +28,6 @@ import { CalendarPanel } from "./CalendarPanel";
 import { FeesPanel } from "./FeesPanel";
 import { InventoryPanel } from "./InventoryPanel";
 
-/** * Utility for merging tailwind classes cleanly
- */
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -48,8 +45,6 @@ export interface GovernanceHubProps {
   students: StudentSummary[];
   attendanceOverview: AttendanceOverview;
 }
-
-// ── Tab config ────────────────────────────────────────────────────────────────
 
 const TABS: {
   id: Tab;
@@ -109,13 +104,41 @@ const INACTIVE =
 
 export function GovernanceHub(props: GovernanceHubProps) {
   const [activeTab, setActiveTab] = useState<Tab>("announcements");
+  const tabListRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Keyboard navigation for accessibility (Left/Right arrows)
+   */
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const currentIndex = TABS.findIndex((t) => t.id === activeTab);
+    if (e.key === "ArrowRight") {
+      const nextIndex = (currentIndex + 1) % TABS.length;
+      setActiveTab(TABS[nextIndex].id);
+      (
+        e.currentTarget.querySelectorAll('[role="tab"]')[
+          nextIndex
+        ] as HTMLElement
+      ).focus();
+    } else if (e.key === "ArrowLeft") {
+      const prevIndex = (currentIndex - 1 + TABS.length) % TABS.length;
+      setActiveTab(TABS[prevIndex].id);
+      (
+        e.currentTarget.querySelectorAll('[role="tab"]')[
+          prevIndex
+        ] as HTMLElement
+      ).focus();
+    }
+  };
 
   return (
     <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] overflow-hidden">
       {/* Tab bar */}
       <div
+        ref={tabListRef}
         role="tablist"
-        className="flex items-stretch border-b border-white/[0.07] overflow-x-auto"
+        aria-label="School governance sections"
+        onKeyDown={handleKeyDown}
+        className="flex items-stretch border-b border-white/[0.07] overflow-x-auto scrollbar-hide"
         style={{ scrollbarWidth: "none" }}
       >
         {TABS.map((tab) => {
@@ -123,7 +146,7 @@ export function GovernanceHub(props: GovernanceHubProps) {
           const count = tab.countFn(props);
           const hasAlert = tab.alertFn?.(props) ?? false;
 
-          // Move logic here to satisfy strict ARIA linters
+          // Satisfy strict ARIA linters by using explicit string "true" | "false"
           const isSelected = isActive ? "true" : "false";
 
           return (
@@ -131,8 +154,8 @@ export function GovernanceHub(props: GovernanceHubProps) {
               key={tab.id}
               id={`tab-${tab.id}`}
               role="tab"
-              aria-selected={isSelected}
               aria-controls={`panel-${tab.id}`}
+              tabIndex={isActive ? 0 : -1} // Only active tab is focusable via Tab key
               onClick={() => setActiveTab(tab.id)}
               className={cn(
                 "relative flex items-center gap-2 px-5 py-4 text-sm font-semibold transition-colors",

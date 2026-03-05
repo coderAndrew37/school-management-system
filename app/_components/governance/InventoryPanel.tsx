@@ -28,7 +28,6 @@ import type {
   InventoryItem,
   InventoryCategory,
   ItemCondition,
-  TransactionType,
 } from "@/lib/types/governance";
 
 /** Utility for merging tailwind classes */
@@ -53,15 +52,24 @@ const itemSchema = z.object({
     "other",
   ]),
   unit: z.string().min(1, "Unit required").max(50),
-  quantity: z.coerce.number().int().min(0),
-  minimum_stock: z.coerce.number().int().min(0),
+  quantity: z.preprocess(
+    (val) => (val === "" ? 0 : val),
+    z.coerce.number().int().min(0),
+  ),
+  minimum_stock: z.preprocess(
+    (val) => (val === "" ? 0 : val),
+    z.coerce.number().int().min(0),
+  ),
   condition: z.enum(["new", "good", "fair", "poor", "condemned"]),
   sku: z
     .string()
     .max(100)
     .optional()
     .transform((v) => v || ""),
-  unit_cost: z.coerce.number().min(0).optional(),
+  unit_cost: z.preprocess(
+    (val) => (val === "" ? undefined : val),
+    z.coerce.number().min(0).optional(),
+  ),
   location: z
     .string()
     .max(200)
@@ -79,6 +87,7 @@ const itemSchema = z.object({
     .transform((v) => v || ""),
 });
 
+// Use z.infer (output type) so SubmitHandler gets the post-transform types
 type ItemValues = z.infer<typeof itemSchema>;
 
 const txSchema = z.object({
@@ -90,7 +99,10 @@ const txSchema = z.object({
     "disposed",
     "audited",
   ]),
-  quantity: z.coerce.number().int().min(1, "Quantity must be at least 1"),
+  quantity: z.preprocess(
+    (val) => (val === "" ? 1 : val),
+    z.coerce.number().int().min(1, "Quantity must be at least 1"),
+  ),
   notes: z
     .string()
     .max(500)
@@ -103,6 +115,7 @@ const txSchema = z.object({
     .transform((v) => v || ""),
 });
 
+// Use z.infer (output type) so SubmitHandler gets the post-transform types
 type TxValues = z.infer<typeof txSchema>;
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -157,11 +170,11 @@ export function InventoryPanel({ items }: Props) {
   const [catFilter, setCatFilter] = useState<InventoryCategory | "all">("all");
   const [isPending, startTransition] = useTransition();
 
-  // Memoized derived state
   const lowStock = useMemo(
     () => items.filter((i) => i.quantity <= i.minimum_stock),
     [items],
   );
+
   const filtered = useMemo(() => {
     return items.filter((i) => {
       const q = search.toLowerCase();
@@ -175,7 +188,8 @@ export function InventoryPanel({ items }: Props) {
 
   // Form Hooks
   const itemForm = useForm<ItemValues>({
-    resolver: zodResolver(itemSchema),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(itemSchema) as any,
     defaultValues: {
       category: "other",
       unit: "piece",
@@ -186,13 +200,16 @@ export function InventoryPanel({ items }: Props) {
       location: "",
       supplier: "",
       description: "",
+      unit_cost: undefined,
     },
   });
 
   const txForm = useForm<TxValues>({
-    resolver: zodResolver(txSchema),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(txSchema) as any,
     defaultValues: {
       tx_type: "received",
+      quantity: 1,
       notes: "",
       reference: "",
     },
@@ -318,6 +335,7 @@ export function InventoryPanel({ items }: Props) {
           >
             <div className="sm:col-span-2">
               <input
+                aria-label="Item name"
                 placeholder="Item name *"
                 className={fieldBase}
                 {...itemForm.register("name")}
@@ -330,6 +348,7 @@ export function InventoryPanel({ items }: Props) {
             </div>
             <div className="relative">
               <select
+                aria-label="Item category"
                 className={cn(fieldBase, "appearance-none")}
                 {...itemForm.register("category")}
               >
@@ -342,17 +361,20 @@ export function InventoryPanel({ items }: Props) {
               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30" />
             </div>
             <input
+              aria-label="SKU"
               placeholder="SKU (optional)"
               className={fieldBase}
               {...itemForm.register("sku")}
             />
             <input
+              aria-label="Unit"
               placeholder="Unit (e.g. piece, box)"
               className={fieldBase}
               {...itemForm.register("unit")}
             />
             <div>
               <input
+                aria-label="Opening quantity"
                 type="number"
                 placeholder="Opening quantity"
                 className={fieldBase}
@@ -365,12 +387,14 @@ export function InventoryPanel({ items }: Props) {
               )}
             </div>
             <input
+              aria-label="Minimum stock level"
               type="number"
               placeholder="Min stock level"
               className={fieldBase}
               {...itemForm.register("minimum_stock")}
             />
             <input
+              aria-label="Unit cost in KES"
               type="number"
               step="0.01"
               placeholder="Unit cost (KES)"
@@ -378,12 +402,14 @@ export function InventoryPanel({ items }: Props) {
               {...itemForm.register("unit_cost")}
             />
             <input
+              aria-label="Storage location"
               placeholder="Location"
               className={fieldBase}
               {...itemForm.register("location")}
             />
             <div className="relative">
               <select
+                aria-label="Item condition"
                 className={cn(fieldBase, "appearance-none")}
                 {...itemForm.register("condition")}
               >
@@ -396,12 +422,14 @@ export function InventoryPanel({ items }: Props) {
               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30" />
             </div>
             <input
+              aria-label="Supplier name"
               placeholder="Supplier (optional)"
               className={fieldBase}
               {...itemForm.register("supplier")}
             />
             <div className="sm:col-span-2 lg:col-span-3">
               <input
+                aria-label="Item description"
                 placeholder="Description (optional)"
                 className={fieldBase}
                 {...itemForm.register("description")}
@@ -516,6 +544,7 @@ export function InventoryPanel({ items }: Props) {
                     </td>
                     <td className="px-4 py-3">
                       <button
+                        aria-label={`Record stock movement for ${item.name}`}
                         onClick={() => setTxTarget(item)}
                         className="opacity-0 group-hover:opacity-100 flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 hover:bg-amber-400/10 text-white/40 hover:text-amber-400 text-xs font-medium transition-all"
                       >
@@ -533,6 +562,9 @@ export function InventoryPanel({ items }: Props) {
       {/* Transaction Modal */}
       {txTarget && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Stock movement for ${txTarget.name}`}
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
           onClick={(e) => e.target === e.currentTarget && setTxTarget(null)}
         >
@@ -540,6 +572,7 @@ export function InventoryPanel({ items }: Props) {
             <div className="flex items-center justify-between mb-1">
               <p className="font-bold text-white">Stock Movement</p>
               <button
+                aria-label="Close stock movement dialog"
                 onClick={() => {
                   setTxTarget(null);
                   txForm.reset();
@@ -563,11 +596,16 @@ export function InventoryPanel({ items }: Props) {
               className="space-y-4"
             >
               <div>
-                <label className="text-[10px] uppercase tracking-widest text-white/35 block mb-1">
+                <label
+                  htmlFor="tx_type"
+                  className="text-[10px] uppercase tracking-widest text-white/35 block mb-1"
+                >
                   Movement type *
                 </label>
                 <div className="relative">
                   <select
+                    id="tx_type"
+                    aria-label="Movement type"
                     className={cn(fieldBase, "appearance-none")}
                     {...txForm.register("tx_type")}
                   >
@@ -582,10 +620,15 @@ export function InventoryPanel({ items }: Props) {
                 </div>
               </div>
               <div>
-                <label className="text-[10px] uppercase tracking-widest text-white/35 block mb-1">
+                <label
+                  htmlFor="tx_quantity"
+                  className="text-[10px] uppercase tracking-widest text-white/35 block mb-1"
+                >
                   Quantity *
                 </label>
                 <input
+                  id="tx_quantity"
+                  aria-label="Transaction quantity"
                   type="number"
                   placeholder="0"
                   className={fieldBase}
@@ -598,11 +641,13 @@ export function InventoryPanel({ items }: Props) {
                 )}
               </div>
               <input
+                aria-label="Reference or LPO number"
                 placeholder="Reference / LPO"
                 className={fieldBase}
                 {...txForm.register("reference")}
               />
               <input
+                aria-label="Optional notes"
                 placeholder="Optional notes"
                 className={fieldBase}
                 {...txForm.register("notes")}

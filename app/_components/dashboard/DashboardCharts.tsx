@@ -13,7 +13,6 @@ import {
   AreaChart,
   Area,
   CartesianGrid,
-  Legend,
 } from "recharts";
 import type {
   GradeEnrollmentBar,
@@ -21,18 +20,62 @@ import type {
   RecentAdmission,
 } from "@/lib/data/dashboard";
 
-// ── Shared tooltip style ──────────────────────────────────────────────────────
+// ── Custom Tooltip Component ─────────────────────────────────────────────────
 
-const tooltipStyle = {
-  contentStyle: {
-    background: "#141824",
-    border: "1px solid rgba(255,255,255,0.08)",
-    borderRadius: "12px",
-    fontSize: "11px",
-    color: "#fff",
-    fontFamily: "var(--font-body)",
-  },
-  cursor: { fill: "rgba(255,255,255,0.03)" },
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: any[];
+  label?: string | number;
+  prefix?: string;
+  suffix?: string;
+  showLabel?: boolean;
+  labelMap?: Record<string, string>;
+}
+
+const CustomTooltip = ({
+  active,
+  payload,
+  label,
+  prefix = "",
+  suffix = "",
+  showLabel = true,
+  labelMap,
+}: CustomTooltipProps) => {
+  if (active && payload && payload.length) {
+    const displayLabel = labelMap && label ? labelMap[label] : label;
+
+    return (
+      <div className="bg-[#141824] border border-white/10 p-3 rounded-xl shadow-2xl backdrop-blur-md">
+        {showLabel && displayLabel && (
+          <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-2">
+            {displayLabel}
+          </p>
+        )}
+        <div className="space-y-1.5">
+          {payload.map((entry, index) => (
+            <div key={index} className="flex items-center gap-2">
+              <div
+                className="w-1.5 h-1.5 rounded-full"
+                style={{
+                  backgroundColor:
+                    entry.color || entry.payload.fill || "#fbbf24",
+                }}
+              />
+              <span className="text-xs text-white/70 font-medium">
+                {entry.name}:
+              </span>
+              <span className="text-xs text-white font-bold tabular-nums">
+                {prefix}
+                {entry.value}
+                {suffix}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return null;
 };
 
 // ── 1. Grade Enrollment Bar Chart ─────────────────────────────────────────────
@@ -50,7 +93,6 @@ interface EnrollmentChartProps {
 export function EnrollmentChart({ data }: EnrollmentChartProps) {
   if (data.length === 0) return <EmptyChart label="No enrollment data yet" />;
 
-  // Shorten grade labels for chart
   const chartData = data.map((d) => ({
     ...d,
     label: d.grade
@@ -62,7 +104,8 @@ export function EnrollmentChart({ data }: EnrollmentChartProps) {
       .replace("PP2", "PP2"),
   }));
 
-  // Derive bar colour from level
+  const labelMap = Object.fromEntries(chartData.map((d) => [d.label, d.grade]));
+
   function maleColor(level: string) {
     return LEVEL_COLORS[level]?.male ?? "#f59e0b";
   }
@@ -96,14 +139,9 @@ export function EnrollmentChart({ data }: EnrollmentChartProps) {
           allowDecimals={false}
         />
         <Tooltip
-          {...tooltipStyle}
-          formatter={(value: number, name: string) => [value, name]}
-          labelFormatter={(label) => {
-            const item = chartData.find((d) => d.label === label);
-            return item?.grade ?? label;
-          }}
+          content={<CustomTooltip labelMap={labelMap} />}
+          cursor={{ fill: "rgba(255,255,255,0.03)" }}
         />
-        {/* Render bars with per-entry colour by level */}
         <Bar dataKey="male" name="Male" radius={[3, 3, 0, 0]}>
           {chartData.map((entry, i) => (
             <Cell
@@ -156,16 +194,16 @@ export function ScoreDonut({ data }: ScoreDonutProps) {
             ))}
           </Pie>
           <Tooltip
-            contentStyle={tooltipStyle.contentStyle}
-            formatter={(value: number, _: string, props: any) => [
-              `${value} · ${props.payload.percent}%`,
-              props.payload.score,
-            ]}
+            content={
+              <CustomTooltip
+                showLabel={false}
+                suffix={` (${data[0]?.percent ?? 0}%)`}
+              />
+            }
           />
         </PieChart>
       </ResponsiveContainer>
 
-      {/* Legend */}
       <div className="flex flex-col gap-2.5 flex-1 min-w-0">
         {data.map((d) => (
           <div
@@ -241,9 +279,9 @@ export function GenderDonut({ male, female, unknown }: GenderDonutProps) {
                 <Cell key={entry.name} fill={entry.color} />
               ))}
             </Pie>
+            <Tooltip content={<CustomTooltip showLabel={false} />} />
           </PieChart>
         </ResponsiveContainer>
-        {/* Centre label */}
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
           <p className="text-lg font-black text-white tabular-nums">{total}</p>
           <p className="text-[8px] uppercase tracking-wider text-white/30">
@@ -328,12 +366,13 @@ export function AdmissionsTrend({ data }: AdmissionsTrendProps) {
           width={28}
         />
         <Tooltip
-          contentStyle={tooltipStyle.contentStyle}
-          formatter={(value: number) => [value, "New admissions"]}
+          content={<CustomTooltip suffix=" Admissions" />}
+          cursor={{ stroke: "rgba(245, 158, 11, 0.2)", strokeWidth: 2 }}
         />
         <Area
           type="monotone"
           dataKey="count"
+          name="Admissions"
           stroke="#f59e0b"
           strokeWidth={2}
           fill="url(#admissionsGrad)"

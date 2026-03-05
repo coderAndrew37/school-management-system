@@ -27,7 +27,6 @@ import type {
   FeeStructure,
   PaymentStatus,
   StudentSummary,
-  PaymentMethod,
 } from "@/lib/types/governance";
 import { ALL_GRADES } from "@/lib/types/allocation";
 import { clsx, type ClassValue } from "clsx";
@@ -96,6 +95,7 @@ const paySchema = z.object({
     .optional()
     .transform((v) => v || ""),
 });
+
 type PayValues = z.infer<typeof paySchema>;
 
 const fsSchema = z.object({
@@ -112,6 +112,7 @@ const fsSchema = z.object({
     .optional()
     .transform((v) => v || ""),
 });
+
 type FsValues = z.infer<typeof fsSchema>;
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -135,8 +136,10 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
 
   // Payment form
   const payForm = useForm<PayValues>({
-    resolver: zodResolver(paySchema),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(paySchema) as any,
     defaultValues: {
+      student_id: "",
       term: 1,
       payment_method: "mpesa",
       amount_due: 0,
@@ -148,7 +151,8 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
 
   // Fee structure form
   const fsForm = useForm<FsValues>({
-    resolver: zodResolver(fsSchema),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(fsSchema) as any,
     defaultValues: {
       grade: ALL_GRADES[0],
       term: 1,
@@ -266,6 +270,11 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
       <div className="flex items-center gap-1 w-fit rounded-xl border border-white/[0.07] bg-white/[0.02] p-1">
         {(["ledger", "structures"] as const).map((t) => (
           <button
+            aria-label={
+              t === "ledger"
+                ? "Switch to Payment Ledger"
+                : "Switch to Fee Structures"
+            }
             key={t}
             onClick={() => setSubTab(t)}
             className={cn(
@@ -287,6 +296,7 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
             <div className="relative flex-1 min-w-[160px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/25 pointer-events-none" />
               <input
+                aria-label="Search students"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search student…"
@@ -295,6 +305,7 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
             </div>
             <div className="relative">
               <select
+                aria-label="Filter by term"
                 value={String(termFilter)}
                 onChange={(e) =>
                   setTermFilter(
@@ -315,6 +326,7 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
             </div>
             <div className="relative">
               <select
+                aria-label="Filter by payment status"
                 value={statusFilter}
                 onChange={(e) =>
                   setStatusFilter(e.target.value as PaymentStatus | "all")
@@ -342,6 +354,9 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
               <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30" />
             </div>
             <button
+              aria-label={
+                showPayForm ? "Cancel recording payment" : "Record new payment"
+              }
               onClick={() => setShowPayForm((v) => !v)}
               className="flex items-center gap-2 rounded-xl bg-amber-400 hover:bg-amber-300 active:scale-95 px-4 py-2.5 text-xs font-bold text-[#0c0f1a] transition-all flex-shrink-0"
             >
@@ -372,11 +387,16 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
                 className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
               >
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest text-white/35 block mb-1">
+                  <label
+                    htmlFor="pay_student_id"
+                    className="text-[10px] uppercase tracking-widest text-white/35 block mb-1"
+                  >
                     Student *
                   </label>
                   <div className="relative">
                     <select
+                      id="pay_student_id"
+                      aria-label="Select student"
                       className={cn(fieldBase, "appearance-none")}
                       {...payForm.register("student_id")}
                     >
@@ -396,11 +416,16 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
                   )}
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest text-white/35 block mb-1">
+                  <label
+                    htmlFor="pay_term"
+                    className="text-[10px] uppercase tracking-widest text-white/35 block mb-1"
+                  >
                     Term *
                   </label>
                   <div className="relative">
                     <select
+                      id="pay_term"
+                      aria-label="Select term"
                       className={cn(fieldBase, "appearance-none")}
                       {...payForm.register("term")}
                     >
@@ -412,10 +437,15 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest text-white/35 block mb-1">
+                  <label
+                    htmlFor="pay_amount_due"
+                    className="text-[10px] uppercase tracking-widest text-white/35 block mb-1"
+                  >
                     Amount Due (KES) *
                   </label>
                   <input
+                    id="pay_amount_due"
+                    aria-label="Amount due in KES"
                     type="number"
                     step="0.01"
                     className={fieldBase}
@@ -428,10 +458,15 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
                   )}
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest text-white/35 block mb-1">
+                  <label
+                    htmlFor="pay_amount_paid"
+                    className="text-[10px] uppercase tracking-widest text-white/35 block mb-1"
+                  >
                     Amount Paid (KES) *
                   </label>
                   <input
+                    id="pay_amount_paid"
+                    aria-label="Amount paid in KES"
                     type="number"
                     step="0.01"
                     className={fieldBase}
@@ -439,11 +474,16 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest text-white/35 block mb-1">
+                  <label
+                    htmlFor="pay_payment_method"
+                    className="text-[10px] uppercase tracking-widest text-white/35 block mb-1"
+                  >
                     Payment method
                   </label>
                   <div className="relative">
                     <select
+                      id="pay_payment_method"
+                      aria-label="Select payment method"
                       className={cn(fieldBase, "appearance-none")}
                       {...payForm.register("payment_method")}
                     >
@@ -457,20 +497,30 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest text-white/35 block mb-1">
+                  <label
+                    htmlFor="pay_mpesa_code"
+                    className="text-[10px] uppercase tracking-widest text-white/35 block mb-1"
+                  >
                     M-Pesa Code
                   </label>
                   <input
+                    id="pay_mpesa_code"
+                    aria-label="M-Pesa transaction code"
                     placeholder="Code"
                     className={cn(fieldBase, "font-mono")}
                     {...payForm.register("mpesa_code")}
                   />
                 </div>
                 <div className="sm:col-span-2 lg:col-span-3">
-                  <label className="text-[10px] uppercase tracking-widest text-white/35 block mb-1">
+                  <label
+                    htmlFor="pay_notes"
+                    className="text-[10px] uppercase tracking-widest text-white/35 block mb-1"
+                  >
                     Notes
                   </label>
                   <input
+                    id="pay_notes"
+                    aria-label="Payment notes"
                     placeholder="Optional notes"
                     className={fieldBase}
                     {...payForm.register("notes")}
@@ -595,6 +645,11 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
               {feeStructures.length !== 1 ? "s" : ""}
             </p>
             <button
+              aria-label={
+                showFsForm
+                  ? "Cancel fee structure"
+                  : "Add or update fee structure"
+              }
               onClick={() => setShowFsForm((v) => !v)}
               className="flex items-center gap-2 rounded-xl bg-amber-400 hover:bg-amber-300 active:scale-95 px-4 py-2 text-xs font-bold text-[#0c0f1a] transition-all"
             >
@@ -624,11 +679,16 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
                 className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
               >
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest text-white/35 block mb-1">
+                  <label
+                    htmlFor="fs_grade"
+                    className="text-[10px] uppercase tracking-widest text-white/35 block mb-1"
+                  >
                     Grade *
                   </label>
                   <div className="relative">
                     <select
+                      id="fs_grade"
+                      aria-label="Select grade"
                       className={cn(fieldBase, "appearance-none")}
                       {...fsForm.register("grade")}
                     >
@@ -642,11 +702,16 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest text-white/35 block mb-1">
+                  <label
+                    htmlFor="fs_term"
+                    className="text-[10px] uppercase tracking-widest text-white/35 block mb-1"
+                  >
                     Term *
                   </label>
                   <div className="relative">
                     <select
+                      id="fs_term"
+                      aria-label="Select term"
                       className={cn(fieldBase, "appearance-none")}
                       {...fsForm.register("term")}
                     >
@@ -660,29 +725,51 @@ export function FeesPanel({ feeStructures, payments, students }: Props) {
                   </div>
                 </div>
                 {[
-                  { name: "tuition_fee", label: "Tuition (KES) *" },
-                  { name: "activity_fee", label: "Activity Fee" },
-                  { name: "lunch_fee", label: "Lunch Fee" },
-                  { name: "transport_fee", label: "Transport Fee" },
-                  { name: "other_fee", label: "Other Fee" },
+                  {
+                    name: "tuition_fee",
+                    label: "Tuition (KES) *",
+                    id: "fs_tuition_fee",
+                  },
+                  {
+                    name: "activity_fee",
+                    label: "Activity Fee",
+                    id: "fs_activity_fee",
+                  },
+                  { name: "lunch_fee", label: "Lunch Fee", id: "fs_lunch_fee" },
+                  {
+                    name: "transport_fee",
+                    label: "Transport Fee",
+                    id: "fs_transport_fee",
+                  },
+                  { name: "other_fee", label: "Other Fee", id: "fs_other_fee" },
                 ].map((f) => (
                   <div key={f.name}>
-                    <label className="text-[10px] uppercase tracking-widest text-white/35 block mb-1">
+                    <label
+                      htmlFor={f.id}
+                      className="text-[10px] uppercase tracking-widest text-white/35 block mb-1"
+                    >
                       {f.label}
                     </label>
                     <input
+                      id={f.id}
+                      aria-label={f.label}
                       type="number"
                       step="0.01"
                       className={fieldBase}
-                      {...fsForm.register(f.name as any)}
+                      {...fsForm.register(f.name as keyof FsValues)}
                     />
                   </div>
                 ))}
                 <div className="sm:col-span-2">
-                  <label className="text-[10px] uppercase tracking-widest text-white/35 block mb-1">
+                  <label
+                    htmlFor="fs_notes"
+                    className="text-[10px] uppercase tracking-widest text-white/35 block mb-1"
+                  >
                     Notes
                   </label>
                   <input
+                    id="fs_notes"
+                    aria-label="Fee structure notes"
                     placeholder="Optional notes"
                     className={fieldBase}
                     {...fsForm.register("notes")}

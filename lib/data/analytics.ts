@@ -78,6 +78,18 @@ export interface AnalyticsOverview {
   gradeEnrollment: { grade: string; count: number; level: string }[];
 }
 
+// ── Internal bucket type — separates numeric score counts from the student Set
+
+type CbcScoreKey = "EE" | "ME" | "AE" | "BE";
+
+interface GradeScoreBucket {
+  EE: number;
+  ME: number;
+  AE: number;
+  BE: number;
+  students: Set<string>;
+}
+
 // ── Main analytics fetch ──────────────────────────────────────────────────────
 
 export async function fetchAnalyticsOverview(
@@ -134,30 +146,28 @@ export async function fetchAnalyticsOverview(
   }
 
   // Per-student score counts
-  const studentScores: Record<string, Record<string, number>> = {};
+  const studentScores: Record<string, Record<CbcScoreKey, number>> = {};
   for (const a of assessments) {
     if (!studentScores[a.student_id])
       studentScores[a.student_id] = { EE: 0, ME: 0, AE: 0, BE: 0 };
-    studentScores[a.student_id]![a.score] =
-      (studentScores[a.student_id]![a.score] ?? 0) + 1;
+    const sc = studentScores[a.student_id]!;
+    sc[a.score as CbcScoreKey] = (sc[a.score as CbcScoreKey] ?? 0) + 1;
   }
 
   // Per-grade score counts
-  const gradeScores: Record<
-    string,
-    Record<string, number> & { students: Set<string> }
-  > = {};
+  const gradeScores: Record<string, GradeScoreBucket> = {};
   for (const a of assessments) {
     const grade = studentMap[a.student_id]?.grade;
     if (!grade) continue;
     if (!gradeScores[grade])
       gradeScores[grade] = { EE: 0, ME: 0, AE: 0, BE: 0, students: new Set() };
-    gradeScores[grade]![a.score] = (gradeScores[grade]![a.score] ?? 0) + 1;
-    gradeScores[grade]!.students.add(a.student_id);
+    const bucket = gradeScores[grade]!;
+    bucket[a.score as CbcScoreKey] = (bucket[a.score as CbcScoreKey] ?? 0) + 1;
+    bucket.students.add(a.student_id);
   }
 
   // Per-subject score counts
-  const subjectGradeScores: Record<string, Record<string, number>> = {};
+  const subjectGradeScores: Record<string, Record<CbcScoreKey, number>> = {};
   const subjectGradeCount: Record<string, string> = {}; // key → grade
   for (const a of assessments) {
     const grade = studentMap[a.student_id]?.grade;
@@ -167,8 +177,8 @@ export async function fetchAnalyticsOverview(
       subjectGradeScores[key] = { EE: 0, ME: 0, AE: 0, BE: 0 };
       subjectGradeCount[key] = grade;
     }
-    subjectGradeScores[key]![a.score] =
-      (subjectGradeScores[key]![a.score] ?? 0) + 1;
+    const sc = subjectGradeScores[key]!;
+    sc[a.score as CbcScoreKey] = (sc[a.score as CbcScoreKey] ?? 0) + 1;
   }
 
   // 4. Build grade enrollment
@@ -291,10 +301,10 @@ export async function fetchAnalyticsOverview(
     .sort((a, b) => b.weightedMean - a.weightedMean);
 
   // 9. Overall score distribution
-  const distAgg = { EE: 0, ME: 0, AE: 0, BE: 0 };
+  const distAgg: Record<CbcScoreKey, number> = { EE: 0, ME: 0, AE: 0, BE: 0 };
   for (const a of assessments) {
-    distAgg[a.score as keyof typeof distAgg] =
-      (distAgg[a.score as keyof typeof distAgg] ?? 0) + 1;
+    distAgg[a.score as CbcScoreKey] =
+      (distAgg[a.score as CbcScoreKey] ?? 0) + 1;
   }
   const distTotal = distAgg.EE + distAgg.ME + distAgg.AE + distAgg.BE;
   const scoreDistribution = (["EE", "ME", "AE", "BE"] as const).map((s) => ({
@@ -365,12 +375,12 @@ export async function fetchGradeAnalytics(
   ).filter((a) => studentIds.has(a.student_id));
 
   // Subject breakdown
-  const subjectScores: Record<string, Record<string, number>> = {};
+  const subjectScores: Record<string, Record<CbcScoreKey, number>> = {};
   for (const a of assessments) {
     if (!subjectScores[a.subject_name])
       subjectScores[a.subject_name] = { EE: 0, ME: 0, AE: 0, BE: 0 };
-    subjectScores[a.subject_name]![a.score] =
-      (subjectScores[a.subject_name]![a.score] ?? 0) + 1;
+    const sc = subjectScores[a.subject_name]!;
+    sc[a.score as CbcScoreKey] = (sc[a.score as CbcScoreKey] ?? 0) + 1;
   }
   const subjects: SubjectSnapshot[] = Object.entries(subjectScores)
     .map(([subjectName, sc]) => {
@@ -401,12 +411,12 @@ export async function fetchGradeAnalytics(
     .sort((a, b) => b.weightedMean - a.weightedMean);
 
   // Student breakdown
-  const studentScores: Record<string, Record<string, number>> = {};
+  const studentScores: Record<string, Record<CbcScoreKey, number>> = {};
   for (const a of assessments) {
     if (!studentScores[a.student_id])
       studentScores[a.student_id] = { EE: 0, ME: 0, AE: 0, BE: 0 };
-    studentScores[a.student_id]![a.score] =
-      (studentScores[a.student_id]![a.score] ?? 0) + 1;
+    const sc = studentScores[a.student_id]!;
+    sc[a.score as CbcScoreKey] = (sc[a.score as CbcScoreKey] ?? 0) + 1;
   }
   const studentSummaries: StudentPerformanceSummary[] = students
     .map((s) => {
@@ -443,10 +453,10 @@ export async function fetchGradeAnalytics(
     .sort((a, b) => b.weightedMean - a.weightedMean);
 
   // Overall distribution
-  const distAgg = { EE: 0, ME: 0, AE: 0, BE: 0 };
+  const distAgg: Record<CbcScoreKey, number> = { EE: 0, ME: 0, AE: 0, BE: 0 };
   for (const a of assessments)
-    distAgg[a.score as keyof typeof distAgg] =
-      (distAgg[a.score as keyof typeof distAgg] ?? 0) + 1;
+    distAgg[a.score as CbcScoreKey] =
+      (distAgg[a.score as CbcScoreKey] ?? 0) + 1;
   const distTotal = distAgg.EE + distAgg.ME + distAgg.AE + distAgg.BE;
   const scoreDistribution = (["EE", "ME", "AE", "BE"] as const).map((s) => ({
     score: s,

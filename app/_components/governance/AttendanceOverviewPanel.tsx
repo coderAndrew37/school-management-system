@@ -10,7 +10,7 @@ import {
   Clock,
   TrendingUp,
   UserCheck,
-  UserX
+  UserX,
 } from "lucide-react";
 import { useState, useTransition } from "react";
 import {
@@ -40,17 +40,6 @@ const STATUS_COLORS = {
   excused: { text: "text-sky-400", bg: "bg-sky-400", bar: "#38bdf8" },
 };
 
-const tooltipStyle = {
-  contentStyle: {
-    background: "#141824",
-    border: "1px solid rgba(255,255,255,0.08)",
-    borderRadius: "12px",
-    fontSize: "11px",
-    color: "#fff",
-    fontFamily: "var(--font-body)",
-  },
-};
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
@@ -77,7 +66,6 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
     presentRate,
   } = data;
 
-  // Rate colour
   const rateColor =
     presentRate >= 90
       ? "text-emerald-400"
@@ -85,7 +73,6 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
         ? "text-amber-400"
         : "text-rose-400";
 
-  // Trend chart data — format date as "Mon 12"
   const trendData = data.recentDays.map((d) => {
     const dt = new Date(d.date + "T00:00:00");
     return {
@@ -101,7 +88,6 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* ── Toolbar: date picker ────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <p className="text-sm text-white/40">
@@ -129,9 +115,7 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
         </div>
       </div>
 
-      {/* ── Summary cards ───────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {/* Attendance rate — hero card */}
         <div className="sm:col-span-1 rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-4 flex flex-col items-center justify-center text-center">
           <TrendingUp className={`h-5 w-5 mb-1 ${rateColor}`} />
           <p className={`text-3xl font-black tabular-nums ${rateColor}`}>
@@ -168,7 +152,6 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
         />
       </div>
 
-      {/* ── Distribution bar ────────────────────────────────────────────────── */}
       {totalMarked > 0 && (
         <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
           <p className="text-[10px] uppercase tracking-widest text-white/30 mb-3">
@@ -218,9 +201,7 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
         </div>
       )}
 
-      {/* ── Two-column layout: grade table + trend chart ────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
-        {/* Grade breakdown table */}
         <div className="lg:col-span-3">
           <p className="text-[10px] uppercase tracking-widest text-white/30 mb-3">
             By Grade
@@ -270,7 +251,6 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
           )}
         </div>
 
-        {/* 14-day trend */}
         <div className="lg:col-span-2">
           <p className="text-[10px] uppercase tracking-widest text-white/30 mb-3">
             Attendance Rate — last 14 days
@@ -319,12 +299,10 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
                     width={28}
                     tickFormatter={(v) => `${v}%`}
                   />
+                  {/* USING CUSTOM TOOLTIP COMPONENT HERE */}
                   <Tooltip
-                    contentStyle={tooltipStyle.contentStyle}
-                    formatter={(v: number, _: string, props: any) => [
-                      `${v}% (${props.payload.marked} marked)`,
-                      "Rate",
-                    ]}
+                    content={<CustomTooltip />}
+                    cursor={{ stroke: "rgba(255,255,255,0.1)", strokeWidth: 1 }}
                   />
                   <Area
                     type="monotone"
@@ -369,7 +347,6 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
         </div>
       </div>
 
-      {/* ── No data state ───────────────────────────────────────────────────── */}
       {totalMarked === 0 && (
         <div className="rounded-2xl border border-dashed border-white/[0.08] py-14 text-center">
           <p className="text-3xl mb-3">📋</p>
@@ -387,6 +364,34 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
+
+function CustomTooltip({ active, payload, label }: any) {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="rounded-xl border border-white/10 bg-[#141824] p-3 shadow-2xl backdrop-blur-md">
+        <p className="text-[10px] uppercase tracking-widest text-white/40 mb-2 font-mono">
+          {label}
+        </p>
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-xs text-white/60">Attendance Rate</span>
+            <span className="text-xs font-bold text-emerald-400">
+              {data.rate}%
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-xs text-white/60">Records Marked</span>
+            <span className="text-xs font-medium text-white">
+              {data.marked}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return null;
+}
 
 function SummaryCard({
   icon,
@@ -428,7 +433,6 @@ function GradeRow({
         : row.marked > 0
           ? "text-rose-400"
           : "text-white/25";
-
   return (
     <tr className="hover:bg-white/[0.02] transition-colors group">
       <td className="px-3 py-2.5 font-medium text-white text-xs">
@@ -441,10 +445,10 @@ function GradeRow({
       <td className="px-3 py-2.5 text-emerald-400 tabular-nums">
         {row.present || <span className="text-white/20">—</span>}
       </td>
-      <td className="px-3 py-2.5 text-amber-400  tabular-nums">
+      <td className="px-3 py-2.5 text-amber-400 tabular-nums">
         {row.late || <span className="text-white/20">—</span>}
       </td>
-      <td className="px-3 py-2.5 text-rose-400   tabular-nums">
+      <td className="px-3 py-2.5 text-rose-400 tabular-nums">
         {row.absent || <span className="text-white/20">—</span>}
       </td>
       <td className="px-3 py-2.5">
