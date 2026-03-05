@@ -1,23 +1,21 @@
-import { redirect } from "next/navigation";
-import Link from "next/link";
+import { getSession } from "@/lib/actions/auth";
 import {
   BarChart3,
-  LayoutDashboard,
   BookMarked,
-  Calendar,
-  FileText,
-  UserRoundPlus,
-  Mail,
-  GraduationCap,
   BookOpen,
-  Users,
   ClipboardList,
+  FileText,
+  GraduationCap,
+  LayoutDashboard,
+  Mail,
+  UserRoundPlus,
+  Users,
 } from "lucide-react";
-import { getSession } from "@/lib/actions/auth";
+import Link from "next/link";
+import { redirect } from "next/navigation";
 
-import { TopNav } from "@/app/_components/nav/TopNav";
-import { fetchAnalyticsOverview } from "@/lib/data/analytics";
 import { AnalyticsHub } from "@/app/_components/analytics/AnalyticsHub";
+import { fetchAnalyticsOverview } from "@/lib/data/analytics";
 
 export const metadata = {
   title: "Analytics | Kibali Academy Admin",
@@ -39,8 +37,6 @@ export default async function AnalyticsPage() {
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] font-[family-name:var(--font-body)]">
-      <TopNav profile={session.profile} email={session.user.email ?? ""} />
-
       {/* Ambient glows */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden -z-10">
         <div className="absolute top-10 left-1/3 w-[600px] h-[400px] rounded-full bg-violet-500/[0.03] blur-[140px]" />

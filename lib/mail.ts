@@ -8,16 +8,16 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 const SENDER_EMAIL =
   process.env.NODE_ENV === "production"
-    ? "admissions@kibali.sc.ke"
+    ? process.env.PROD_EMAIL || "contact.sleeksites-test.co.ke"
     : "onboarding@resend.dev";
 
 const SENDER_STAFF_EMAIL =
   process.env.NODE_ENV === "production"
-    ? "staff@kibali.sc.ke"
+    ? process.env.PROD_EMAIL || "contact.sleeksites-test.co.ke"
     : "onboarding@resend.dev";
 
 /** In dev we only send to this verified address to satisfy Resend's sandbox */
-const DEV_EMAIL = "omollondrw@gmail.com";
+const DEV_EMAIL = process.env.DEV_EMAIL || "omollondrw@gmail.com";
 
 function resolveRecipient(email: string): string {
   return process.env.NODE_ENV === "production" ? email : DEV_EMAIL;
