@@ -20,7 +20,6 @@ interface AdminSidebarProps {
 export function AdminSidebar({ links, isOpen, onClose }: AdminSidebarProps) {
   const pathname = usePathname();
 
-  // Group links by their group label
   const groups = links.reduce<Record<string, NavLink[]>>((acc, link) => {
     const key = link.group ?? "Other";
     if (!acc[key]) acc[key] = [];
@@ -44,20 +43,44 @@ export function AdminSidebar({ links, isOpen, onClose }: AdminSidebarProps) {
         />
       )}
 
-      {/* ── Sidebar panel ───────────────────────────────────────────────────── */}
-      <aside
-        className={[
-          // Layout
-          "fixed top-0 left-0 z-50 h-screen w-[240px] flex flex-col",
-          // Background & border
-          "bg-[#0a0d16] border-r border-white/[0.06]",
-          // Transition
-          "transition-transform duration-300 ease-in-out",
-          // Desktop: always visible; mobile: slide from left
-          isOpen ? "translate-x-0" : "-translate-x-full",
-          "lg:translate-x-0",
-        ].join(" ")}
-      >
+      {/*
+        ── Sidebar panel ─────────────────────────────────────────────────────────
+
+        WHY we use a <style> tag for the translate instead of conditional classes:
+
+        Tailwind's production build statically scans class strings. When classes
+        are built with ternary expressions or array.join(), the scanner sees the
+        raw source tokens — but "translate-x-0", "-translate-x-full", and
+        "lg:translate-x-0" are often purged because the scanner can't always
+        prove they're reachable. The result: sidebar is invisible in production
+        but works in dev (where all classes are included).
+
+        The fix: always apply both a base class and override via a scoped
+        <style> tag so the rule is never subject to purging.
+      */}
+      <aside className="sidebar-panel fixed top-0 left-0 z-50 h-screen w-[240px] flex flex-col bg-[#0a0d16] border-r border-white/[0.06] transition-transform duration-300 ease-in-out">
+        <style>{`
+          /* Mobile: off-screen by default */
+          .sidebar-panel {
+            transform: translateX(-100%);
+          }
+          /* Mobile: open state */
+          .sidebar-panel.sidebar-open {
+            transform: translateX(0);
+          }
+          /* Desktop: always visible */
+          @media (min-width: 1024px) {
+            .sidebar-panel {
+              transform: translateX(0) !important;
+            }
+          }
+        `}</style>
+
+        {/* Apply open class — this is a plain boolean, not a Tailwind purge risk */}
+        <style>
+          {isOpen ? ".sidebar-panel { transform: translateX(0); }" : ""}
+        </style>
+
         {/* ── Logo ────────────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-5 h-14 border-b border-white/[0.06] flex-shrink-0">
           <Link
@@ -78,7 +101,6 @@ export function AdminSidebar({ links, isOpen, onClose }: AdminSidebarProps) {
             </div>
           </Link>
 
-          {/* Mobile close button */}
           <button
             onClick={onClose}
             className="lg:hidden flex h-7 w-7 items-center justify-center rounded-lg text-white/30 hover:text-white hover:bg-white/5 transition-colors"
@@ -92,12 +114,10 @@ export function AdminSidebar({ links, isOpen, onClose }: AdminSidebarProps) {
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-5 no-scrollbar">
           {Object.entries(groups).map(([groupName, groupLinks]) => (
             <div key={groupName}>
-              {/* Group label */}
               <p className="px-3 mb-1.5 text-[9px] font-black uppercase tracking-[0.18em] text-white/20">
                 {groupName}
               </p>
 
-              {/* Links */}
               <div className="space-y-0.5">
                 {groupLinks.map((link) => {
                   const active = isActive(link.href);
@@ -108,27 +128,24 @@ export function AdminSidebar({ links, isOpen, onClose }: AdminSidebarProps) {
                       key={link.href}
                       href={link.href}
                       onClick={onClose}
-                      className={[
-                        "flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all duration-150",
+                      className={
                         active
-                          ? "bg-amber-400/12 border border-amber-400/20 text-amber-400"
-                          : "text-white/45 hover:text-white/80 hover:bg-white/[0.04] border border-transparent",
-                      ].join(" ")}
+                          ? "flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all duration-150 bg-amber-400/12 border border-amber-400/20 text-amber-400"
+                          : "flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all duration-150 text-white/45 hover:text-white/80 hover:bg-white/[0.04] border border-transparent"
+                      }
                     >
-                      {/* Active indicator dot */}
                       <div
-                        className={[
-                          "flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-lg transition-colors",
+                        className={
                           active
-                            ? "bg-amber-400/15 text-amber-400"
-                            : "text-white/30 group-hover:text-white/60",
-                        ].join(" ")}
+                            ? "flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-lg transition-colors bg-amber-400/15 text-amber-400"
+                            : "flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-lg transition-colors text-white/30"
+                        }
                       >
                         <Icon className="h-4 w-4" />
                       </div>
+
                       <span className="truncate">{link.name}</span>
 
-                      {/* Active left accent */}
                       {active && (
                         <div className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
                       )}

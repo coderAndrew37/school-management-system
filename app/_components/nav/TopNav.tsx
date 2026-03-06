@@ -16,6 +16,7 @@ const ROLE_LABELS: Record<string, string> = {
   parent: "Parent / Guardian",
 };
 
+// Full class strings — no string concatenation so Tailwind can scan them
 const ROLE_COLORS: Record<string, string> = {
   admin: "bg-amber-400/10 text-amber-400 border-amber-400/25",
   teacher: "bg-emerald-400/10 text-emerald-400 border-emerald-400/25",
@@ -49,7 +50,7 @@ export function TopNav({ profile, email, onMenuClick }: TopNavProps) {
   return (
     <nav className="sticky top-0 z-40 w-full h-14 border-b border-white/[0.06] bg-[#0c0f1a]/80 backdrop-blur-xl flex items-center">
       <div className="w-full px-4 sm:px-6 flex items-center justify-between gap-4">
-        {/* Left: hamburger (mobile sidebar) or standalone logo */}
+        {/* ── Left: hamburger (mobile) or standalone logo ───────────────────── */}
         <div className="flex items-center gap-3">
           {onMenuClick ? (
             <button
@@ -71,14 +72,16 @@ export function TopNav({ profile, email, onMenuClick }: TopNavProps) {
           )}
         </div>
 
-        {/* Right: role badge + avatar + logout */}
+        {/* ── Right: role badge + avatar + logout ───────────────────────────── */}
         <div className="flex items-center gap-3">
+          {/* Role badge — full class string per role so Tailwind never purges */}
           <span
             className={`hidden md:inline-flex items-center rounded-lg border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider ${roleColor}`}
           >
             {roleLabel}
           </span>
 
+          {/* Avatar + name */}
           <div className="flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-1.5">
             <div
               className={`flex h-7 w-7 items-center justify-center rounded-lg border text-xs font-bold flex-shrink-0 ${avatarColor}`}
@@ -95,6 +98,7 @@ export function TopNav({ profile, email, onMenuClick }: TopNavProps) {
             </div>
           </div>
 
+          {/* Sign out */}
           <form action={logoutAction}>
             <button
               type="submit"
