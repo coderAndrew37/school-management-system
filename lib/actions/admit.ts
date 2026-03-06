@@ -3,7 +3,6 @@
 import { sendWelcomeEmail } from "@/lib/mail";
 import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { AdmissionActionResult, admissionSchema } from "../schemas/admission";
 
 const supabaseAdmin = createClient(
@@ -23,11 +22,6 @@ export interface ParentSearchResult {
 
 // ── Parent Search ─────────────────────────────────────────────────────────────
 
-/**
- * SEARCH PARENTS ACTION
- * Debounced real-time search by name, email, or phone.
- * Returns up to 8 results including each parent's existing children.
- */
 export async function searchParentsAction(
   query: string,
 ): Promise<{ success: boolean; data: ParentSearchResult[]; message?: string }> {
@@ -41,15 +35,10 @@ export async function searchParentsAction(
     const { data, error } = await supabaseAdmin
       .from("parents")
       .select(
-        `
-        id,
-        full_name,
-        email,
-        phone_number,
+        `id, full_name, email, phone_number,
         student_parents (
           students ( id, full_name, current_grade )
-        )
-      `,
+        )`,
       )
       .or(`full_name.ilike.%${q}%,email.ilike.%${q}%,phone_number.ilike.%${q}%`)
       .order("full_name")
@@ -75,28 +64,34 @@ export async function searchParentsAction(
 
 // ── Admit Student ─────────────────────────────────────────────────────────────
 
-/**
- * ADMIT STUDENT ACTION
- *
- * Two flows:
- *   A) existingParentId is set → link student to existing parent, skip auth creation.
- *   B) existingParentId absent  → create new parent auth account, then link.
- *
- * Student is always inserted fresh, then linked via student_parents join table.
- */
 export async function admitStudentAction(
   formData: FormData,
 ): Promise<AdmissionActionResult> {
+  // Pull existingParentId before schema validation so we can conditionally
+  // relax the phone number check — an existing parent's phone is already
+  // stored and we don't re-validate it here.
+  const existingParentId =
+    (formData.get("existingParentId") as string | null) || null;
+
   const raw = {
     studentName: formData.get("studentName"),
     dateOfBirth: formData.get("dateOfBirth"),
     gender: formData.get("gender"),
     currentGrade: formData.get("currentGrade"),
-    parentPhone: formData.get("parentPhone"),
-    parentEmail: formData.get("parentEmail"),
-    parentName: formData.get("parentName"),
     relationshipType: formData.get("relationshipType") ?? "guardian",
-    existingParentId: formData.get("existingParentId") ?? null,
+    existingParentId,
+    // When linking an existing parent these three are irrelevant to us,
+    // but the schema requires them. We pass safe placeholder values so
+    // validation passes, then never use them in Flow A below.
+    parentName: existingParentId
+      ? (formData.get("parentName") ?? "placeholder")
+      : formData.get("parentName"),
+    parentEmail: existingParentId
+      ? (formData.get("parentEmail") ?? "placeholder@placeholder.com")
+      : formData.get("parentEmail"),
+    parentPhone: existingParentId
+      ? "0700000000" // valid Kenyan format — satisfies regex but is never used
+      : formData.get("parentPhone"),
   };
 
   const parsed = admissionSchema.safeParse(raw);
@@ -107,8 +102,6 @@ export async function admitStudentAction(
     };
   }
 
-  // All fields — including relationshipType and existingParentId — are now
-  // on parsed.data because they are defined in the schema.
   const {
     studentName,
     dateOfBirth,
@@ -118,13 +111,12 @@ export async function admitStudentAction(
     parentEmail,
     parentName,
     relationshipType,
-    existingParentId,
   } = parsed.data;
 
   try {
     let parentId: string;
 
-    // ── FLOW A: Existing parent ───────────────────────────────────────────────
+    // ── FLOW A: Link to existing parent ──────────────────────────────────────
     if (existingParentId) {
       const { data: existing, error } = await supabaseAdmin
         .from("parents")
@@ -141,7 +133,7 @@ export async function admitStudentAction(
 
       parentId = existing.id;
     } else {
-      // ── FLOW B: New parent ──────────────────────────────────────────────────
+      // ── FLOW B: Create new parent ───────────────────────────────────────────
 
       // Guard against duplicate email
       const { data: existingByEmail } = await supabaseAdmin
@@ -157,7 +149,6 @@ export async function admitStudentAction(
         };
       }
 
-      // Create Auth user (invite link sets the password)
       const { data: newAuthUser, error: authError } =
         await supabaseAdmin.auth.admin.createUser({
           email: parentEmail,
@@ -172,7 +163,6 @@ export async function admitStudentAction(
 
       parentId = newAuthUser.user.id;
 
-      // Insert parent profile
       const { error: parentError } = await supabaseAdmin
         .from("parents")
         .insert({
@@ -190,7 +180,6 @@ export async function admitStudentAction(
         );
       }
 
-      // Generate password-setup link
       const { data: linkData, error: linkError } =
         await supabaseAdmin.auth.admin.generateLink({
           type: "recovery",
@@ -218,7 +207,7 @@ export async function admitStudentAction(
       }
     }
 
-    // ── INSERT STUDENT (no parent_id column anymore) ──────────────────────────
+    // ── INSERT STUDENT ────────────────────────────────────────────────────────
     const { data: newStudent, error: studentError } = await supabaseAdmin
       .from("students")
       .insert({
@@ -254,6 +243,10 @@ export async function admitStudentAction(
     revalidatePath("/students");
     revalidatePath("/parents");
     revalidatePath("/dashboard");
+
+    // Return success — the form handles the toast + redirect client-side
+    // so the user actually sees the confirmation before navigation.
+    return { success: true, message: "Student admitted successfully." };
   } catch (err: any) {
     console.error("Admission Error:", err.message);
     return {
@@ -261,8 +254,6 @@ export async function admitStudentAction(
       message: err.message || "An unexpected error occurred.",
     };
   }
-
-  redirect("/students");
 }
 
 // ── Resend Invite ─────────────────────────────────────────────────────────────
@@ -272,13 +263,8 @@ export async function resendInviteAction(parentId: string) {
     const { data: parent, error: pError } = await supabaseAdmin
       .from("parents")
       .select(
-        `
-        email,
-        full_name,
-        student_parents (
-          students ( full_name )
-        )
-      `,
+        `email, full_name,
+        student_parents ( students ( full_name ) )`,
       )
       .eq("id", parentId)
       .single();

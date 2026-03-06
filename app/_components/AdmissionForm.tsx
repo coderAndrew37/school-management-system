@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { useTransition, useState, useCallback, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { admissionSchema, AdmissionFormValues } from "@/lib/schemas/admission";
 import {
   UserRoundPlus,
@@ -127,7 +128,6 @@ function ParentSearchBox({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // ── Selected state card ───────────────────────────────────────────────────
   if (selected) {
     return (
       <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/[0.06] px-4 py-3 flex items-start justify-between gap-3">
@@ -164,7 +164,6 @@ function ParentSearchBox({
     );
   }
 
-  // ── Search input + dropdown ───────────────────────────────────────────────
   return (
     <div ref={container} className="relative">
       <div className="relative">
@@ -232,6 +231,7 @@ export default function AdmissionForm() {
   const [isPending, startTransition] = useTransition();
   const [selectedParent, setSelectedParent] =
     useState<ParentSearchResult | null>(null);
+  const router = useRouter();
 
   const {
     register,
@@ -241,9 +241,7 @@ export default function AdmissionForm() {
   } = useForm<AdmissionFormValues>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(admissionSchema) as any,
-    defaultValues: {
-      relationshipType: "guardian",
-    },
+    defaultValues: { relationshipType: "guardian" },
   });
 
   const onSubmit = (values: AdmissionFormValues) => {
@@ -258,11 +256,14 @@ export default function AdmissionForm() {
       fd.append("relationshipType", values.relationshipType ?? "guardian");
 
       if (selectedParent) {
-        // Flow A: existing parent — send id, mirror name/email/phone for schema pass
+        // Flow A: existing parent.
+        // We send existingParentId — the action uses it and ignores the
+        // parent name/email/phone fields entirely. We send a valid stub
+        // phone so the schema doesn't throw a validation error.
         fd.append("existingParentId", selectedParent.id);
         fd.append("parentName", selectedParent.full_name);
         fd.append("parentEmail", selectedParent.email);
-        fd.append("parentPhone", selectedParent.phone_number ?? "");
+        fd.append("parentPhone", "0700000000"); // stub — never used by action
       } else {
         // Flow B: new parent
         fd.append("parentName", values.parentName);
@@ -277,17 +278,24 @@ export default function AdmissionForm() {
           description: result.message,
           duration: 5000,
         });
-      } else {
-        toast.success("Admission Successful", {
-          description: selectedParent
-            ? `Student added to ${selectedParent.full_name}'s account.`
-            : "Parent account created and invite sent.",
-          duration: 6000,
-          icon: "🎓",
-        });
-        reset();
-        setSelectedParent(null);
+        return;
       }
+
+      // Show toast first, then redirect after a short delay so the
+      // user actually sees the confirmation before the page changes.
+      toast.success("Admission Successful 🎓", {
+        description: selectedParent
+          ? `Student added to ${selectedParent.full_name}'s account.`
+          : "Parent account created and invite sent.",
+        duration: 3000,
+      });
+
+      reset();
+      setSelectedParent(null);
+
+      // 1.2 s lets the toast render before navigation tears down the page
+      await new Promise((r) => setTimeout(r, 1200));
+      router.push("/admin/students");
     });
   };
 
@@ -296,14 +304,12 @@ export default function AdmissionForm() {
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] flex items-center justify-center p-4 font-[family-name:var(--font-body)]">
-      {/* Ambient glow */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full bg-amber-500/5 blur-[120px]" />
         <div className="absolute bottom-0 right-0 w-80 h-80 rounded-full bg-blue-500/5 blur-[100px]" />
       </div>
 
       <div className="relative w-full max-w-lg">
-        {/* Header */}
         <div className="mb-6 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-400/10 border border-amber-400/20">
             <GraduationCap className="h-5 w-5 text-amber-400" />
@@ -442,7 +448,6 @@ export default function AdmissionForm() {
               <div className="h-px flex-1 bg-white/[0.06]" />
             </div>
 
-            {/* Relationship type — registered directly since it's in the schema */}
             <div>
               <Label
                 htmlFor="relationshipType"
@@ -472,7 +477,6 @@ export default function AdmissionForm() {
               </div>
             </div>
 
-            {/* Real-time parent search */}
             <div>
               <Label
                 htmlFor="parentSearch"
@@ -491,7 +495,6 @@ export default function AdmissionForm() {
               </p>
             </div>
 
-            {/* New parent fields — hidden when an existing parent is selected */}
             {!selectedParent && (
               <div className="space-y-6">
                 <div>
@@ -559,7 +562,6 @@ export default function AdmissionForm() {
 
             <div className="h-px bg-white/[0.06]" />
 
-            {/* Submit */}
             <button
               type="submit"
               disabled={isPending}
