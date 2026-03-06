@@ -38,6 +38,10 @@ export const admissionSchema = z.object({
     .min(1, "Grade is required")
     .max(20, "Grade must be under 20 characters"),
 
+  // ── Parent fields — required only when creating a new parent ──────────────
+  // When an existing parent is selected these are still sent (from the selected
+  // parent object) so we keep them required in the schema; the action decides
+  // whether to actually use them.
   parentPhone: z
     .string()
     .min(10, "Phone number must be at least 10 digits")
@@ -60,6 +64,13 @@ export const admissionSchema = z.object({
       /^[a-zA-Z\s'-]+$/,
       "Name can only contain letters, spaces, hyphens, and apostrophes",
     ),
+
+  // ── New fields ─────────────────────────────────────────────────────────────
+  relationshipType: z
+    .enum(["mother", "father", "guardian", "other"])
+    .default("guardian"),
+
+  existingParentId: z.string().uuid().nullable().optional(),
 });
 
 export type AdmissionFormValues = z.infer<typeof admissionSchema>;
@@ -79,6 +90,7 @@ export interface Parent {
   created_at: string;
 }
 
+// Updated: parent_id removed — relationship now lives in student_parents table
 export interface Student {
   id: string;
   readable_id: string | null;
@@ -87,6 +99,5 @@ export interface Student {
   date_of_birth: string;
   gender: "Male" | "Female" | null;
   current_grade: string;
-  parent_id: string | null;
   created_at: string;
 }

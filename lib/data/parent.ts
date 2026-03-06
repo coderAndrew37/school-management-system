@@ -12,9 +12,7 @@ import type {
   TalentCompetency,
 } from "@/lib/types/parent";
 
-// ── Internal Supabase response shapes ─────────────────────────────────────────
-// These mirror exactly what Supabase returns for each query.
-// We cast ONCE here so every consumer is fully typed.
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface ChildPortalData {
   notifications: StudentNotification[];
@@ -45,6 +43,7 @@ type ParentRow = {
   phone_number: string;
 };
 
+// parent_id removed — relationship now lives in student_parents
 type RawStudentRow = {
   id: string;
   readable_id: string | null;
@@ -53,13 +52,25 @@ type RawStudentRow = {
   date_of_birth: string;
   gender: "Male" | "Female" | null;
   current_grade: string;
-  parent_id: string | null;
   created_at: string;
-  parents: ParentRow | null;
+  // join table rows, each nesting the parent object
+  student_parents: {
+    is_primary_contact: boolean;
+    relationship_type: string;
+    parents: ParentRow | null;
+  }[];
   assessments: AssessmentRow[];
 };
 
-// ── Mappers ────────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Pick the primary contact parent, falling back to the first linked parent. */
+function getPrimaryParent(
+  links: RawStudentRow["student_parents"],
+): ParentRow | null {
+  const primary = links.find((l) => l.is_primary_contact) ?? links[0] ?? null;
+  return primary?.parents ?? null;
+}
 
 function mapAssessment(row: AssessmentRow): Assessment {
   return {
@@ -71,7 +82,6 @@ function mapAssessment(row: AssessmentRow): Assessment {
     score: row.score,
     evidence_url: row.evidence_url,
     teacher_remarks: row.teacher_remarks,
-    // The DB CHECK constraint ensures term is 1|2|3; we assert here.
     term: row.term as 1 | 2 | 3,
     academic_year: row.academic_year,
     created_at: row.created_at,
@@ -87,20 +97,27 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
     date_of_birth: row.date_of_birth,
     gender: row.gender,
     current_grade: row.current_grade,
-    parent_id: row.parent_id,
+    // parent_id is no longer on the students table — consumers should use
+    // `parents` below instead.
+    parent_id: null,
     created_at: row.created_at,
-    parents: row.parents,
+    // Flatten to the same shape as before so all existing UI components
+    // that read child.parents.full_name continue to work unchanged.
+    parents: getPrimaryParent(row.student_parents),
     assessments: row.assessments.map(mapAssessment),
   };
 }
 
-// ── Student select fragment ────────────────────────────────────────────────────
+// ── Select fragment ───────────────────────────────────────────────────────────
 
 const STUDENT_WITH_ASSESSMENTS_SELECT = `
   id, readable_id, upi_number, full_name,
-  date_of_birth, gender, current_grade,
-  parent_id, created_at,
-  parents ( full_name, phone_number ),
+  date_of_birth, gender, current_grade, created_at,
+  student_parents (
+    is_primary_contact,
+    relationship_type,
+    parents ( full_name, phone_number )
+  ),
   assessments (
     id, student_id, teacher_id, subject_name,
     strand_id, score, evidence_url,
@@ -110,7 +127,10 @@ const STUDENT_WITH_ASSESSMENTS_SELECT = `
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/** Fetch the parent record for the currently authenticated user. */
+/**
+ * Fetch the parent record for the currently authenticated user.
+ * Looks up by auth.uid() via profiles, not by email, for reliability.
+ */
 export async function fetchMyProfile(): Promise<Parent | null> {
   const supabase = createServerClient();
 
@@ -119,24 +139,36 @@ export async function fetchMyProfile(): Promise<Parent | null> {
     error: authError,
   } = await supabase.auth.getUser();
 
-  if (authError || !user?.email) return null;
+  if (authError || !user) return null;
 
+  // Look up via profiles → parents join using auth uid, not email
   const { data, error } = await supabase
     .from("parents")
     .select("id, full_name, email, phone_number, created_at")
-    .eq("email", user.email)
+    .eq("id", user.id)
     .single<Parent>();
 
   if (error) {
-    console.error("fetchMyProfile error:", error);
-    return null;
+    // Fallback: try by email in case the parent's id differs from auth uid
+    const { data: byEmail, error: emailErr } = await supabase
+      .from("parents")
+      .select("id, full_name, email, phone_number, created_at")
+      .eq("email", user.email ?? "")
+      .single<Parent>();
+
+    if (emailErr) {
+      console.error("fetchMyProfile error:", emailErr);
+      return null;
+    }
+    return byEmail;
   }
 
   return data;
 }
 
-/** Fetch all children linked to this parent.
- *  RLS `current_parent_id()` scopes the query — no client-side filtering needed.
+/**
+ * Fetch all children linked to this parent via student_parents.
+ * RLS `current_parent_id()` scopes the query — no client-side filtering needed.
  */
 export async function fetchMyChildren(): Promise<ChildWithAssessments[]> {
   const supabase = createServerClient();
@@ -155,9 +187,9 @@ export async function fetchMyChildren(): Promise<ChildWithAssessments[]> {
   return (data ?? []).map(mapStudentRow);
 }
 
-/** Fetch a single child with assessments.
- *  RLS enforces ownership — if the child doesn't belong to this parent,
- *  Supabase returns null.
+/**
+ * Fetch a single child with assessments.
+ * RLS enforces ownership — returns null if not this parent's child.
  */
 export async function fetchChild(
   studentId: string,
@@ -187,7 +219,6 @@ export async function fetchAllChildData(
 ): Promise<ChildPortalData & { unreadCount: number }> {
   const supabase = createServerClient();
 
-  // Parallel fetching for better performance
   const [
     { data: notifications },
     { data: diary },
@@ -203,10 +234,10 @@ export async function fetchAllChildData(
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
     supabase
-      .from("diary_entries")
+      .from("student_diary")
       .select("*")
       .eq("student_id", studentId)
-      .order("date", { ascending: false }),
+      .order("created_at", { ascending: false }),
     supabase
       .from("attendance")
       .select("*")
@@ -217,12 +248,9 @@ export async function fetchAllChildData(
       .select("*")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
+    supabase.from("talent_gallery").select("*").eq("student_id", studentId),
     supabase
-      .from("talent_competencies")
-      .select("*")
-      .eq("student_id", studentId),
-    supabase
-      .from("student_gallery")
+      .from("talent_gallery")
       .select("*")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),

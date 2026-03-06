@@ -1,11 +1,12 @@
 "use server";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server"; // Ensure correct import
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import crypto from "crypto";
 
+// ── Send Message ──────────────────────────────────────────────────────────────
+
 export async function sendMessageAction(formData: FormData) {
-  // FIX 1: Add await here
   const supabase = await createSupabaseServerClient();
 
   const studentId = formData.get("student_id") as string;
@@ -25,18 +26,34 @@ export async function sendMessageAction(formData: FormData) {
     } = await supabase.auth.getUser();
     if (!user) throw new Error("Unauthorized");
 
-    const { data: parent } = await supabase
-      .from("parents")
+    // Look up parent name via profiles (works after migration 004).
+    // Profiles always exist for any authenticated user — no need to
+    // join through parents table just to get a display name.
+    const { data: profile } = await supabase
+      .from("profiles")
       .select("full_name")
-      .eq("email", user.email)
+      .eq("id", user.id)
       .single();
+
+    // Verify the authenticated parent is actually linked to this student
+    // via the student_parents join table before allowing a message.
+    const { data: link, error: linkError } = await supabase
+      .from("student_parents")
+      .select("student_id")
+      .eq("student_id", studentId)
+      .eq("parent_id", user.id)
+      .maybeSingle();
+
+    if (linkError || !link) {
+      throw new Error("You are not linked to this student.");
+    }
 
     const finalThreadId = isReply && threadId ? threadId : crypto.randomUUID();
 
     const messageData = {
       student_id: studentId,
       sender_id: user.id,
-      sender_name: parent?.full_name || "Parent",
+      sender_name: profile?.full_name || "Parent",
       sender_role: "parent",
       category,
       subject: isReply ? null : subject,
@@ -62,11 +79,12 @@ export async function sendMessageAction(formData: FormData) {
   }
 }
 
+// ── Mark Thread as Read ───────────────────────────────────────────────────────
+
 export async function markThreadAsReadAction(
   threadId: string,
   studentId: string,
 ) {
-  // FIX 2: Use correct function name AND add await
   const supabase = await createSupabaseServerClient();
 
   const {
@@ -86,6 +104,8 @@ export async function markThreadAsReadAction(
   return { success: true };
 }
 
+// ── Save JSS Pathway ──────────────────────────────────────────────────────────
+
 export async function saveJssPathwayAction(formData: FormData) {
   const supabase = await createSupabaseServerClient();
 
@@ -93,7 +113,6 @@ export async function saveJssPathwayAction(formData: FormData) {
   const studentName = formData.get("student_name") as string;
   const grade = formData.get("grade") as string;
 
-  // Convert comma-separated strings back to arrays
   const interest_areas =
     formData.get("interest_areas")?.toString().split(",").filter(Boolean) || [];
   const strong_subjects =
@@ -111,9 +130,6 @@ export async function saveJssPathwayAction(formData: FormData) {
     } = await supabase.auth.getUser();
     if (!user) throw new Error("Unauthorized");
 
-    // --- AI GUIDANCE LOGIC ---
-    // For now, we'll generate a structured recommendation.
-    // You can replace this with an actual AI API call later.
     const aiGuidance = `Based on ${studentName}'s interest in ${interest_areas.slice(0, 2).join(" & ")} and strength in ${strong_subjects.slice(0, 1)}, the ${pathway_cluster} cluster is an excellent fit. Suggest focusing on projects involving ${career_interests[0]} to align with a ${learning_style} learning style.`;
 
     const { error } = await supabase.from("jss_pathways").upsert(
@@ -134,11 +150,7 @@ export async function saveJssPathwayAction(formData: FormData) {
     if (error) throw error;
 
     revalidatePath(`/parent/portal/${studentId}`);
-
-    return {
-      success: true,
-      guidance: aiGuidance,
-    };
+    return { success: true, guidance: aiGuidance };
   } catch (error: any) {
     console.error("saveJssPathwayAction Error:", error);
     return {
@@ -147,6 +159,8 @@ export async function saveJssPathwayAction(formData: FormData) {
     };
   }
 }
+
+// ── Mark Notifications Read ───────────────────────────────────────────────────
 
 export async function markNotificationsReadAction(studentId: string) {
   const supabase = await createSupabaseServerClient();
