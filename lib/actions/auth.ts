@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
 import {
   loginSchema,
   forgotPasswordSchema,
@@ -11,6 +12,12 @@ import {
 } from "@/lib/types/auth";
 import type { Profile, UserRole } from "@/lib/types/auth";
 import { resolveAllRoles, resolvePrimaryRole } from "./auth-utils";
+
+// Admin client — needed to update parents table after password set
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+);
 
 export interface AuthActionResult {
   success: boolean;
@@ -50,8 +57,7 @@ export async function loginAction(
     if (error.message.toLowerCase().includes("email not confirmed")) {
       return {
         success: false,
-        message:
-          "Please verify your email address before signing in. Check your inbox.",
+        message: "Please verify your email address before signing in.",
       };
     }
     return { success: false, message: "Sign-in failed. Please try again." };
@@ -60,11 +66,10 @@ export async function loginAction(
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
   if (!user)
     return { success: false, message: "Session error. Please try again." };
 
-  // ── Fetch BOTH role fields so multi-role users go to the right dashboard ──
+  // Fetch BOTH role fields so multi-role users land on the right dashboard
   const { data: profile } = await supabase
     .from("profiles")
     .select("role, roles")
@@ -72,6 +77,24 @@ export async function loginAction(
     .single();
 
   const primaryRole = resolvePrimaryRole(profile);
+
+  // Check if parent hasn't completed onboarding (invite_accepted = false)
+  // Redirect them to complete password setup before accessing the portal
+  if (primaryRole === "parent") {
+    const { data: parentRow } = await supabaseAdmin
+      .from("parents")
+      .select("invite_accepted")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (parentRow && parentRow.invite_accepted === false) {
+      return {
+        success: false,
+        message:
+          "Your account setup is incomplete. Please check your email for the setup link, or contact the school office to resend it.",
+      };
+    }
+  }
 
   revalidatePath("/", "layout");
 
@@ -111,22 +134,22 @@ export async function forgotPasswordAction(
 
   const { error } = await supabase.auth.resetPasswordForEmail(
     parsed.data.email,
-    { redirectTo: `${siteUrl}/auth/callback?type=recovery` },
+    { redirectTo: `${siteUrl}/auth/confirm` },
   );
 
   if (error) {
     console.error("forgotPassword error:", error.message);
   }
 
-  // Always respond the same way — don't reveal whether the email exists
+  // Always respond the same way — never reveal whether the email exists
   return {
     success: true,
     message:
-      "If an account with that email exists, you will receive a password reset link within a few minutes.",
+      "If an account with that email exists, you will receive a reset link within a few minutes.",
   };
 }
 
-// ── Reset password ────────────────────────────────────────────────────────────
+// ── Reset password (called from /auth/reset-password after invite link) ───────
 
 export async function resetPasswordAction(
   formData: FormData,
@@ -146,6 +169,20 @@ export async function resetPasswordAction(
 
   const supabase = await createSupabaseServerClient();
 
+  // Get the current user — session was established by /auth/confirm
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  if (userError || !user) {
+    return {
+      success: false,
+      message:
+        "Session expired. Please click the setup link in your email again.",
+    };
+  }
+
+  // Update the password
   const { error } = await supabase.auth.updateUser({
     password: parsed.data.password,
   });
@@ -159,15 +196,36 @@ export async function resetPasswordAction(
     }
     return {
       success: false,
-      message: "Failed to update password. The reset link may have expired.",
+      message:
+        "Failed to update password. The setup link may have expired — please contact the school office.",
     };
   }
 
+  // Mark invite_accepted = true so the parent can now log in normally
+  // Use admin client to bypass RLS (parents can't update their own row by default)
+  await supabaseAdmin
+    .from("parents")
+    .update({ invite_accepted: true })
+    .eq("id", user.id);
+
+  // Fetch primary role to send parent directly to the right portal
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role, roles")
+    .eq("id", user.id)
+    .single();
+
+  const primaryRole = resolvePrimaryRole(profile);
+  const destination = ROLE_ROUTES[primaryRole] ?? "/parent/portal";
+
   revalidatePath("/", "layout");
+
+  // Return the destination — the client (reset-password page) handles the
+  // toast then navigates. Parent is ALREADY logged in — no second login needed.
   return {
     success: true,
-    message: "Password updated successfully. You are now signed in.",
-    redirectTo: "/login",
+    message: "Password set successfully! Welcome to Kibali Academy.",
+    redirectTo: destination,
   };
 }
 

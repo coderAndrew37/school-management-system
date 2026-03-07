@@ -3,9 +3,20 @@
 /**
  * /app/auth/confirm/page.tsx
  *
- * Admin-generated Supabase links deliver tokens in the URL fragment (#access_token=...).
- * The browser client does NOT auto-parse fragments after initial load, so we must
- * manually extract the tokens and call setSession() ourselves.
+ * Handles Supabase invite/recovery links.
+ *
+ * Supabase delivers tokens in the URL fragment (#access_token=...) which the
+ * server can never read. This client page:
+ *   1. Reads + parses the fragment
+ *   2. Signs out any existing session first (prevents stale session conflicts)
+ *   3. Calls setSession() to validate the recovery token
+ *   4. Redirects to /auth/reset-password (session is live, updateUser will work)
+ *
+ * The parent is technically "logged in" at this point, but:
+ *   - invite_accepted is still false
+ *   - They have no password yet
+ *   - resetPasswordAction sets the password AND marks invite_accepted = true,
+ *     then redirects them directly to /parent/portal (no second login needed)
  */
 
 import { createBrowserClient } from "@supabase/ssr";
@@ -24,11 +35,10 @@ export default function AuthConfirmPage() {
     );
 
     async function handleFragment() {
-      // 1. Read and parse the URL fragment
-      const hash = window.location.hash.slice(1); // strip leading #
+      const hash = window.location.hash.slice(1);
       if (!hash) {
         setErrorMessage(
-          "No authentication tokens found in this link. It may be malformed.",
+          "No authentication tokens found in this link. It may be malformed or already used.",
         );
         setStatus("error");
         return;
@@ -37,39 +47,53 @@ export default function AuthConfirmPage() {
       const params = new URLSearchParams(hash);
       const accessToken = params.get("access_token");
       const refreshToken = params.get("refresh_token");
-      const type = params.get("type"); // 'recovery' for password setup links
+      const type = params.get("type"); // "recovery" for invite/reset links
+      const errorDesc = params.get("error_description");
+
+      // Supabase sometimes puts the error in the fragment itself
+      if (errorDesc) {
+        setErrorMessage(decodeURIComponent(errorDesc));
+        setStatus("error");
+        return;
+      }
 
       if (!accessToken || !refreshToken) {
         setErrorMessage(
-          "This link is missing required tokens. Please request a new invite.",
+          "This link is missing required tokens. Please request a new invite from the school.",
         );
         setStatus("error");
         return;
       }
 
-      // 2. Manually establish the session with the tokens from the fragment
+      // Sign out any stale session first — otherwise setSession may conflict
+      // with a logged-in admin or teacher who clicked a parent invite link
+      await supabase.auth.signOut();
+
+      // Establish a session from the recovery/invite tokens
       const { error } = await supabase.auth.setSession({
         access_token: accessToken,
         refresh_token: refreshToken,
       });
 
       if (error) {
-        console.error("setSession error:", error.message);
+        const expired =
+          error.message.toLowerCase().includes("expired") ||
+          error.message.toLowerCase().includes("invalid");
         setErrorMessage(
-          error.message.includes("expired")
-            ? "This setup link has expired. Please contact the school to request a new one."
+          expired
+            ? "This setup link has expired (links are valid for 24 hours). Please contact the school office to request a new one."
             : `Authentication failed: ${error.message}`,
         );
         setStatus("error");
         return;
       }
 
-      // 3. Session is live — redirect based on link type
+      // Session is now live. Redirect to set-password page.
+      // For recovery (invite) links always go to reset-password.
       if (type === "recovery") {
-        // Password setup / reset flow
         router.replace("/auth/reset-password");
       } else {
-        // Fallback for any other type (signup confirmation, magic link, etc.)
+        // Fallback for magic links, email confirmations, etc.
         router.replace("/dashboard");
       }
     }
@@ -77,67 +101,61 @@ export default function AuthConfirmPage() {
     handleFragment();
   }, [router]);
 
-  // ── UI ────────────────────────────────────────────────────────────────────
-
   if (status === "error") {
     return (
-      <main
-        style={{
-          minHeight: "100vh",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          fontFamily: "sans-serif",
-          padding: "24px",
-          textAlign: "center",
-        }}
-      >
-        <div
-          style={{
-            maxWidth: 420,
-            border: "1px solid #fca5a5",
-            borderRadius: 12,
-            padding: 32,
-            background: "#fff1f2",
-          }}
-        >
-          <h2 style={{ color: "#b91c1c", marginTop: 0 }}>Link Unavailable</h2>
-          <p style={{ color: "#7f1d1d", lineHeight: 1.6 }}>{errorMessage}</p>
+      <main className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6 text-center font-sans">
+        <div className="max-w-md w-full border border-red-200 rounded-2xl p-8 bg-white shadow-lg">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-100">
+            <svg
+              className="h-7 w-7 text-red-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 9v2m0 4h.01M12 3a9 9 0 100 18A9 9 0 0012 3z"
+              />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-red-700 mb-2">
+            Link Unavailable
+          </h2>
+          <p className="text-sm text-slate-600 leading-relaxed mb-6">
+            {errorMessage}
+          </p>
+          <p className="text-xs text-slate-400">
+            Please contact the school office or ask your child's teacher to
+            resend the invite.
+          </p>
+          <a
+            href="/login"
+            className="mt-6 inline-block rounded-lg bg-amber-500 px-6 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 transition-colors"
+          >
+            Back to Login
+          </a>
         </div>
       </main>
     );
   }
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        fontFamily: "sans-serif",
-        gap: 16,
-      }}
-    >
-      <div
-        style={{
-          width: 40,
-          height: 40,
-          border: "4px solid #fef3c7",
-          borderTop: "4px solid #f59e0b",
-          borderRadius: "50%",
-          animation: "spin 0.8s linear infinite",
-        }}
-      />
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      <p style={{ color: "#92400e", fontWeight: 600 }}>
-        Setting up your account…
-      </p>
-      <p style={{ color: "#b45309", fontSize: 14 }}>
-        You will be redirected shortly.
-      </p>
+    <main className="min-h-screen flex flex-col items-center justify-center bg-slate-50 gap-4 font-sans">
+      <div className="flex flex-col items-center gap-4">
+        <div
+          className="w-12 h-12 rounded-full border-4 border-amber-100 border-t-amber-500"
+          style={{ animation: "spin 0.8s linear infinite" }}
+        />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <p className="text-amber-800 font-semibold text-lg">
+          Setting up your account…
+        </p>
+        <p className="text-amber-600 text-sm">
+          You will be redirected to create your password shortly.
+        </p>
+      </div>
     </main>
   );
 }

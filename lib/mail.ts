@@ -321,21 +321,33 @@ export async function resolveAudienceRecipients(
 
     case "grade_parents": {
       if (audience.grade === null) return [];
+
+      // FIXED: students.parent_id is gone — join through student_parents instead.
+      // student_parents → students (filtered by grade) → parents
       const { data, error } = await supabase
-        .from("students")
-        .select("parents!inner(id, full_name, email)")
-        .eq("current_grade", audience.grade)
-        .returns<{ parents: RecipientRow }[]>();
+        .from("student_parents")
+        .select(
+          `
+          parents ( id, full_name, email ),
+          students!inner ( current_grade )
+        `,
+        )
+        .eq("students.current_grade", audience.grade)
+        .returns<
+          { parents: RecipientRow; students: { current_grade: string } }[]
+        >();
+
       if (error) {
         console.error(error);
         return [];
       }
-      // Deduplicate by parent id (one parent may have multiple children in grade)
+
+      // Deduplicate by parent id — one parent may have multiple children in the grade
       const seen = new Set<string>();
       return (data ?? [])
         .map((row) => row.parents)
         .filter((p) => {
-          if (seen.has(p.id)) return false;
+          if (!p || seen.has(p.id)) return false;
           seen.add(p.id);
           return true;
         });
