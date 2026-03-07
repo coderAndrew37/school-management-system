@@ -1,7 +1,6 @@
 import { PROTECTED_PREFIXES, ROLE_ROUTES } from "@/lib/types/auth";
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-// 1. Import the shared helpers
 import { resolveAllRoles, resolvePrimaryRole } from "@/lib/actions/auth-utils";
 
 export async function middleware(request: NextRequest) {
@@ -39,13 +38,15 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   // ── Route classification ──────────────────────────────────────────────────
+
   const publicRoutes = [
     "/login",
-    "/forgot-password",
-    "/reset-password",
+    "/auth/forgot-password", // FIX: was "/forgot-password" — wrong prefix
+    "/auth/reset-password", // FIX: was "/reset-password"  — wrong prefix
     "/auth/callback",
     "/auth/confirm",
   ];
+
   const isPublicRoute = publicRoutes.some((r) => pathname.startsWith(r));
   const isApiRoute = pathname.startsWith("/api/");
 
@@ -59,18 +60,26 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // ── Authenticated user hits a public auth page → send to their dashboard ──
-  if (
-    user &&
-    isPublicRoute &&
-    pathname !== "/auth/callback" &&
-    pathname !== "/auth/confirm"
-  ) {
-    const profile = await fetchProfile(supabase, user.id);
-    const primaryRole = resolvePrimaryRole(profile);
-    return NextResponse.redirect(
-      new URL(ROLE_ROUTES[primaryRole], request.url),
-    );
+  // ── Authenticated user hits a public page → send to their dashboard ───────
+  //
+  // EXCEPTIONS — keep authenticated users on these pages:
+  //   /auth/confirm         — must stay to call setSession() with the token
+  //   /auth/reset-password  — parent is authenticated mid-onboarding, must
+  //                           complete password setup before going to portal
+  //   /auth/forgot-password — any authenticated user can reset their password
+  if (user && isPublicRoute) {
+    const bypassRedirect =
+      pathname.startsWith("/auth/confirm") ||
+      pathname.startsWith("/auth/reset-password") ||
+      pathname.startsWith("/auth/forgot-password");
+
+    if (!bypassRedirect) {
+      const profile = await fetchProfile(supabase, user.id);
+      const primaryRole = resolvePrimaryRole(profile);
+      return NextResponse.redirect(
+        new URL(ROLE_ROUTES[primaryRole], request.url),
+      );
+    }
   }
 
   // ── Role-based access control ─────────────────────────────────────────────
@@ -80,10 +89,10 @@ export async function middleware(request: NextRequest) {
 
     const matchingPrefixes = Object.keys(PROTECTED_PREFIXES)
       .filter((prefix) => pathname.startsWith(prefix))
-      .sort((a, b) => b.length - a.length);
+      .sort((a, b) => b.length - a.length); // longest match wins
 
     if (matchingPrefixes.length > 0) {
-      const allowedRoles = PROTECTED_PREFIXES[matchingPrefixes[0]];
+      const allowedRoles = PROTECTED_PREFIXES[matchingPrefixes[0]!]!;
       const hasAccess = userRoles.some((r) => allowedRoles.includes(r));
 
       if (!hasAccess) {
@@ -98,8 +107,6 @@ export async function middleware(request: NextRequest) {
   return response;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 async function fetchProfile(supabase: any, userId: string) {
   const { data } = await supabase
     .from("profiles")
@@ -108,8 +115,6 @@ async function fetchProfile(supabase: any, userId: string) {
     .single();
   return data ?? null;
 }
-
-// 2. REMOVED: resolveAllRoles and resolvePrimaryRole were deleted from here
 
 export const config = {
   matcher: [

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ForgotPasswordForm } from "../_components/auth/ForgotPasswordForm";
+import { ForgotPasswordForm } from "../../../_components/auth/ForgotPasswordForm";
 
 export const metadata: Metadata = {
   title: "Reset Password | Kibali Academy",

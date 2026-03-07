@@ -23,6 +23,7 @@ import {
   Users,
 } from "lucide-react";
 import { loginSchema, type LoginFormValues } from "@/lib/types/auth";
+import Link from "next/link";
 import { loginAction } from "@/lib/actions/auth";
 import { AuthLayout } from "./AuthLayout";
 
@@ -225,12 +226,12 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
             <label className="text-xs font-bold text-slate-600 uppercase tracking-wide">
               Password
             </label>
-            <a
+            <Link
               href="/auth/forgot-password"
               className="text-xs text-amber-600 hover:text-amber-700 font-medium"
             >
               Forgot password?
-            </a>
+            </Link>
           </div>
           <input
             type="password"
