@@ -8,25 +8,101 @@ import {
   XCircle,
   Clock,
   BookOpen,
+  TrendingUp,
 } from "lucide-react";
 import type { AttendanceRecord, AttendanceStatus } from "@/lib/types/parent";
-import { STATUS_COLOR } from "@/lib/types/parent";
 
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
+const FULL_MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
   "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
+
+// Light-mode semantic pairs matching prototype .att-present / .att-absent etc.
+const S: Record<
+  AttendanceStatus,
+  {
+    statBg: string;
+    statBorder: string;
+    statText: string;
+    statIcon: string;
+    calBg: string;
+    calText: string;
+    rowBg: string;
+    rowBorder: string;
+    rowText: string;
+    dot: string;
+    label: string;
+    icon: React.ReactNode;
+  }
+> = {
+  present: {
+    statBg: "bg-emerald-50",
+    statBorder: "border-emerald-200",
+    statText: "text-emerald-700",
+    statIcon: "bg-emerald-100",
+    calBg: "bg-emerald-100",
+    calText: "text-emerald-700",
+    rowBg: "bg-emerald-50",
+    rowBorder: "border-emerald-200",
+    rowText: "text-emerald-700",
+    dot: "bg-emerald-500",
+    label: "Present",
+    icon: <CheckCircle2 className="h-4 w-4" />,
+  },
+  absent: {
+    statBg: "bg-red-50",
+    statBorder: "border-red-200",
+    statText: "text-red-700",
+    statIcon: "bg-red-100",
+    calBg: "bg-red-100",
+    calText: "text-red-700",
+    rowBg: "bg-red-50",
+    rowBorder: "border-red-200",
+    rowText: "text-red-700",
+    dot: "bg-red-500",
+    label: "Absent",
+    icon: <XCircle className="h-4 w-4" />,
+  },
+  late: {
+    statBg: "bg-amber-50",
+    statBorder: "border-amber-200",
+    statText: "text-amber-700",
+    statIcon: "bg-amber-100",
+    calBg: "bg-amber-100",
+    calText: "text-amber-700",
+    rowBg: "bg-amber-50",
+    rowBorder: "border-amber-200",
+    rowText: "text-amber-700",
+    dot: "bg-amber-500",
+    label: "Late",
+    icon: <Clock className="h-4 w-4" />,
+  },
+  excused: {
+    statBg: "bg-cyan-50",
+    statBorder: "border-cyan-200",
+    statText: "text-cyan-700",
+    statIcon: "bg-cyan-100",
+    calBg: "bg-cyan-100",
+    calText: "text-cyan-700",
+    rowBg: "bg-cyan-50",
+    rowBorder: "border-cyan-200",
+    rowText: "text-cyan-700",
+    dot: "bg-cyan-500",
+    label: "Excused",
+    icon: <BookOpen className="h-4 w-4" />,
+  },
+};
 
 interface Props {
   records: AttendanceRecord[];
@@ -38,13 +114,11 @@ export function AttendancePanel({ records, studentName }: Props) {
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
 
-  // Build date → record map
   const byDate: Record<string, AttendanceRecord> = {};
   for (const r of records) byDate[r.date] = r;
 
-  // Calendar grid
   const firstDay = new Date(viewYear, viewMonth, 1);
-  const startOffset = (firstDay.getDay() + 6) % 7; // Monday=0
+  const startOffset = (firstDay.getDay() + 6) % 7;
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
 
   const prevMonth = () =>
@@ -56,223 +130,224 @@ export function AttendancePanel({ records, studentName }: Props) {
       ? (setViewYear((y) => y + 1), setViewMonth(0))
       : setViewMonth((m) => m + 1);
 
-  // Month stats
   const monthRecords = records.filter((r) => {
     const d = new Date(r.date);
     return d.getFullYear() === viewYear && d.getMonth() === viewMonth;
   });
-  const monthCounts = { present: 0, late: 0, absent: 0, excused: 0 } as Record<
+  const counts = { present: 0, late: 0, absent: 0, excused: 0 } as Record<
     AttendanceStatus,
     number
   >;
-  for (const r of monthRecords) monthCounts[r.status]++;
-  const attendanceRate =
+  for (const r of monthRecords) counts[r.status]++;
+  const rate =
     monthRecords.length > 0
-      ? Math.round(
-          ((monthCounts.present + monthCounts.late) / monthRecords.length) *
-            100,
-        )
+      ? Math.round(((counts.present + counts.late) / monthRecords.length) * 100)
       : null;
 
-  // Recent absences (for the list)
-  const recentAbsences = records
+  const issues = records
     .filter((r) => r.status === "absent" || r.status === "late")
-    .slice(0, 10);
+    .slice(0, 8);
 
   return (
-    <div className="space-y-6">
-      {/* ── Stats strip ───────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          {
-            label: "Present",
-            value: monthCounts.present,
-            icon: <CheckCircle2 className="h-4 w-4" />,
-            cls: "text-emerald-400 border-emerald-400/20 bg-emerald-400/5",
-          },
-          {
-            label: "Absent",
-            value: monthCounts.absent,
-            icon: <XCircle className="h-4 w-4" />,
-            cls: "text-rose-400    border-rose-400/20    bg-rose-400/5",
-          },
-          {
-            label: "Late",
-            value: monthCounts.late,
-            icon: <Clock className="h-4 w-4" />,
-            cls: "text-amber-400  border-amber-400/20  bg-amber-400/5",
-          },
-          {
-            label: "Excused",
-            value: monthCounts.excused,
-            icon: <BookOpen className="h-4 w-4" />,
-            cls: "text-sky-400    border-sky-400/20    bg-sky-400/5",
-          },
-        ].map(({ label, value, icon, cls }) => (
-          <div
-            key={label}
-            className={`rounded-xl border px-3 py-3 text-center ${cls}`}
-          >
-            <div className="flex justify-center mb-1">{icon}</div>
-            <p className="text-xl font-bold tabular-nums">{value}</p>
-            <p className="text-[10px] uppercase tracking-widest opacity-60 mt-0.5">
-              {label}
-            </p>
-          </div>
-        ))}
+    <div className="space-y-4">
+      {/* ── Stat cards ────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-4 gap-2.5">
+        {(["present", "absent", "late", "excused"] as AttendanceStatus[]).map(
+          (s) => (
+            <div
+              key={s}
+              className={`rounded-2xl border ${S[s].statBorder} ${S[s].statBg} p-3 text-center shadow-sm`}
+            >
+              <div
+                className={`mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-xl ${S[s].statIcon} ${S[s].statText}`}
+              >
+                {S[s].icon}
+              </div>
+              <p
+                className={`text-2xl font-black tabular-nums ${S[s].statText}`}
+              >
+                {counts[s]}
+              </p>
+              <p className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                {S[s].label}
+              </p>
+            </div>
+          ),
+        )}
       </div>
 
-      {attendanceRate !== null && (
-        <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-5 py-3 flex items-center justify-between">
-          <p className="text-sm text-white/50">Monthly attendance rate</p>
-          <div className="flex items-center gap-3">
-            <div className="h-2 w-40 rounded-full bg-white/[0.06] overflow-hidden">
+      {/* ── Attendance rate ────────────────────────────────────────────────── */}
+      {rate !== null && (
+        <div
+          className={[
+            "flex items-center gap-3 rounded-2xl border px-4 py-3 shadow-sm",
+            rate >= 90
+              ? "border-emerald-200 bg-emerald-50"
+              : rate >= 75
+                ? "border-amber-200  bg-amber-50"
+                : "border-red-200 bg-red-50",
+          ].join(" ")}
+        >
+          <TrendingUp
+            className={`h-5 w-5 flex-shrink-0 ${rate >= 90 ? "text-emerald-600" : rate >= 75 ? "text-amber-600" : "text-red-600"}`}
+          />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                Monthly attendance rate
+              </p>
+              <p
+                className={`text-sm font-black tabular-nums ${rate >= 90 ? "text-emerald-700" : rate >= 75 ? "text-amber-700" : "text-red-700"}`}
+              >
+                {rate}%
+              </p>
+            </div>
+            <div className="h-2 w-full rounded-full bg-white/80 border border-slate-200 overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all duration-700 ${attendanceRate >= 90 ? "bg-emerald-400" : attendanceRate >= 75 ? "bg-amber-400" : "bg-rose-400"}`}
-                style={{ width: `${attendanceRate}%` }}
+                className={`h-full rounded-full transition-all duration-700 ${rate >= 90 ? "bg-emerald-500" : rate >= 75 ? "bg-amber-500" : "bg-red-500"}`}
+                style={{ width: `${rate}%` }}
               />
             </div>
-            <span
-              className={`text-sm font-bold tabular-nums ${attendanceRate >= 90 ? "text-emerald-400" : attendanceRate >= 75 ? "text-amber-400" : "text-rose-400"}`}
-            >
-              {attendanceRate}%
-            </span>
           </div>
         </div>
       )}
 
-      {/* ── Calendar ──────────────────────────────────────────────────── */}
-      <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-5">
+      {/* ── Calendar ──────────────────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm">
         {/* Month nav */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
           <button
-            aria-label="previous month"
             onClick={prevMonth}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+            aria-label="previous month"
+            className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 active:scale-90 shadow-sm"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <p className="text-sm font-bold text-white">
-            {MONTHS[viewMonth]} {viewYear}
-          </p>
+          <div className="text-center">
+            <p className="text-sm font-black text-slate-800">
+              {FULL_MONTHS[viewMonth]} {viewYear}
+            </p>
+            <p className="text-[10px] font-semibold text-slate-400">
+              {monthRecords.length} days recorded
+            </p>
+          </div>
           <button
-            aria-label="next month"
             onClick={nextMonth}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+            aria-label="next month"
+            className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 active:scale-90 shadow-sm"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
 
-        {/* Weekday headers */}
-        <div className="grid grid-cols-7 mb-1">
-          {DAYS.map((d) => (
-            <div
-              key={d}
-              className="text-center text-[10px] font-semibold uppercase tracking-wider text-white/25 py-1"
-            >
-              {d}
-            </div>
-          ))}
-        </div>
-
-        {/* Day cells */}
-        <div className="grid grid-cols-7 gap-1">
-          {Array.from({ length: startOffset }).map((_, i) => (
-            <div key={`e${i}`} />
-          ))}
-          {Array.from({ length: daysInMonth }).map((_, i) => {
-            const d = i + 1;
-            const ds = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-            const rec = byDate[ds];
-            const isToday = ds === today.toISOString().slice(0, 10);
-            const sc = rec ? STATUS_COLOR[rec.status] : null;
-            const isWeekend = (startOffset + i) % 7 >= 5;
-
-            return (
+        <div className="p-3">
+          {/* Day headers */}
+          <div className="grid grid-cols-7 mb-1">
+            {DAYS.map((d, i) => (
               <div
-                key={d}
-                title={
-                  rec ? `${rec.status}${rec.notes ? ": " + rec.notes : ""}` : ds
-                }
-                className={[
-                  "rounded-lg h-9 flex flex-col items-center justify-center transition-colors relative",
-                  isToday ? "ring-1 ring-amber-400/60" : "",
-                  isWeekend ? "opacity-40" : "",
-                  rec
-                    ? `${sc!.bg} ${sc!.border} border`
-                    : "hover:bg-white/[0.03]",
-                ].join(" ")}
+                key={`${d}${i}`}
+                className="text-center text-[10px] font-black uppercase tracking-wider text-slate-400 py-1"
               >
-                <span
-                  className={`text-xs font-medium ${isToday ? "text-amber-400" : rec ? sc!.text : "text-white/40"}`}
-                >
-                  {d}
-                </span>
-                {rec && (
-                  <span
-                    className={`text-[8px] font-bold uppercase ${sc!.text} opacity-80`}
-                  >
-                    {rec.status.charAt(0).toUpperCase()}
-                  </span>
-                )}
+                {d}
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
 
-        {/* Legend */}
-        <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-4 pt-4 border-t border-white/[0.06]">
-          {(["present", "late", "absent", "excused"] as AttendanceStatus[]).map(
-            (s) => (
+          {/* Day cells — matches .att-present / .att-absent / .att-cell */}
+          <div className="grid grid-cols-7 gap-1">
+            {Array.from({ length: startOffset }).map((_, i) => (
+              <div key={`e${i}`} />
+            ))}
+            {Array.from({ length: daysInMonth }).map((_, i) => {
+              const day = i + 1;
+              const ds = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+              const rec = byDate[ds];
+              const sc = rec ? S[rec.status] : null;
+              const isToday = ds === today.toISOString().slice(0, 10);
+              const isWeek = (startOffset + i) % 7 >= 5;
+              return (
+                <div
+                  key={day}
+                  title={
+                    rec
+                      ? `${rec.status}${rec.notes ? ": " + rec.notes : ""}`
+                      : ds
+                  }
+                  className={[
+                    "flex flex-col items-center justify-center rounded-lg aspect-square text-[11px] font-bold transition-all",
+                    isToday ? "ring-2 ring-blue-500 ring-offset-1" : "",
+                    isWeek ? "bg-slate-50 text-slate-300" : "",
+                    !isWeek && sc ? `${sc.calBg} ${sc.calText}` : "",
+                    !isWeek && !sc ? "text-slate-500 hover:bg-slate-50" : "",
+                  ].join(" ")}
+                >
+                  <span>{day}</span>
+                  {rec && !isWeek && (
+                    <span className="text-[7px] font-black opacity-60 -mt-0.5">
+                      {rec.status[0].toUpperCase()}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Legend */}
+          <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-x-4 gap-y-1">
+            {(
+              ["present", "late", "absent", "excused"] as AttendanceStatus[]
+            ).map((s) => (
               <span
                 key={s}
-                className={`flex items-center gap-1.5 text-[10px] ${STATUS_COLOR[s].text}`}
+                className={`flex items-center gap-1.5 text-[10px] font-bold ${S[s].statText}`}
               >
-                <span
-                  className={`w-2 h-2 rounded-full ${STATUS_COLOR[s].dot}`}
-                />
-                {s.charAt(0).toUpperCase() + s.slice(1)}
+                <span className={`h-2 w-2 rounded-full ${S[s].dot}`} />
+                {S[s].label}
               </span>
-            ),
-          )}
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* ── Recent absences / late list ────────────────────────────────── */}
-      {recentAbsences.length > 0 && (
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-white/30 mb-3">
-            Recent Absences & Late Arrivals
-          </p>
-          <div className="space-y-2">
-            {recentAbsences.map((r) => {
-              const sc = STATUS_COLOR[r.status];
+      {/* ── Recent issues ──────────────────────────────────────────────────── */}
+      {issues.length > 0 && (
+        <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+          <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+              Absences & Late Arrivals
+            </p>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {issues.map((r) => {
+              const sc = S[r.status];
               return (
                 <div
                   key={r.id}
-                  className={`flex items-center gap-3 rounded-xl border ${sc.border} ${sc.bg} px-4 py-3`}
+                  className={`flex items-center gap-3 px-4 py-3 ${sc.rowBg}`}
                 >
                   <span
-                    className={`text-xs font-bold uppercase px-2 py-0.5 rounded-md ${sc.text} ${sc.bg} border ${sc.border}`}
+                    className={`flex-shrink-0 flex h-8 w-8 items-center justify-center rounded-xl ${sc.statIcon} ${sc.statText}`}
                   >
-                    {r.status}
+                    {sc.icon}
                   </span>
-                  <div className="flex-1">
-                    <p className={`text-sm font-medium ${sc.text}`}>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-bold ${sc.rowText}`}>
                       {new Date(r.date + "T00:00:00").toLocaleDateString(
                         "en-KE",
-                        {
-                          weekday: "short",
-                          day: "numeric",
-                          month: "long",
-                        },
+                        { weekday: "short", day: "numeric", month: "long" },
                       )}
                     </p>
                     {r.notes && (
-                      <p className="text-xs text-white/40 mt-0.5">{r.notes}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        {r.notes}
+                      </p>
                     )}
                   </div>
+                  <span
+                    className={`flex-shrink-0 rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${sc.rowBg} ${sc.rowBorder} ${sc.rowText}`}
+                  >
+                    {sc.label}
+                  </span>
                 </div>
               );
             })}
@@ -281,9 +356,11 @@ export function AttendancePanel({ records, studentName }: Props) {
       )}
 
       {records.length === 0 && (
-        <div className="rounded-2xl border border-dashed border-white/10 py-12 text-center">
+        <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 py-14 text-center">
           <p className="text-3xl mb-2">📅</p>
-          <p className="text-sm text-white/40">No attendance records yet</p>
+          <p className="text-sm font-bold text-slate-500">
+            No attendance records yet
+          </p>
         </div>
       )}
     </div>

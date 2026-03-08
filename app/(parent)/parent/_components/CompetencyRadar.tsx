@@ -4,49 +4,48 @@ import { useState } from "react";
 import { COMPETENCY_DOMAINS } from "@/lib/types/parent";
 import type { TalentCompetency, CompetencyKey } from "@/lib/types/parent";
 
-// ── Maths helpers ─────────────────────────────────────────────────────────────
-
-const N = COMPETENCY_DOMAINS.length; // 8
-const LEVELS = 5;
-const CENTER = 160;
-const OUTER = 130;
-
-function angleFor(i: number) {
-  // Start from top (-90°), go clockwise
+// ── Radar maths ───────────────────────────────────────────────────────────────
+const N = COMPETENCY_DOMAINS.length,
+  LEVELS = 5,
+  CX = 160,
+  CY = 160,
+  OUTER = 115;
+function angle(i: number) {
   return (i / N) * 2 * Math.PI - Math.PI / 2;
 }
-
-function polarToXY(radius: number, i: number) {
-  const a = angleFor(i);
-  return { x: CENTER + radius * Math.cos(a), y: CENTER + radius * Math.sin(a) };
+function pt(r: number, i: number) {
+  return { x: CX + r * Math.cos(angle(i)), y: CY + r * Math.sin(angle(i)) };
 }
-
-function buildPath(values: number[]): string {
+function buildPath(vals: number[]) {
   return (
-    values
+    vals
       .map((v, i) => {
-        const r = (v / LEVELS) * OUTER;
-        const { x, y } = polarToXY(r, i);
-        return `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
+        const { x, y } = pt((v / LEVELS) * OUTER, i);
+        return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
       })
       .join(" ") + " Z"
   );
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+const LEVEL_LABEL = [
+  "",
+  "Beginning",
+  "Approaching",
+  "Meeting",
+  "Exceeding",
+  "Exemplary",
+];
 
 function RadarGrid() {
   return (
     <g>
-      {/* Concentric rings */}
       {Array.from({ length: LEVELS }).map((_, lvl) => {
         const r = ((lvl + 1) / LEVELS) * OUTER;
-        const pts = Array.from({ length: N }, (_, i) => polarToXY(r, i));
         const d =
-          pts
+          Array.from({ length: N }, (_, i) => pt(r, i))
             .map(
               (p, i) =>
-                `${i === 0 ? "M" : "L"}${p.x.toFixed(2)},${p.y.toFixed(2)}`,
+                `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`,
             )
             .join(" ") + " Z";
         return (
@@ -54,37 +53,34 @@ function RadarGrid() {
             key={lvl}
             d={d}
             fill="none"
-            stroke="rgba(255,255,255,0.07)"
+            stroke={lvl === LEVELS - 1 ? "#cbd5e1" : "#e2e8f0"}
             strokeWidth={lvl === LEVELS - 1 ? 1.5 : 0.8}
           />
         );
       })}
-      {/* Spokes */}
       {COMPETENCY_DOMAINS.map((_, i) => {
-        const outer = polarToXY(OUTER, i);
+        const o = pt(OUTER, i);
         return (
           <line
             key={i}
-            x1={CENTER}
-            y1={CENTER}
-            x2={outer.x.toFixed(2)}
-            y2={outer.y.toFixed(2)}
-            stroke="rgba(255,255,255,0.06)"
+            x1={CX}
+            y1={CY}
+            x2={o.x.toFixed(1)}
+            y2={o.y.toFixed(1)}
+            stroke="#e2e8f0"
             strokeWidth={0.8}
           />
         );
       })}
-      {/* Level labels (1-5 on one spoke) */}
       {Array.from({ length: LEVELS }).map((_, lvl) => {
-        const r = ((lvl + 1) / LEVELS) * OUTER;
-        const p = polarToXY(r, 0); // top spoke
+        const p = pt(((lvl + 1) / LEVELS) * OUTER, 0);
         return (
           <text
             key={lvl}
-            x={(p.x - 10).toFixed(2)}
-            y={(p.y + 4).toFixed(2)}
-            fontSize="8"
-            fill="rgba(255,255,255,0.25)"
+            x={(p.x - 8).toFixed(1)}
+            y={(p.y + 4).toFixed(1)}
+            fontSize="7"
+            fill="#94a3b8"
             textAnchor="end"
           >
             {lvl + 1}
@@ -96,39 +92,38 @@ function RadarGrid() {
 }
 
 function RadarPolygon({
-  values,
+  vals,
   color,
-  opacity = 0.18,
-  strokeOpacity = 0.8,
+  fillOp = 0.15,
+  strokeOp = 0.9,
 }: {
-  values: number[];
+  vals: number[];
   color: string;
-  opacity?: number;
-  strokeOpacity?: number;
+  fillOp?: number;
+  strokeOp?: number;
 }) {
-  const d = buildPath(values);
+  const d = buildPath(vals);
   return (
     <g>
       <path
         d={d}
         fill={color}
-        fillOpacity={opacity}
+        fillOpacity={fillOp}
         stroke={color}
-        strokeWidth={1.5}
-        strokeOpacity={strokeOpacity}
+        strokeWidth={2}
+        strokeOpacity={strokeOp}
       />
-      {values.map((v, i) => {
-        const r = (v / LEVELS) * OUTER;
-        const p = polarToXY(r, i);
+      {vals.map((v, i) => {
+        const p = pt((v / LEVELS) * OUTER, i);
         return (
           <circle
             key={i}
-            cx={p.x.toFixed(2)}
-            cy={p.y.toFixed(2)}
+            cx={p.x.toFixed(1)}
+            cy={p.y.toFixed(1)}
             r={3.5}
             fill={color}
             fillOpacity={0.9}
-            stroke="#0c0f1a"
+            stroke="white"
             strokeWidth={1.5}
           />
         );
@@ -138,40 +133,33 @@ function RadarPolygon({
 }
 
 function RadarLabels() {
-  const labelR = OUTER + 22;
   return (
     <g>
-      {COMPETENCY_DOMAINS.map((domain, i) => {
-        const { x, y } = polarToXY(labelR, i);
-        const angle = angleFor(i) * (180 / Math.PI);
-
-        // Anchor based on quadrant
-        const isLeft = Math.cos(angleFor(i)) < -0.1;
-        const isRight = Math.cos(angleFor(i)) > 0.1;
-        const anchor = isLeft ? "end" : isRight ? "start" : "middle";
-
+      {COMPETENCY_DOMAINS.map((d, i) => {
+        const { x, y } = pt(OUTER + 22, i);
+        const cos = Math.cos(angle(i));
+        const anchor = cos < -0.1 ? "end" : cos > 0.1 ? "start" : "middle";
         return (
           <g key={i}>
             <text
-              x={x.toFixed(2)}
-              y={(y - 4).toFixed(2)}
-              fontSize="9"
-              fontWeight="600"
-              fill="rgba(255,255,255,0.7)"
+              x={x.toFixed(1)}
+              y={(y - 5).toFixed(1)}
+              fontSize="11"
               textAnchor={anchor}
               dominantBaseline="middle"
+              fill="#334155"
             >
-              {domain.icon}
+              {d.icon}
             </text>
             <text
-              x={x.toFixed(2)}
-              y={(y + 9).toFixed(2)}
-              fontSize="8"
-              fill="rgba(255,255,255,0.45)"
+              x={x.toFixed(1)}
+              y={(y + 9).toFixed(1)}
+              fontSize="7.5"
               textAnchor={anchor}
               dominantBaseline="middle"
+              fill="#64748b"
             >
-              {domain.label}
+              {d.label.split(" ")[0]}
             </text>
           </g>
         );
@@ -180,25 +168,23 @@ function RadarLabels() {
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
-
 interface Props {
   competencies: TalentCompetency[];
   studentName: string;
 }
 
 export function CompetencyRadar({ competencies, studentName }: Props) {
-  const [activeTerm, setActiveTerm] = useState<number>(
+  const [activeTerm, setActiveTerm] = useState(
     competencies[competencies.length - 1]?.term ?? 1,
   );
   const [compareMode, setCompareMode] = useState(false);
 
   if (competencies.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-white/10 py-12 text-center">
+      <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 py-14 text-center">
         <p className="text-3xl mb-2">📊</p>
-        <p className="text-sm text-white/40">No competency ratings yet</p>
-        <p className="text-xs text-white/25 mt-1">
+        <p className="font-bold text-slate-500">No competency ratings yet</p>
+        <p className="text-xs text-slate-400 mt-1">
           Teacher ratings will appear here once submitted.
         </p>
       </div>
@@ -209,144 +195,148 @@ export function CompetencyRadar({ competencies, studentName }: Props) {
   const prev = compareMode
     ? competencies.find((c) => c.term === activeTerm - 1)
     : null;
-
-  const getValues = (comp: TalentCompetency): number[] =>
-    COMPETENCY_DOMAINS.map((d) => comp[d.key as CompetencyKey] as number);
-
-  const currentValues = current
-    ? getValues(current)
-    : COMPETENCY_DOMAINS.map(() => 0);
-  const prevValues = prev ? getValues(prev) : null;
-
-  // Average score
-  const avg = currentValues.reduce((a, b) => a + b, 0) / currentValues.length;
+  const getVals = (c: TalentCompetency) =>
+    COMPETENCY_DOMAINS.map((d) => c[d.key as CompetencyKey] as number);
+  const currVals = current ? getVals(current) : COMPETENCY_DOMAINS.map(() => 0);
+  const prevVals = prev ? getVals(prev) : null;
+  const avg = currVals.reduce((a, b) => a + b, 0) / currVals.length;
 
   return (
-    <div className="space-y-5">
-      {/* Controls */}
+    <div className="space-y-4">
+      {/* ── Controls ────────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1 rounded-xl border border-white/[0.07] bg-white/[0.03] p-1">
+        {/* Term tabs — .docket-tab style */}
+        <div className="flex items-center gap-2 flex-wrap">
           {competencies.map((c) => (
             <button
               key={c.term}
               onClick={() => setActiveTerm(c.term)}
               className={[
-                "rounded-lg px-4 py-1.5 text-xs font-semibold transition-all",
+                "rounded-full border px-4 py-1.5 text-xs font-bold transition-all active:scale-95",
                 activeTerm === c.term
-                  ? "bg-purple-500 text-white"
-                  : "text-white/40 hover:text-white",
+                  ? "border-blue-600 bg-blue-600 text-white shadow-md shadow-blue-200"
+                  : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700",
               ].join(" ")}
             >
               Term {c.term}
             </button>
           ))}
         </div>
-
         {competencies.length > 1 && (
           <button
             onClick={() => setCompareMode((v) => !v)}
             className={[
-              "rounded-xl px-3.5 py-2 text-xs font-semibold border transition-all",
+              "rounded-xl border px-3 py-1.5 text-xs font-bold transition-all active:scale-95 shadow-sm",
               compareMode
-                ? "border-sky-400/40 bg-sky-400/10 text-sky-400"
-                : "border-white/10 text-white/40 hover:text-white hover:border-white/20",
+                ? "border-cyan-200 bg-cyan-100 text-cyan-700"
+                : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700",
             ].join(" ")}
           >
-            {compareMode ? "Comparing terms" : "Compare with previous"}
+            {compareMode ? "Comparing ✓" : "Compare terms"}
           </button>
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* SVG Radar */}
-        <div className="lg:col-span-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4 flex items-center justify-center">
+      {/* ── Average score — .stat-card .sc-purple style ────────────────────── */}
+      <div className="rounded-2xl border border-purple-200 bg-purple-50 px-4 py-3 flex items-center gap-4 shadow-sm">
+        <div className="text-center flex-shrink-0">
+          <p className="text-2xl font-black text-purple-700 tabular-nums leading-none">
+            {avg.toFixed(1)}
+            <span className="text-sm font-semibold text-purple-400">/5</span>
+          </p>
+          <p className="text-[9px] font-black uppercase tracking-widest text-purple-500 mt-1">
+            Avg · Term {activeTerm}
+          </p>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="h-2 rounded-full bg-purple-200 overflow-hidden mb-1.5">
+            <div
+              className="h-full rounded-full bg-purple-500 transition-all duration-700"
+              style={{ width: `${(avg / LEVELS) * 100}%` }}
+            />
+          </div>
+          <p className="text-xs font-semibold text-purple-600">
+            {LEVEL_LABEL[Math.round(avg)] ?? ""}
+          </p>
+        </div>
+      </div>
+
+      {/* ── Radar + bars ─────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 gap-4">
+        {/* SVG */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 flex items-center justify-center shadow-sm">
           <svg
             viewBox="0 0 320 320"
             width="100%"
-            style={{ maxWidth: 340 }}
-            aria-label={`Competency radar chart for ${studentName}`}
+            style={{ maxWidth: 320 }}
+            aria-label={`Competency radar for ${studentName}`}
           >
             <RadarGrid />
-            {prevValues && (
+            {prevVals && (
               <RadarPolygon
-                values={prevValues}
-                color="#38bdf8"
-                opacity={0.08}
-                strokeOpacity={0.35}
+                vals={prevVals}
+                color="#22d3ee"
+                fillOp={0.07}
+                strokeOp={0.4}
               />
             )}
             <RadarPolygon
-              values={currentValues}
-              color="#a78bfa"
-              opacity={0.2}
-              strokeOpacity={0.9}
+              vals={currVals}
+              color="#7c3aed"
+              fillOp={0.15}
+              strokeOp={0.9}
             />
             <RadarLabels />
           </svg>
         </div>
 
-        {/* Score breakdown */}
-        <div className="lg:col-span-2 space-y-3">
-          {/* Average badge */}
-          <div className="rounded-xl border border-purple-400/20 bg-purple-400/5 px-4 py-3 text-center">
-            <p className="text-2xl font-bold text-purple-400">
-              {avg.toFixed(1)}
-              <span className="text-sm font-normal text-purple-400/60">/5</span>
-            </p>
-            <p className="text-[10px] uppercase tracking-widest text-purple-400/60 mt-0.5">
-              Average Score · Term {activeTerm}
-            </p>
-          </div>
-
-          {/* Per-domain bars */}
-          <div className="space-y-2">
-            {COMPETENCY_DOMAINS.map((domain, i) => {
-              const val = currentValues[i]!;
-              const prevVal = prevValues?.[i] ?? null;
-              const pct = (val / LEVELS) * 100;
-              const delta = prevVal !== null ? val - prevVal : null;
-
-              return (
-                <div key={domain.key} className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-white/60 flex items-center gap-1.5">
-                      <span>{domain.icon}</span>
-                      <span>{domain.label}</span>
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      {delta !== null && delta !== 0 && (
-                        <span
-                          className={`text-[9px] font-bold ${delta > 0 ? "text-emerald-400" : "text-rose-400"}`}
-                        >
-                          {delta > 0 ? "▲" : "▼"}
-                          {Math.abs(delta)}
-                        </span>
-                      )}
-                      <span className="text-xs font-bold text-white tabular-nums">
-                        {val}/5
+        {/* Domain bars */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
+          {COMPETENCY_DOMAINS.map((domain, i) => {
+            const val = currVals[i]!;
+            const pval = prevVals?.[i] ?? null;
+            const delta = pval !== null ? val - pval : null;
+            return (
+              <div key={domain.key} className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
+                    <span className="text-sm">{domain.icon}</span>
+                    {domain.label}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {delta !== null && delta !== 0 && (
+                      <span
+                        className={`text-[9px] font-black ${delta > 0 ? "text-emerald-600" : "text-red-600"}`}
+                      >
+                        {delta > 0 ? "▲" : "▼"}
+                        {Math.abs(delta)}
                       </span>
-                    </div>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${pct}%`, background: domain.color }}
-                    />
+                    )}
+                    <span className="text-xs font-black text-slate-800 tabular-nums">
+                      {val}/5
+                    </span>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-
-          {/* Legend for compare mode */}
+                <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${(val / LEVELS) * 100}%`,
+                      background: domain.color,
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
           {compareMode && prev && (
-            <div className="flex items-center gap-4 pt-2 text-xs text-white/40">
+            <div className="flex items-center gap-4 pt-2 border-t border-slate-100 text-xs text-slate-400 font-semibold">
               <span className="flex items-center gap-1.5">
-                <span className="w-3 h-0.5 bg-purple-400 inline-block rounded" />
+                <span className="inline-block h-0.5 w-5 bg-purple-500 rounded" />
                 Term {activeTerm}
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="w-3 h-0.5 bg-sky-400 inline-block rounded opacity-50" />
+                <span className="inline-block h-0.5 w-5 bg-cyan-400 rounded" />
                 Term {activeTerm - 1}
               </span>
             </div>

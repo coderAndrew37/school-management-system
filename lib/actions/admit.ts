@@ -67,9 +67,6 @@ export async function searchParentsAction(
 export async function admitStudentAction(
   formData: FormData,
 ): Promise<AdmissionActionResult> {
-  // Pull existingParentId before schema validation so we can conditionally
-  // relax the phone number check — an existing parent's phone is already
-  // stored and we don't re-validate it here.
   const existingParentId =
     (formData.get("existingParentId") as string | null) || null;
 
@@ -80,18 +77,13 @@ export async function admitStudentAction(
     currentGrade: formData.get("currentGrade"),
     relationshipType: formData.get("relationshipType") ?? "guardian",
     existingParentId,
-    // When linking an existing parent these three are irrelevant to us,
-    // but the schema requires them. We pass safe placeholder values so
-    // validation passes, then never use them in Flow A below.
     parentName: existingParentId
       ? (formData.get("parentName") ?? "placeholder")
       : formData.get("parentName"),
     parentEmail: existingParentId
       ? (formData.get("parentEmail") ?? "placeholder@placeholder.com")
       : formData.get("parentEmail"),
-    parentPhone: existingParentId
-      ? "0700000000" // valid Kenyan format — satisfies regex but is never used
-      : formData.get("parentPhone"),
+    parentPhone: existingParentId ? "0700000000" : formData.get("parentPhone"),
   };
 
   const parsed = admissionSchema.safeParse(raw);
@@ -133,9 +125,8 @@ export async function admitStudentAction(
 
       parentId = existing.id;
     } else {
-      // ── FLOW B: Create new parent ───────────────────────────────────────────
+      // ── FLOW B: Create new parent ─────────────────────────────────────────
 
-      // Guard against duplicate email
       const { data: existingByEmail } = await supabaseAdmin
         .from("parents")
         .select("id")
@@ -200,10 +191,12 @@ export async function admitStudentAction(
           parentEmail,
           parentName,
           studentName,
+          grade: currentGrade, // ← added
           setupLink,
         });
       } catch (mailErr) {
         console.error("Mail delivery failed:", mailErr);
+        // Non-fatal — student is still admitted, admin can resend invite
       }
     }
 
@@ -244,8 +237,6 @@ export async function admitStudentAction(
     revalidatePath("/parents");
     revalidatePath("/dashboard");
 
-    // Return success — the form handles the toast + redirect client-side
-    // so the user actually sees the confirmation before navigation.
     return { success: true, message: "Student admitted successfully." };
   } catch (err: any) {
     console.error("Admission Error:", err.message);
@@ -264,7 +255,9 @@ export async function resendInviteAction(parentId: string) {
       .from("parents")
       .select(
         `email, full_name,
-        student_parents ( students ( full_name ) )`,
+        student_parents (
+          students ( full_name, current_grade )
+        )`,
       )
       .eq("id", parentId)
       .single();
@@ -283,14 +276,13 @@ export async function resendInviteAction(parentId: string) {
     if (linkError) throw linkError;
 
     const setupLink = linkData.properties.action_link;
-    const firstChildName =
-      (parent.student_parents as any[])?.[0]?.students?.full_name ??
-      "your child";
+    const firstChild = (parent.student_parents as any[])?.[0]?.students;
 
     await sendWelcomeEmail({
       parentEmail: parent.email,
       parentName: parent.full_name,
-      studentName: firstChildName,
+      studentName: firstChild?.full_name ?? "your child",
+      grade: firstChild?.current_grade ?? "—", // ← added
       setupLink,
     });
 

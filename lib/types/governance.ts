@@ -150,6 +150,8 @@ export interface FeePayment {
     readable_id: string | null;
     current_grade: string;
   } | null;
+  payment_date: string;
+  reference_number: number;
 }
 
 // ── Attendance ────────────────────────────────────────────────────────────────

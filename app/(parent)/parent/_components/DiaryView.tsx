@@ -1,10 +1,15 @@
 "use client";
 
 import type { DiaryEntry } from "@/lib/types/parent";
-import { AlertCircle, ChevronDown, Clock, Filter } from "lucide-react";
+import {
+  AlertCircle,
+  BookOpen,
+  ChevronDown,
+  Clock,
+  Filter,
+  PenLine,
+} from "lucide-react";
 import { useState } from "react";
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatDate(dateStr: string) {
   return new Date(dateStr + "T00:00:00").toLocaleDateString("en-KE", {
@@ -13,72 +18,66 @@ function formatDate(dateStr: string) {
     month: "long",
   });
 }
-
-function isDueSoon(dueDateStr: string | null): boolean {
-  if (!dueDateStr) return false;
-  const due = new Date(dueDateStr + "T00:00:00");
-  const now = new Date();
-  const diff = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+function isDueSoon(d: string | null): boolean {
+  if (!d) return false;
+  const diff = (new Date(d + "T00:00:00").getTime() - Date.now()) / 86400000;
   return diff >= 0 && diff <= 3;
 }
-
-function isOverdue(dueDateStr: string | null): boolean {
-  if (!dueDateStr) return false;
-  return new Date(dueDateStr + "T00:00:00") < new Date();
+function isOverdue(d: string | null): boolean {
+  if (!d) return false;
+  return new Date(d + "T00:00:00") < new Date();
 }
-
-// ── Component ─────────────────────────────────────────────────────────────────
+function shortDate(d: string) {
+  return new Date(d + "T00:00:00").toLocaleDateString("en-KE", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+}
 
 interface Props {
   entries: DiaryEntry[];
 }
 
 export function DiaryView({ entries }: Props) {
-  const [subjectFilter, setSubjectFilter] = useState<string>("all");
+  const [subjectFilter, setSubjectFilter] = useState("all");
   const [showOnlyHw, setShowOnlyHw] = useState(false);
 
-  // Subject options
   const subjects = [
     "all",
     ...Array.from(
       new Set(entries.map((e) => e.subject_name).filter(Boolean) as string[]),
     ).sort(),
   ];
-
-  // Filter
   const filtered = entries.filter((e) => {
-    const matchSubject =
-      subjectFilter === "all" || e.subject_name === subjectFilter;
-    const matchHw = !showOnlyHw || !!e.homework;
-    return matchSubject && matchHw;
+    const ms = subjectFilter === "all" || e.subject_name === subjectFilter;
+    const mh = !showOnlyHw || !!e.homework;
+    return ms && mh;
   });
-
-  // Homework due soon
   const urgentHw = entries.filter((e) => e.homework && isDueSoon(e.due_date));
 
   return (
-    <div className="space-y-5">
-      {/* Urgent homework banner */}
+    <div className="space-y-4">
+      {/* ── Due-soon banner — matches .alert .al-amber ─────────────────────── */}
       {urgentHw.length > 0 && (
-        <div className="rounded-xl border border-amber-400/30 bg-amber-400/[0.06] px-4 py-3 space-y-2">
-          <p className="text-xs font-bold uppercase tracking-widest text-amber-400 flex items-center gap-2">
-            <AlertCircle className="h-3.5 w-3.5" /> Homework due soon
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3.5 space-y-2.5">
+          <p className="text-xs font-black uppercase tracking-widest text-amber-700 flex items-center gap-2">
+            <AlertCircle className="h-3.5 w-3.5" />
+            Homework due soon
           </p>
           {urgentHw.map((e) => (
-            <div key={e.id} className="flex items-start gap-2 text-xs">
-              <span className="text-amber-400/70 font-semibold flex-shrink-0 min-w-[80px]">
+            <div key={e.id} className="flex items-start gap-2">
+              <span className="text-[10px] font-black text-amber-600 min-w-[72px] flex-shrink-0 mt-0.5">
                 {e.subject_name ?? "General"}
               </span>
-              <span className="text-white/70">{e.homework}</span>
+              <span className="flex-1 text-xs text-amber-800 leading-relaxed">
+                {e.homework}
+              </span>
               {e.due_date && (
                 <span
-                  className={`ml-auto flex-shrink-0 font-bold ${isOverdue(e.due_date) ? "text-rose-400" : "text-amber-400"}`}
+                  className={`flex-shrink-0 text-[10px] font-black ml-1 ${isOverdue(e.due_date) ? "text-red-700" : "text-amber-700"}`}
                 >
-                  Due{" "}
-                  {new Date(e.due_date + "T00:00:00").toLocaleDateString(
-                    "en-KE",
-                    { day: "numeric", month: "short" },
-                  )}
+                  {shortDate(e.due_date)}
                 </span>
               )}
             </div>
@@ -86,84 +85,92 @@ export function DiaryView({ entries }: Props) {
         </div>
       )}
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative">
+      {/* ── Filters ────────────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-0 max-w-[180px]">
           <select
-            aria-label="subject filter"
             value={subjectFilter}
             onChange={(e) => setSubjectFilter(e.target.value)}
-            className="appearance-none rounded-xl border border-white/10 bg-white/5 pl-3 pr-8 py-2 text-xs text-white outline-none focus:border-white/20 cursor-pointer"
+            aria-label="subject filter"
+            className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 py-2 pr-8 text-xs font-semibold text-slate-600 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 cursor-pointer shadow-sm"
           >
             {subjects.map((s) => (
-              <option key={s} value={s} className="bg-[#0c0f1a]">
+              <option key={s} value={s}>
                 {s === "all" ? "All subjects" : s}
               </option>
             ))}
           </select>
-          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/30" />
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
         </div>
+
         <button
           onClick={() => setShowOnlyHw((v) => !v)}
-          className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold border transition-all ${
+          className={[
+            "flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-xs font-bold transition-all active:scale-95",
             showOnlyHw
-              ? "bg-amber-400/15 border-amber-400/30 text-amber-400"
-              : "border-white/10 text-white/40 hover:text-white"
-          }`}
+              ? "border-amber-500 bg-amber-500 text-white shadow-sm shadow-amber-200"
+              : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700",
+          ].join(" ")}
         >
           <Filter className="h-3 w-3" />
           Homework only
         </button>
-        <p className="ml-auto text-xs text-white/30">
-          {filtered.length} entr{filtered.length !== 1 ? "ies" : "y"}
+
+        <p className="ml-auto text-[10px] font-bold text-slate-400">
+          {filtered.length} {filtered.length !== 1 ? "entries" : "entry"}
         </p>
       </div>
 
-      {/* Entries */}
+      {/* ── Entries ────────────────────────────────────────────────────────── */}
       {filtered.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-white/10 py-16 text-center">
-          <p className="text-3xl mb-2">📔</p>
-          <p className="text-sm text-white/40">No diary entries found</p>
+        <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 py-14 text-center">
+          <BookOpen className="h-8 w-8 text-slate-300 mx-auto mb-3" />
+          <p className="font-bold text-slate-500">No diary entries found</p>
         </div>
       ) : (
         <div className="space-y-3">
           {filtered.map((entry) => {
             const hasHw = !!entry.homework;
             const overdue = isOverdue(entry.due_date);
-            const dueSoon = isDueSoon(entry.due_date);
-
+            const soon = isDueSoon(entry.due_date);
             return (
               <div
                 key={entry.id}
-                className={`rounded-2xl border p-5 space-y-3 transition-colors ${
+                className={[
+                  "rounded-2xl border p-4 space-y-3 transition-all shadow-sm",
                   hasHw
-                    ? "border-amber-400/20 bg-amber-400/[0.03]"
-                    : "border-white/[0.07] bg-white/[0.02]"
-                }`}
+                    ? "border-amber-200 bg-amber-50"
+                    : "border-slate-200 bg-white",
+                ].join(" ")}
               >
                 {/* Header */}
                 <div className="flex items-start gap-3">
                   <div
-                    className={`flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center text-base ${
+                    className={[
+                      "flex-shrink-0 h-9 w-9 rounded-xl flex items-center justify-center border",
                       hasHw
-                        ? "bg-amber-400/15 border border-amber-400/25"
-                        : "bg-white/5 border border-white/10"
-                    }`}
+                        ? "border-amber-200 bg-amber-100"
+                        : "border-slate-200 bg-slate-100",
+                    ].join(" ")}
                   >
-                    {hasHw ? "✏️" : "📝"}
+                    {hasHw ? (
+                      <PenLine className="h-4 w-4 text-amber-700" />
+                    ) : (
+                      <BookOpen className="h-4 w-4 text-slate-500" />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-semibold text-white text-sm">
+                    <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                      <p className="text-sm font-black text-slate-800 leading-snug">
                         {entry.title}
                       </p>
                       {entry.subject_name && (
-                        <span className="text-[10px] text-sky-400 border border-sky-400/25 bg-sky-400/10 px-2 py-0.5 rounded-md font-semibold">
+                        <span className="text-[10px] font-bold border border-cyan-200 bg-cyan-100 text-cyan-700 px-2 py-0.5 rounded-full">
                           {entry.subject_name}
                         </span>
                       )}
                     </div>
-                    <p className="text-[10px] text-white/30 mt-0.5 flex items-center gap-1.5">
+                    <p className="text-[10px] font-semibold text-slate-400 flex items-center gap-1.5">
                       <Clock className="h-3 w-3" />
                       {formatDate(entry.diary_date)} · {entry.author_name}
                     </p>
@@ -171,45 +178,37 @@ export function DiaryView({ entries }: Props) {
                 </div>
 
                 {/* Body */}
-                <p className="text-sm text-white/60 leading-relaxed">
+                <p className="text-sm text-slate-600 leading-relaxed">
                   {entry.body}
                 </p>
 
                 {/* Homework block */}
                 {hasHw && (
                   <div
-                    className={`rounded-xl border px-4 py-3 space-y-1 ${
+                    className={[
+                      "rounded-xl border px-3.5 py-3 space-y-1.5",
                       overdue
-                        ? "border-rose-400/30 bg-rose-400/[0.07]"
-                        : dueSoon
-                          ? "border-amber-400/40 bg-amber-400/[0.09]"
-                          : "border-amber-400/20 bg-amber-400/[0.05]"
-                    }`}
+                        ? "border-red-200 bg-red-50"
+                        : soon
+                          ? "border-amber-300 bg-amber-100"
+                          : "border-amber-200 bg-white",
+                    ].join(" ")}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p
-                        className={`text-[10px] font-bold uppercase tracking-widest ${
-                          overdue ? "text-rose-400" : "text-amber-400"
-                        }`}
+                        className={`text-[10px] font-black uppercase tracking-widest ${overdue ? "text-red-700" : "text-amber-700"}`}
                       >
-                        {overdue ? "⚠️ Overdue Homework" : "📚 Homework"}
+                        {overdue ? "⚠ Overdue" : "📚 Homework"}
                       </p>
                       {entry.due_date && (
                         <span
-                          className={`text-[10px] font-bold ${overdue ? "text-rose-400" : dueSoon ? "text-amber-400" : "text-white/40"}`}
+                          className={`text-[10px] font-bold ${overdue ? "text-red-700" : soon ? "text-amber-700" : "text-slate-500"}`}
                         >
-                          Due:{" "}
-                          {new Date(
-                            entry.due_date + "T00:00:00",
-                          ).toLocaleDateString("en-KE", {
-                            weekday: "short",
-                            day: "numeric",
-                            month: "short",
-                          })}
+                          Due {shortDate(entry.due_date)}
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-white/75 leading-relaxed">
+                    <p className="text-sm text-slate-700 leading-relaxed">
                       {entry.homework}
                     </p>
                   </div>

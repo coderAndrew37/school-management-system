@@ -1,51 +1,115 @@
 "use client";
 
+import { useState } from "react";
 import {
-  BarChart2,
   Bell,
   BookOpen,
   Calendar,
-  Compass,
-  Image,
   MessageSquare,
+  Image,
+  Compass,
+  BarChart2,
+  Megaphone,
+  CalendarDays,
+  CreditCard,
 } from "lucide-react";
-import { useState } from "react";
 
 import type { ChildPortalData } from "@/lib/data/parent";
 import type { Student } from "@/lib/types/dashboard";
+import { NotificationsPanel } from "./NotificationsPanel";
+import { AnnouncementsView } from "./AnnouncementsView";
 import { AttendancePanel } from "./AttendancePanel";
 import { CommunicationBook } from "./CommunicationBook";
 import { CompetencyRadar } from "./CompetencyRadar";
 import { DiaryView } from "./DiaryView";
+import { FeeStatusPanel } from "./FeesStatusPanel";
 import { JssPathwayPanel } from "./JSSPathwayPanel";
-import { NotificationsPanel } from "./NotificationsPanel";
+import { SchoolCalendarView } from "./SchoolCalendarView";
 import { TalentGallery } from "./TalentGallery";
 
-// ── Tab config ─────────────────────────────────────────────────────────────────
+// ── Tab config ────────────────────────────────────────────────────────────────
 
 const TABS = [
   { id: "notifications", label: "Alerts", icon: Bell },
+  { id: "announcements", label: "Notices", icon: Megaphone },
   { id: "diary", label: "Diary", icon: BookOpen },
   { id: "attendance", label: "Attendance", icon: Calendar },
   { id: "communication", label: "Messages", icon: MessageSquare },
-  { id: "competencies", label: "Competencies", icon: BarChart2 },
+  { id: "fees", label: "Fees", icon: CreditCard },
+  { id: "events", label: "Events", icon: CalendarDays },
+  { id: "competencies", label: "Skills", icon: BarChart2 },
   { id: "gallery", label: "Gallery", icon: Image },
   { id: "pathway", label: "Pathway", icon: Compass },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
 
-const TAB_COLORS: Record<TabId, string> = {
-  notifications: "text-sky-400 border-sky-400/30 bg-sky-400/10",
-  diary: "text-amber-400 border-amber-400/30 bg-amber-400/10",
-  attendance: "text-emerald-400 border-emerald-400/30 bg-emerald-400/10",
-  communication: "text-purple-400 border-purple-400/30 bg-purple-400/10",
-  competencies: "text-pink-400 border-pink-400/30 bg-pink-400/10",
-  gallery: "text-orange-400 border-orange-400/30 bg-orange-400/10",
-  pathway: "text-indigo-400 border-indigo-400/30 bg-indigo-400/10",
+// Tab → accent color for the active indicator & section header
+const TAB_ACCENT: Record<
+  TabId,
+  { icon: string; bg: string; border: string; text: string }
+> = {
+  notifications: {
+    icon: "bg-blue-100",
+    bg: "bg-blue-50",
+    border: "border-blue-200",
+    text: "text-blue-700",
+  },
+  announcements: {
+    icon: "bg-amber-100",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-700",
+  },
+  diary: {
+    icon: "bg-amber-100",
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-700",
+  },
+  attendance: {
+    icon: "bg-emerald-100",
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    text: "text-emerald-700",
+  },
+  communication: {
+    icon: "bg-purple-100",
+    bg: "bg-purple-50",
+    border: "border-purple-200",
+    text: "text-purple-700",
+  },
+  fees: {
+    icon: "bg-red-100",
+    bg: "bg-red-50",
+    border: "border-red-200",
+    text: "text-red-700",
+  },
+  events: {
+    icon: "bg-cyan-100",
+    bg: "bg-cyan-50",
+    border: "border-cyan-200",
+    text: "text-cyan-700",
+  },
+  competencies: {
+    icon: "bg-pink-100",
+    bg: "bg-pink-50",
+    border: "border-pink-200",
+    text: "text-pink-700",
+  },
+  gallery: {
+    icon: "bg-orange-100",
+    bg: "bg-orange-50",
+    border: "border-orange-200",
+    text: "text-orange-700",
+  },
+  pathway: {
+    icon: "bg-indigo-100",
+    bg: "bg-indigo-50",
+    border: "border-indigo-200",
+    text: "text-indigo-700",
+  },
 };
-
-// ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
   child: Student;
@@ -53,11 +117,10 @@ interface Props {
   senderRole: "parent" | "teacher" | "admin";
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
-
 export function ParentPortalHub({ child, data, senderRole }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>("notifications");
 
+  // ── Badges ────────────────────────────────────────────────────────────────
   const unreadNotifs = data.notifications.filter((n) => !n.is_read).length;
   const unreadMsgs = data.messages.filter(
     (m) => !m.is_read && m.sender_role !== senderRole,
@@ -70,43 +133,63 @@ export function ParentPortalHub({ child, data, senderRole }: Props) {
       (new Date(e.due_date + "T00:00:00").getTime() - Date.now()) / 86400000 <=
         3,
   ).length;
+  const urgentAnnouncements = (data.announcements ?? []).filter((a) => {
+    if (a.expires_at && new Date(a.expires_at) < new Date()) return false;
+    if (a.audience === "teachers") return false;
+    if (a.audience === "grade" && a.target_grade !== child.current_grade)
+      return false;
+    return a.priority === "urgent" || a.priority === "high";
+  }).length;
+  const feeArrears = (data.feePayments ?? []).filter((p) =>
+    ["overdue", "partial", "pending"].includes(p.status),
+  ).length;
+  const soonEvents = (data.events ?? []).filter((e) => {
+    const diff =
+      (new Date(e.start_date + "T00:00:00").getTime() - Date.now()) / 86400000;
+    return diff >= 0 && diff <= 7;
+  }).length;
 
   const BADGES: Partial<Record<TabId, number>> = {
     notifications: unreadNotifs,
+    announcements: urgentAnnouncements,
     communication: unreadMsgs,
     diary: homeworkDue,
+    fees: feeArrears,
+    events: soonEvents,
   };
 
-  const activeColor = TAB_COLORS[activeTab];
+  const accent = TAB_ACCENT[activeTab];
+  const activeTab_ = TABS.find((t) => t.id === activeTab)!;
+  const ActiveIcon = activeTab_.icon;
 
   return (
-    <div className="space-y-5">
-      {/* ── Tab bar ───────────────────────────────────────────────────────── */}
-      <div className="overflow-x-auto scrollbar-none">
-        <div className="flex items-center gap-1 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-1.5 w-max min-w-full sm:min-w-0">
+    <div className="space-y-4">
+      {/* ── Tab bar ─────────────────────────────────────────────────────────── */}
+      <div className="overflow-x-auto scrollbar-none -mx-1 px-1">
+        <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-white p-1.5 w-max min-w-full sm:min-w-0 shadow-sm">
           {TABS.map(({ id, label, icon: Icon }) => {
             const isActive = activeTab === id;
             const badge = BADGES[id];
-            const color = TAB_COLORS[id];
+            const ac = TAB_ACCENT[id];
             return (
               <button
                 key={id}
                 onClick={() => setActiveTab(id)}
                 className={[
-                  "relative flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all whitespace-nowrap",
+                  "relative flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition-all whitespace-nowrap",
                   isActive
-                    ? `border ${color}`
-                    : "text-white/40 hover:text-white",
+                    ? `${ac.bg} ${ac.text} border ${ac.border} shadow-sm`
+                    : "text-slate-400 hover:text-slate-700 hover:bg-slate-50",
                 ].join(" ")}
               >
                 <Icon className="h-3.5 w-3.5 flex-shrink-0" />
                 {label}
                 {badge && badge > 0 ? (
                   <span
-                    className={`ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold ${
+                    className={`ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-black ${
                       isActive
-                        ? "bg-white/20 text-white"
-                        : "bg-sky-500 text-white"
+                        ? "bg-white/70 text-inherit"
+                        : "bg-red-500 text-white"
                     }`}
                   >
                     {badge}
@@ -118,31 +201,27 @@ export function ParentPortalHub({ child, data, senderRole }: Props) {
         </div>
       </div>
 
-      {/* ── Section header ────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3">
-        {(() => {
-          const tab = TABS.find((t) => t.id === activeTab)!;
-          const Icon = tab.icon;
-          return (
-            <>
-              <div
-                className={`w-8 h-8 rounded-xl flex items-center justify-center border ${activeColor}`}
-              >
-                <Icon className="h-4 w-4" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-white">{tab.label}</p>
-                <p className="text-[10px] text-white/30">
-                  {child.full_name} · {child.current_grade}
-                </p>
-              </div>
-            </>
-          );
-        })()}
+      {/* ── Section header ───────────────────────────────────────────────────── */}
+      <div
+        className={`flex items-center gap-3 rounded-xl border ${accent.border} ${accent.bg} px-4 py-3`}
+      >
+        <div
+          className={`flex h-8 w-8 items-center justify-center rounded-xl ${accent.icon} ${accent.text}`}
+        >
+          <ActiveIcon className="h-4 w-4" />
+        </div>
+        <div>
+          <p className={`text-sm font-black ${accent.text}`}>
+            {activeTab_.label}
+          </p>
+          <p className="text-[10px] font-semibold text-slate-400">
+            {child.full_name} · {child.current_grade}
+          </p>
+        </div>
       </div>
 
-      {/* ── Panel ─────────────────────────────────────────────────────────── */}
-      <div>
+      {/* ── Content panel ────────────────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         {activeTab === "notifications" && (
           <NotificationsPanel
             notifications={data.notifications}
@@ -178,6 +257,25 @@ export function ParentPortalHub({ child, data, senderRole }: Props) {
             studentId={child.id}
             studentName={child.full_name}
             grade={child.current_grade}
+          />
+        )}
+        {activeTab === "announcements" && (
+          <AnnouncementsView
+            announcements={data.announcements ?? []}
+            childGrade={child.current_grade}
+          />
+        )}
+        {activeTab === "events" && (
+          <SchoolCalendarView
+            events={data.events ?? []}
+            childGrade={child.current_grade}
+          />
+        )}
+        {activeTab === "fees" && (
+          <FeeStatusPanel
+            payments={data.feePayments ?? []}
+            childName={child.full_name}
+            childGrade={child.current_grade}
           />
         )}
       </div>
