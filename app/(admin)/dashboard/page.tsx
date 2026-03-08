@@ -28,6 +28,7 @@ import {
 import { StatCard } from "@/app/_components/dashboard/StatCard";
 import { StudentGrid } from "@/app/_components/dashboard/StudentGrd";
 import { TeachersTable } from "@/app/_components/dashboard/TeachersTable";
+import RegisterTeacherModal from "@/app/_components/teachers/RegisterTeacherModal";
 
 export const metadata = {
   title: "Dashboard | Kibali Academy",
@@ -74,13 +75,19 @@ export default async function DashboardPage() {
             </div>
           </div>
 
-          <Link
-            href="/admission"
-            className="flex items-center gap-2 rounded-xl bg-amber-400 hover:bg-amber-300 active:scale-95 transition-all duration-200 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#0c0f1a] shadow-lg shadow-amber-400/20"
-          >
-            <UserRoundPlus className="h-4 w-4" />
-            Admit Student
-          </Link>
+          <div className="flex items-center gap-3">
+            {/* NEW: Green Teacher Modal Button */}
+            <RegisterTeacherModal />
+
+            {/* Existing Student Link */}
+            <Link
+              href="/admission"
+              className="flex items-center gap-2 rounded-xl bg-amber-400 hover:bg-amber-300 active:scale-95 transition-all duration-200 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#0c0f1a] shadow-lg shadow-amber-400/20"
+            >
+              <UserRoundPlus className="h-4 w-4" />
+              Admit Student
+            </Link>
+          </div>
         </header>
 
         {/* ── Stat Cards ─────────────────────────────────────────────────────── */}

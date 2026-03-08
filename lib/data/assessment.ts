@@ -1,168 +1,317 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { AssessmentGridState, GridStudent } from "@/lib/types/assessment";
+import type { SubjectLevel } from "@/lib/types/allocation";
 
-// ── Types for raw DB rows ─────────────────────────────────────────────────────
-
-interface RawAssessment {
-  id: string;
-  student_id: string;
-  subject_name: string;
-  strand_id: string;
-  score: "EE" | "ME" | "AE" | "BE" | null;
-  term: number;
-  academic_year: number;
-}
-
-interface RawNarrative {
-  student_id: string;
-  subject_name: string;
-  narrative: string;
-}
-
-// ── Fetch a teacher's own record from their profile teacher_id ────────────────
-
-export async function fetchTeacherRecord(teacherId: string) {
-  const supabase = await createSupabaseServerClient();
-  const { data } = await supabase
-    .from("teachers")
-    .select("id, full_name, email, tsc_number")
-    .eq("id", teacherId)
-    .single();
-  return data;
-}
-
-// ── Fetch students in a grade with existing assessments for a term ────────────
-
-export interface ClassAssessmentData {
-  students: GridStudent[];
-  gridState: AssessmentGridState;
-}
-
-export async function fetchClassAssessments(
-  grade: string,
-  subjectName: string,
-  term: number,
-  academicYear: number = 2026,
-): Promise<ClassAssessmentData> {
-  const supabase = await createSupabaseServerClient();
-
-  // Fetch students in this grade
-  const { data: studentData, error: sErr } = await supabase
-    .from("students")
-    .select("id, full_name, readable_id, current_grade")
-    .eq("current_grade", grade)
-    .order("full_name");
-
-  if (sErr) {
-    console.error("[fetchClassAssessments] students:", sErr.message);
-    return { students: [], gridState: {} };
-  }
-
-  const students = (studentData ?? []) as GridStudent[];
-  const studentIds = students.map((s) => s.id);
-
-  if (studentIds.length === 0) return { students: [], gridState: {} };
-
-  // Fetch existing assessments for this subject/term
-  const { data: assessData } = await supabase
-    .from("assessments")
-    .select(
-      "id, student_id, subject_name, strand_id, score, term, academic_year",
-    )
-    .in("student_id", studentIds)
-    .eq("subject_name", subjectName)
-    .eq("term", term)
-    .eq("academic_year", academicYear);
-
-  // Fetch cached narrative remarks
-  const { data: narrativeData } = await supabase
-    .from("assessment_narratives")
-    .select("student_id, subject_name, narrative")
-    .in("student_id", studentIds)
-    .eq("subject_name", subjectName)
-    .eq("term", term)
-    .eq("academic_year", academicYear);
-
-  // Build narrative lookup
-  const narrativeMap: Record<string, string> = {};
-  for (const n of (narrativeData ?? []) as RawNarrative[]) {
-    narrativeMap[n.student_id] = n.narrative;
-  }
-
-  // Attach narratives to students
-  const studentsWithNarratives: GridStudent[] = students.map((s) => ({
-    ...s,
-    narrative: narrativeMap[s.id] ?? null,
-  }));
-
-  // Build grid state from existing DB rows
-  const gridState: AssessmentGridState = {};
-  for (const a of (assessData ?? []) as RawAssessment[]) {
-    const key = `${a.student_id}:${a.subject_name}:${a.strand_id}`;
-    gridState[key] = {
-      assessmentId: a.id,
-      score: a.score,
-      dirty: false,
-    };
-  }
-
-  return { students: studentsWithNarratives, gridState };
-}
-
-// ── Fetch teacher's allocations (grade+subject combos) ───────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface TeacherAllocationSummary {
   id: string;
   grade: string;
   subjectName: string;
   subjectCode: string;
-  subjectLevel: string;
+  subjectLevel: SubjectLevel;
+  weeklyLessons: number;
   studentCount: number;
 }
 
+export interface ClassStudent {
+  id: string;
+  full_name: string;
+  readable_id: string | null;
+  gender: "Male" | "Female" | null;
+  current_grade: string;
+}
+
+export interface AssessmentGridRow {
+  studentId: string;
+  strandId: string;
+  score: "EE" | "ME" | "AE" | "BE" | null;
+  teacherRemarks: string | null;
+  evidenceUrl: string | null;
+}
+
+export type AssessmentGridState = Record<
+  string, // studentId
+  Record<string, AssessmentGridRow> // strandId → row
+>;
+
+export interface ClassAssessmentData {
+  students: ClassStudent[];
+  gridState: AssessmentGridState;
+}
+
+export interface TeacherDiaryEntry {
+  id: string;
+  student_id: string;
+  student_name: string;
+  grade: string;
+  title: string;
+  content: string | null;
+  homework: boolean;
+  due_date: string | null;
+  is_completed: boolean;
+  created_at: string;
+}
+
+export interface AttendanceRecord {
+  id: string;
+  student_id: string;
+  status: "Present" | "Absent" | "Late";
+  date: string;
+  remarks: string | null;
+}
+
+// ── Raw DB shapes ─────────────────────────────────────────────────────────────
+
+interface RawAllocationRow {
+  id: string;
+  teacher_id: string;
+  subject_id: string;
+  grade: string;
+  academic_year: number;
+  created_at: string;
+  teachers:
+    | {
+        id: string;
+        full_name: string;
+        email: string;
+        tsc_number: string | null;
+      }[]
+    | null;
+  subjects:
+    | {
+        id: string;
+        name: string;
+        code: string;
+        level: SubjectLevel;
+        weekly_lessons: number;
+      }[]
+    | null;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+async function fetchStudentCountsByGrade(
+  grades: string[],
+): Promise<Record<string, number>> {
+  if (grades.length === 0) return {};
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .from("students")
+    .select("current_grade")
+    .in("current_grade", grades);
+  const counts: Record<string, number> = {};
+  for (const row of (data ?? []) as { current_grade: string }[]) {
+    counts[row.current_grade] = (counts[row.current_grade] ?? 0) + 1;
+  }
+  return counts;
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/**
+ * All allocations for a teacher, enriched with student counts.
+ * Used by both the dashboard and the assess page.
+ */
 export async function fetchTeacherAssessmentAllocations(
   teacherId: string,
-  academicYear: number = 2026,
+  academicYear = 2026,
 ): Promise<TeacherAllocationSummary[]> {
   const supabase = await createSupabaseServerClient();
 
-  const { data: allocData, error } = await supabase
+  const { data, error } = await supabase
     .from("teacher_subject_allocations")
     .select(
       `
-      id, grade, academic_year,
-      subjects ( name, code, level )
+      id, teacher_id, subject_id, grade, academic_year, created_at,
+      teachers ( id, full_name, email, tsc_number ),
+      subjects ( id, name, code, level, weekly_lessons )
     `,
     )
     .eq("teacher_id", teacherId)
     .eq("academic_year", academicYear)
-    .order("grade");
+    .order("grade")
+    .returns<RawAllocationRow[]>();
+
+  if (error || !data) return [];
+
+  const grades = [...new Set(data.map((r) => r.grade))];
+  const studentCounts = await fetchStudentCountsByGrade(grades);
+
+  return data.map(
+    (row): TeacherAllocationSummary => ({
+      id: row.id,
+      grade: row.grade,
+      subjectName: row.subjects?.[0]?.name ?? "Unknown Subject",
+      subjectCode: row.subjects?.[0]?.code ?? "—",
+      subjectLevel: row.subjects?.[0]?.level ?? "upper_primary",
+      weeklyLessons: row.subjects?.[0]?.weekly_lessons ?? 0,
+      studentCount: studentCounts[row.grade] ?? 0,
+    }),
+  );
+}
+
+/**
+ * All students + existing assessments for one class/subject/term.
+ * Builds the grid state keyed by studentId → strandId.
+ */
+export async function fetchClassAssessments(
+  grade: string,
+  subjectName: string,
+  term: 1 | 2 | 3,
+  academicYear = 2026,
+): Promise<ClassAssessmentData> {
+  const supabase = await createSupabaseServerClient();
+
+  const [{ data: students }, { data: assessments }] = await Promise.all([
+    supabase
+      .from("students")
+      .select("id, full_name, readable_id, gender, current_grade")
+      .eq("current_grade", grade)
+      .order("full_name")
+      .returns<ClassStudent[]>(),
+
+    supabase
+      .from("assessments")
+      .select("student_id, strand_id, score, teacher_remarks, evidence_url")
+      .eq("subject_name", subjectName)
+      .eq("term", term)
+      .eq("academic_year", academicYear),
+  ]);
+
+  const gridState: AssessmentGridState = {};
+
+  for (const student of (students ?? []) as ClassStudent[]) {
+    gridState[student.id] = {};
+  }
+
+  for (const row of (assessments ?? []) as {
+    student_id: string;
+    strand_id: string;
+    score: "EE" | "ME" | "AE" | "BE" | null;
+    teacher_remarks: string | null;
+    evidence_url: string | null;
+  }[]) {
+    if (!gridState[row.student_id]) gridState[row.student_id] = {};
+    gridState[row.student_id]![row.strand_id] = {
+      studentId: row.student_id,
+      strandId: row.strand_id,
+      score: row.score,
+      teacherRemarks: row.teacher_remarks,
+      evidenceUrl: row.evidence_url,
+    };
+  }
+
+  return {
+    students: (students ?? []) as ClassStudent[],
+    gridState,
+  };
+}
+
+/**
+ * All students in a grade — used for attendance + diary views.
+ */
+export async function fetchClassStudents(
+  grade: string,
+): Promise<ClassStudent[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("students")
+    .select("id, full_name, readable_id, gender, current_grade")
+    .eq("current_grade", grade)
+    .order("full_name")
+    .returns<ClassStudent[]>();
 
   if (error) {
-    console.error("[fetchTeacherAssessmentAllocations]", error.message);
+    console.error("[fetchClassStudents]", error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+/**
+ * Attendance records for a class on a specific date.
+ * Used by the teacher to take or review roll call.
+ */
+export async function fetchClassAttendance(
+  grade: string,
+  date: string,
+): Promise<AttendanceRecord[]> {
+  const supabase = await createSupabaseServerClient();
+
+  // Get student ids in this grade first
+  const students = await fetchClassStudents(grade);
+  if (students.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("attendance")
+    .select("id, student_id, status, date, remarks")
+    .in(
+      "student_id",
+      students.map((s) => s.id),
+    )
+    .eq("date", date)
+    .returns<AttendanceRecord[]>();
+
+  if (error) {
+    console.error("[fetchClassAttendance]", error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+/**
+ * Recent diary entries across all grades this teacher covers.
+ * Joined with student name for display.
+ */
+export async function fetchTeacherDiaryEntries(
+  grades: string[],
+  limit = 20,
+): Promise<TeacherDiaryEntry[]> {
+  if (grades.length === 0) return [];
+  const supabase = await createSupabaseServerClient();
+
+  // Get student ids in these grades
+  const { data: studentRows } = await supabase
+    .from("students")
+    .select("id, full_name, current_grade")
+    .in("current_grade", grades);
+
+  const studentMap: Record<string, { name: string; grade: string }> = {};
+  for (const s of (studentRows ?? []) as {
+    id: string;
+    full_name: string;
+    current_grade: string;
+  }[]) {
+    studentMap[s.id] = { name: s.full_name, grade: s.current_grade };
+  }
+
+  const studentIds = Object.keys(studentMap);
+  if (studentIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("student_diary")
+    .select(
+      "id, student_id, title, content, homework, due_date, is_completed, created_at",
+    )
+    .in("student_id", studentIds)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("[fetchTeacherDiaryEntries]", error.message);
     return [];
   }
 
-  if (!allocData || allocData.length === 0) return [];
-
-  // Count students per grade
-  const grades = [...new Set(allocData.map((a: any) => a.grade as string))];
-  const { data: studentData } = await supabase
-    .from("students")
-    .select("current_grade")
-    .in("current_grade", grades);
-
-  const counts: Record<string, number> = {};
-  for (const s of (studentData ?? []) as { current_grade: string }[]) {
-    counts[s.current_grade] = (counts[s.current_grade] ?? 0) + 1;
-  }
-
-  return (allocData as any[]).map((a) => ({
-    id: a.id as string,
-    grade: a.grade as string,
-    subjectName: a.subjects?.name ?? "",
-    subjectCode: a.subjects?.code ?? "",
-    subjectLevel: a.subjects?.level ?? "",
-    studentCount: counts[a.grade as string] ?? 0,
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    student_id: row.student_id,
+    student_name: studentMap[row.student_id]?.name ?? "Unknown",
+    grade: studentMap[row.student_id]?.grade ?? "—",
+    title: row.title,
+    content: row.content,
+    homework: row.homework,
+    due_date: row.due_date,
+    is_completed: row.is_completed,
+    created_at: row.created_at,
   }));
 }

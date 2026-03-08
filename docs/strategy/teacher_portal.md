@@ -1,0 +1,17 @@
+FileRoute
+attendance-page.tsx
+app/teacher/attendance/page.tsx
+AttendanceClient.tsx
+app/teacher/attendance/AttendanceClient.tsx
+diary-page.tsx
+app/teacher/diary/page.tsx
+DiaryClient.tsx
+app/teacher/diary/DiaryClient.tsx
+messages-page.tsx
+app/teacher/messages/page.tsx
+MessagesClient.tsx
+app/teacher/messages/MessagesClient.tsx
+pathway-page.tsx
+app/teacher/pathway/page.tsx
+PathwayClient.tsx
+app/teacher/pathway/PathwayClient.tsx
