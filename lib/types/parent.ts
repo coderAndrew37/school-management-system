@@ -7,13 +7,9 @@ export type CbcScore = "EE" | "ME" | "AE" | "BE";
 export interface ScoreMeta {
   label: CbcScore;
   description: string;
-  /** Tailwind text-color class */
   color: string;
-  /** Tailwind bg-color class */
   bg: string;
-  /** Tailwind border-color class */
   border: string;
-  /** Numeric value used for radar chart: EE=4, ME=3, AE=2, BE=1 */
   numeric: 1 | 2 | 3 | 4;
 }
 
@@ -33,8 +29,7 @@ export interface Assessment {
   created_at: string;
 }
 
-// ── Supabase raw shape returned by the joined query ───────────────────────────
-// Keeps the cast surface minimal — one place to trust, everywhere else is typed.
+// ── Supabase raw shape ────────────────────────────────────────────────────────
 
 export interface StudentRow {
   id: string;
@@ -50,13 +45,13 @@ export interface StudentRow {
   assessments: Assessment[];
 }
 
-// ── Domain model exposed to components ────────────────────────────────────────
+// ── Domain model ──────────────────────────────────────────────────────────────
 
 export interface ChildWithAssessments extends Student {
   assessments: Assessment[];
 }
 
-// ── Derived / computed shapes ─────────────────────────────────────────────────
+// ── Derived shapes ────────────────────────────────────────────────────────────
 
 export interface SubjectSummaryItem {
   subject: string;
@@ -67,7 +62,6 @@ export interface SubjectSummaryItem {
 export interface OverallLevel {
   label: string;
   emoji: string;
-  /** Tailwind text-color class */
   color: string;
 }
 
@@ -77,7 +71,7 @@ export interface RadarPoint {
   fullMark: 4;
 }
 
-// ── Component prop interfaces ─────────────────────────────────────────────────
+// ── Component props ───────────────────────────────────────────────────────────
 
 export interface ParentHomeClientProps {
   children: ChildWithAssessments[];
@@ -123,7 +117,7 @@ export interface AssessmentCardProps {
 
 export interface TermTabsProps {
   terms: Array<1 | 2 | 3>;
-  active: 0 | 1 | 2 | 3; // 0 = all terms
+  active: 0 | 1 | 2 | 3;
   onSelect: (term: 0 | 1 | 2 | 3) => void;
 }
 
@@ -131,7 +125,7 @@ export interface ParentShellProps {
   children: React.ReactNode;
 }
 
-// ── Talent Gallery ───────────────────────────────────────────────────────────
+// ── Talent Gallery ────────────────────────────────────────────────────────────
 
 export type GalleryCategory =
   | "Academic"
@@ -140,22 +134,56 @@ export type GalleryCategory =
   | "Leadership"
   | "Tech";
 
+/**
+ * GalleryItem — mapped from the talent_gallery DB table.
+ *
+ * IMPORTANT column-name notes (DB → app field):
+ *   DB `tags`        → app `tags`        (text[], legacy)
+ *   DB `description` → app `description` (text, legacy)
+ *   DB `media_url`   → storage PATH, not a usable URL — use `signedUrl`
+ *
+ * Audience tiers:
+ *   "student" → specific child
+ *   "class"   → whole grade (target_grade is set)
+ *   "school"  → all parents
+ */
 export interface GalleryItem {
   id: string;
-  student_id: string;
+
+  // ownership / audience
+  student_id: string | null;
+  target_grade: string | null;
+  audience: "student" | "class" | "school";
+  teacher_id: string | null;
+
+  // content
   title: string;
-  description?: string;
-  media_type: "image" | "video" | "audio" | "document";
+  caption: string | null;
+  description: string | null; // legacy column, still on the DB
+  category: string | null;
+  media_type: "image" | "video";
+
+  /**
+   * media_url — raw Supabase Storage PATH e.g. "{teacher_id}/{uuid}.jpg".
+   * Never pass to <img src>. Always use signedUrl.
+   */
   media_url: string;
-  category: GalleryCategory;
-  skills_tagged: string[];
-  captured_on: string; // ISO Date string (YYYY-MM-DD)
+
+  /**
+   * signedUrl — 1-hour signed URL hydrated server-side.
+   * Empty string if signing failed.
+   */
+  signedUrl: string;
+
+  // legacy fields — present on old rows
+  tags: string[]; // DB column `tags` text[]
+
+  // context
+  term: number | null;
+  academic_year: number | null;
   created_at: string;
 }
 
-/** * Styling mapping for the different gallery categories
- * used for badges, filters, and lightboxes.
- */
 export const GALLERY_CAT_STYLE: Record<
   GalleryCategory,
   { icon: string; bg: string; text: string; border: string }
@@ -192,24 +220,38 @@ export const GALLERY_CAT_STYLE: Record<
   },
 };
 
-// ── Diary & Communication ─────────────────────────────────────────────────────
+export const GALLERY_CAT_DEFAULT: {
+  icon: string;
+  bg: string;
+  text: string;
+  border: string;
+} = {
+  icon: "🖼️",
+  bg: "bg-slate-500/10",
+  text: "text-slate-400",
+  border: "border-slate-500/20",
+};
+
+export const GALLERY_AUDIENCE_STYLE: Record<
+  "student" | "class" | "school",
+  { label: string; bg: string; text: string }
+> = {
+  student: { label: "Your child", bg: "bg-sky-500/10", text: "text-sky-400" },
+  class: { label: "Class", bg: "bg-emerald-500/10", text: "text-emerald-400" },
+  school: { label: "School", bg: "bg-purple-500/10", text: "text-purple-400" },
+};
+
+// ── Diary ─────────────────────────────────────────────────────────────────────
 
 export interface DiaryEntry {
   id: string;
   student_id: string;
-  /** The subject this entry relates to (e.g., "Mathematics", "Science") */
   subject_name: string | null;
-  /** The headline or topic of the diary entry */
   title: string;
-  /** The main content/message from the teacher */
   body: string;
-  /** Specific homework instructions, if any */
   homework: string | null;
-  /** The date the diary was written (ISO YYYY-MM-DD) */
   diary_date: string;
-  /** The date the homework is due (ISO YYYY-MM-DD) */
   due_date: string | null;
-  /** The name of the teacher/staff who wrote the entry */
   author_name: string;
   created_at: string;
 }
@@ -226,7 +268,7 @@ export type MessageCategory =
 
 export interface CommMessage {
   id: string;
-  thread_id: string; // Used to group replies together
+  thread_id: string;
   student_id: string;
   sender_id: string;
   sender_name: string;
@@ -238,9 +280,6 @@ export interface CommMessage {
   created_at: string;
 }
 
-/**
- * Styling mapping for communication categories
- */
 export const CATEGORY_STYLE: Record<
   MessageCategory,
   { bg: string; text: string; border: string }
@@ -277,7 +316,7 @@ export const CATEGORY_STYLE: Record<
   },
 };
 
-// ── JSS Pathway Guidance ──────────────────────────────────────────────────────
+// ── JSS Pathway ───────────────────────────────────────────────────────────────
 
 export interface JssPathway {
   id: string;
@@ -356,13 +395,10 @@ export interface StudentNotification {
   title: string;
   body: string;
   is_read: boolean;
-  link_to?: string; // Optional path for internal navigation
+  link_to?: string;
   created_at: string;
 }
 
-/**
- * Visual configuration for notification icons and status
- */
 export const NOTIF_STYLE: Record<
   NotificationType,
   { icon: string; color: string }
@@ -375,45 +411,47 @@ export const NOTIF_STYLE: Record<
   system: { icon: "⚙️", color: "slate" },
 };
 
-// ── Attendance ──────────────────────────────────────────────────────────────
+// ── Attendance ────────────────────────────────────────────────────────────────
 
-export type AttendanceStatus = "present" | "late" | "absent" | "excused";
+/**
+ * CAPITALISED to match exact DB storage values.
+ * The attendance table stores "Present" / "Absent" / "Late" / "Excused".
+ * Using lowercase was causing TS2367 "no overlap" errors on every status comparison.
+ */
+export type AttendanceStatus = "Present" | "Late" | "Absent" | "Excused";
 
 export interface AttendanceRecord {
   id: string;
   student_id: string;
-  date: string; // ISO Format YYYY-MM-DD
+  date: string;
   status: AttendanceStatus;
   notes?: string;
   marked_by?: string;
 }
 
-/**
- * Visual styling for attendance calendar and list items
- */
 export const STATUS_COLOR: Record<
   AttendanceStatus,
   { bg: string; text: string; border: string; dot: string }
 > = {
-  present: {
+  Present: {
     bg: "bg-emerald-400/10",
     text: "text-emerald-400",
     border: "border-emerald-400/20",
     dot: "bg-emerald-400",
   },
-  late: {
+  Late: {
     bg: "bg-amber-400/10",
     text: "text-amber-400",
     border: "border-amber-400/20",
     dot: "bg-amber-400",
   },
-  absent: {
+  Absent: {
     bg: "bg-rose-400/10",
     text: "text-rose-400",
     border: "border-rose-400/20",
     dot: "bg-rose-400",
   },
-  excused: {
+  Excused: {
     bg: "bg-sky-400/10",
     text: "text-sky-400",
     border: "border-sky-400/20",
@@ -421,7 +459,7 @@ export const STATUS_COLOR: Record<
   },
 };
 
-// ── Talent & Competencies ─────────────────────────────────────────────────────
+// ── Competencies ──────────────────────────────────────────────────────────────
 
 export type CompetencyKey =
   | "critical_thinking"
@@ -438,7 +476,7 @@ export interface TalentCompetency {
   student_id: string;
   term: number;
   year: number;
-  critical_thinking: number; // Scale 1-5
+  critical_thinking: number;
   creativity: number;
   communication: number;
   collaboration: number;
@@ -450,9 +488,6 @@ export interface TalentCompetency {
   updated_at: string;
 }
 
-/**
- * Metadata for the Radar Chart domains
- */
 export const COMPETENCY_DOMAINS: {
   key: CompetencyKey;
   label: string;

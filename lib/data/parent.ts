@@ -1,3 +1,4 @@
+import { createClient } from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Parent } from "@/lib/types/dashboard";
 import type {
@@ -12,10 +13,14 @@ import type {
   TalentCompetency,
 } from "@/lib/types/parent";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Service-role client (storage signing ONLY — no DB writes) ─────────────────
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+);
 
-// These are fetched school-wide (not per-student) but included in ChildPortalData
-// so ParentPortalHub receives everything in one prop.
+// ── Exported aggregate types ──────────────────────────────────────────────────
+
 export type Announcement = {
   id: string;
   title: string;
@@ -57,12 +62,49 @@ export interface ChildPortalData {
   competencies: TalentCompetency[];
   gallery: GalleryItem[];
   pathway: JssPathway | null;
-  // School-wide data filtered/used by ParentPortalHub
   announcements: Announcement[];
   events: SchoolEvent[];
   feePayments: FeePayment[];
   unreadCount: number;
 }
+
+// ── Raw DB shape for talent_gallery ──────────────────────────────────────────
+// Matches the ACTUAL column names in the DB schema:
+//   tags        text[]   (NOT skills_tagged)
+//   description text     (NOT caption-only — both exist)
+//   media_url   text     (storage path)
+//   image_url   text     (legacy public URL column — may be populated)
+// NOTE: `captured_on` does NOT exist in the DB. Do not select it.
+
+interface RawGalleryRow {
+  id: string;
+  student_id: string | null;
+  target_grade: string | null;
+  audience: string | null;
+  teacher_id: string | null;
+  title: string | null;
+  caption: string | null;
+  description: string | null;
+  category: string | null;
+  media_type: string | null;
+  media_url: string; // storage path (NOT a usable URL)
+  image_url: string | null; // legacy public URL — use as fallback
+  tags: string[] | null;
+  term: number | null;
+  academic_year: number | null;
+  created_at: string;
+}
+
+// ── GALLERY_SELECT — only columns that ACTUALLY exist in the DB ───────────────
+// Root cause of images not showing: selecting `skills_tagged` and `captured_on`
+// (neither exists) caused PostgREST to return a GenericStringError instead of
+// rows, so every gallery array was actually an error object.
+const GALLERY_SELECT =
+  "id, student_id, target_grade, audience, teacher_id, " +
+  "title, caption, description, category, media_type, " +
+  "media_url, image_url, tags, term, academic_year, created_at";
+
+// ── Student query helpers ─────────────────────────────────────────────────────
 
 type AssessmentRow = {
   id: string;
@@ -78,11 +120,6 @@ type AssessmentRow = {
   created_at: string;
 };
 
-type ParentRow = {
-  full_name: string;
-  phone_number: string;
-};
-
 type RawStudentRow = {
   id: string;
   readable_id: string | null;
@@ -95,53 +132,10 @@ type RawStudentRow = {
   student_parents: {
     is_primary_contact: boolean;
     relationship_type: string;
-    parents: ParentRow | null;
+    parents: { full_name: string; phone_number: string } | null;
   }[];
   assessments: AssessmentRow[];
 };
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function getPrimaryParent(
-  links: RawStudentRow["student_parents"],
-): ParentRow | null {
-  const primary = links.find((l) => l.is_primary_contact) ?? links[0] ?? null;
-  return primary?.parents ?? null;
-}
-
-function mapAssessment(row: AssessmentRow): Assessment {
-  return {
-    id: row.id,
-    student_id: row.student_id,
-    teacher_id: row.teacher_id,
-    subject_name: row.subject_name,
-    strand_id: row.strand_id,
-    score: row.score,
-    evidence_url: row.evidence_url,
-    teacher_remarks: row.teacher_remarks,
-    term: row.term as 1 | 2 | 3,
-    academic_year: row.academic_year,
-    created_at: row.created_at,
-  };
-}
-
-function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
-  return {
-    id: row.id,
-    readable_id: row.readable_id,
-    upi_number: row.upi_number,
-    full_name: row.full_name,
-    date_of_birth: row.date_of_birth,
-    gender: row.gender,
-    current_grade: row.current_grade,
-    parent_id: null,
-    created_at: row.created_at,
-    parents: getPrimaryParent(row.student_parents),
-    assessments: row.assessments.map(mapAssessment),
-  };
-}
-
-// ── Select fragment ───────────────────────────────────────────────────────────
 
 const STUDENT_WITH_ASSESSMENTS_SELECT = `
   id, readable_id, upi_number, full_name,
@@ -158,11 +152,110 @@ const STUDENT_WITH_ASSESSMENTS_SELECT = `
   )
 ` as const;
 
+function getPrimaryParent(links: RawStudentRow["student_parents"]) {
+  const primary = links.find((l) => l.is_primary_contact) ?? links[0] ?? null;
+  return primary?.parents ?? null;
+}
+
+function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
+  return {
+    id: row.id,
+    readable_id: row.readable_id,
+    upi_number: row.upi_number,
+    full_name: row.full_name,
+    date_of_birth: row.date_of_birth,
+    gender: row.gender,
+    current_grade: row.current_grade,
+    parent_id: null,
+    created_at: row.created_at,
+    parents: getPrimaryParent(row.student_parents),
+    assessments: row.assessments.map(
+      (r): Assessment => ({
+        id: r.id,
+        student_id: r.student_id,
+        teacher_id: r.teacher_id,
+        subject_name: r.subject_name,
+        strand_id: r.strand_id,
+        score: r.score,
+        evidence_url: r.evidence_url,
+        teacher_remarks: r.teacher_remarks,
+        term: r.term as 1 | 2 | 3,
+        academic_year: r.academic_year,
+        created_at: r.created_at,
+      }),
+    ),
+  };
+}
+
+// ── signGalleryUrl ────────────────────────────────────────────────────────────
+
+/**
+ * Resolve the best viewable URL for a gallery row:
+ *
+ * 1. If image_url is a full HTTP URL (legacy public-bucket rows) → use it directly.
+ * 2. If media_url looks like a storage path → sign it via service-role client.
+ * 3. If media_url is also a full HTTP URL (shouldn't happen but defensive) → use it.
+ * 4. Anything else → return "" so the component shows a placeholder.
+ */
+async function signGalleryUrl(
+  mediaUrl: string,
+  imageUrl: string | null,
+): Promise<string> {
+  // Prefer legacy public URL if it's already a real URL
+  if (imageUrl && imageUrl.startsWith("http")) return imageUrl;
+
+  if (!mediaUrl) return "";
+
+  // Already a full URL — shouldn't happen for new uploads but handle defensively
+  if (mediaUrl.startsWith("http")) return mediaUrl;
+
+  // It's a storage path — sign it
+  const { data, error } = await supabaseAdmin.storage
+    .from("gallery")
+    .createSignedUrl(mediaUrl, 3600);
+
+  if (error) {
+    console.error(
+      "[signGalleryUrl] failed:",
+      error.message,
+      "| path:",
+      mediaUrl,
+    );
+    return "";
+  }
+  return data.signedUrl;
+}
+
+// ── mapGalleryRow ─────────────────────────────────────────────────────────────
+
+async function mapGalleryRow(row: RawGalleryRow): Promise<GalleryItem> {
+  const signedUrl = await signGalleryUrl(row.media_url, row.image_url);
+  return {
+    id: row.id,
+    student_id: row.student_id ?? null,
+    target_grade: row.target_grade ?? null,
+    audience: (row.audience ?? "student") as GalleryItem["audience"],
+    teacher_id: row.teacher_id ?? null,
+    title: row.title ?? "Untitled",
+    caption: row.caption ?? null,
+    description: row.description ?? null,
+    category: row.category ?? null,
+    media_type: (row.media_type === "video"
+      ? "video"
+      : "image") as GalleryItem["media_type"],
+    media_url: row.media_url,
+    signedUrl,
+    tags: Array.isArray(row.tags) ? row.tags : [],
+    term: row.term ?? null,
+    academic_year: row.academic_year ?? null,
+    created_at: row.created_at,
+  };
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function fetchMyProfile(): Promise<Parent | null> {
   const supabase = await createSupabaseServerClient();
-
   const {
     data: { user },
     error: authError,
@@ -176,30 +269,22 @@ export async function fetchMyProfile(): Promise<Parent | null> {
     .single<Parent>();
 
   if (error) {
-    // Fallback: match by email in case id diverged
     const { data: byEmail, error: emailErr } = await supabase
       .from("parents")
       .select("id, full_name, email, phone_number, created_at")
       .eq("email", user.email ?? "")
       .single<Parent>();
-
     if (emailErr) {
       console.error("[fetchMyProfile] both lookups failed:", emailErr.message);
       return null;
     }
     return byEmail;
   }
-
   return data;
 }
 
-/**
- * Fetch all children linked to this parent via student_parents.
- * RLS `current_parent_id()` scopes the query — returns only this parent's children.
- */
 export async function fetchMyChildren(): Promise<ChildWithAssessments[]> {
   const supabase = await createSupabaseServerClient();
-
   const { data, error } = await supabase
     .from("students")
     .select(STUDENT_WITH_ASSESSMENTS_SELECT)
@@ -207,10 +292,9 @@ export async function fetchMyChildren(): Promise<ChildWithAssessments[]> {
     .returns<RawStudentRow[]>();
 
   if (error) {
-    console.error("[fetchMyChildren] error:", error.message, error.details);
+    console.error("[fetchMyChildren]", error.message, error.details);
     return [];
   }
-
   return (data ?? []).map(mapStudentRow);
 }
 
@@ -218,7 +302,6 @@ export async function fetchChild(
   studentId: string,
 ): Promise<ChildWithAssessments | null> {
   const supabase = await createSupabaseServerClient();
-
   const { data, error } = await supabase
     .from("students")
     .select(STUDENT_WITH_ASSESSMENTS_SELECT)
@@ -226,16 +309,23 @@ export async function fetchChild(
     .single<RawStudentRow>();
 
   if (error) {
-    console.error("[fetchChild] error:", error.message);
+    console.error("[fetchChild]", error.message);
     return null;
   }
-
   return data ? mapStudentRow(data) : null;
 }
 
 /**
- * Aggregates all data needed for the Parent Portal Hub view.
- * Runs all queries in parallel for performance.
+ * fetchAllChildData — aggregates all portal data for one child.
+ *
+ * Gallery fetch uses 3 separate queries (student / class / school) so we can
+ * pass targeted filters to each. Results are merged and de-duped by id, then
+ * signed URLs are hydrated in parallel.
+ *
+ * KEY FIX: GALLERY_SELECT only requests columns that actually exist in the DB.
+ * Previously selecting `skills_tagged` and `captured_on` (neither exists) caused
+ * PostgREST to return a GenericStringError, so gallery arrays were actually error
+ * objects — hence "Property 'id' does not exist on type GenericStringError".
  */
 export async function fetchAllChildData(
   studentId: string,
@@ -244,16 +334,18 @@ export async function fetchAllChildData(
   const supabase = await createSupabaseServerClient();
 
   const [
-    { data: notifications },
-    { data: diary },
-    { data: attendance },
-    { data: messages },
-    { data: competencies },
-    { data: gallery },
-    { data: pathway },
-    { data: announcements },
-    { data: events },
-    { data: feePayments },
+    { data: notifications, error: eNotif },
+    { data: diary, error: eDiary },
+    { data: attendance, error: eAttend },
+    { data: messages, error: eMsg },
+    { data: competencies, error: eComp },
+    { data: galleryStudent, error: eGalStudent },
+    { data: galleryClass, error: eGalClass },
+    { data: gallerySchool, error: eGalSchool },
+    { data: pathway, error: ePathway },
+    { data: announcements, error: eAnnounce },
+    { data: events, error: eEvents },
+    { data: feePayments, error: eFees },
   ] = await Promise.all([
     supabase
       .from("notifications")
@@ -279,13 +371,40 @@ export async function fetchAllChildData(
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
 
-    supabase.from("talent_gallery").select("*").eq("student_id", studentId),
+    // ── Competencies — uses student_competencies table, NOT talent_gallery ──
+    supabase
+      .from("student_competencies")
+      .select("*")
+      .eq("student_id", studentId),
 
+    // ── Gallery tier 1: child-specific ────────────────────────────────────
     supabase
       .from("talent_gallery")
-      .select("*")
+      .select(GALLERY_SELECT)
+      .eq("audience", "student")
       .eq("student_id", studentId)
-      .order("created_at", { ascending: false }),
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(60),
+
+    // ── Gallery tier 2: class-wide ─────────────────────────────────────────
+    supabase
+      .from("talent_gallery")
+      .select(GALLERY_SELECT)
+      .eq("audience", "class")
+      .eq("target_grade", grade)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(40),
+
+    // ── Gallery tier 3: school-wide ────────────────────────────────────────
+    supabase
+      .from("talent_gallery")
+      .select(GALLERY_SELECT)
+      .eq("audience", "school")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(20),
 
     supabase
       .from("jss_pathways")
@@ -293,7 +412,6 @@ export async function fetchAllChildData(
       .eq("student_id", studentId)
       .maybeSingle(),
 
-    // School-wide — no student filter, RLS handles audience scoping
     supabase
       .from("announcements")
       .select(
@@ -323,10 +441,43 @@ export async function fetchAllChildData(
       .order("created_at", { ascending: false }),
   ]);
 
-  const unreadNotifs = notifications?.filter((n) => !n.is_read).length ?? 0;
-  const unreadMessages =
-    messages?.filter((m) => !m.is_read && m.sender_role !== "parent").length ??
-    0;
+  // Log any gallery query errors so they're visible in server logs
+  if (eGalStudent)
+    console.error(
+      "[gallery/student]",
+      eGalStudent.message,
+      eGalStudent.details,
+    );
+  if (eGalClass)
+    console.error("[gallery/class]", eGalClass.message, eGalClass.details);
+  if (eGalSchool)
+    console.error("[gallery/school]", eGalSchool.message, eGalSchool.details);
+  if (eComp) console.error("[competencies]", eComp.message);
+
+  // ── Merge gallery tiers, de-dupe by id ────────────────────────────────────
+  const seenIds = new Set<string>();
+  const rawGallery: RawGalleryRow[] = [];
+
+  for (const row of [
+    ...((galleryStudent ?? []) as RawGalleryRow[]),
+    ...((galleryClass ?? []) as RawGalleryRow[]),
+    ...((gallerySchool ?? []) as RawGalleryRow[]),
+  ]) {
+    if (row && typeof row === "object" && "id" in row && !seenIds.has(row.id)) {
+      seenIds.add(row.id);
+      rawGallery.push(row);
+    }
+  }
+
+  // ── Hydrate signed URLs in parallel ───────────────────────────────────────
+  const gallery: GalleryItem[] = await Promise.all(
+    rawGallery.map(mapGalleryRow),
+  );
+
+  const unreadCount =
+    (notifications?.filter((n) => !n.is_read).length ?? 0) +
+    (messages?.filter((m) => !m.is_read && m.sender_role !== "parent").length ??
+      0);
 
   return {
     notifications: notifications ?? [],
@@ -334,11 +485,11 @@ export async function fetchAllChildData(
     attendance: attendance ?? [],
     messages: messages ?? [],
     competencies: competencies ?? [],
-    gallery: gallery ?? [],
+    gallery,
     pathway: pathway ?? null,
     announcements: announcements ?? [],
     events: events ?? [],
     feePayments: feePayments ?? [],
-    unreadCount: unreadNotifs + unreadMessages,
+    unreadCount,
   };
 }
