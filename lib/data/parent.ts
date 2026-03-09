@@ -13,6 +13,9 @@ import type {
   TalentCompetency,
 } from "@/lib/types/parent";
 
+// NOTE: student_competencies table does not exist in the DB.
+// TalentCompetency type is kept for future use; competencies always returns [].
+
 // ── Service-role client (storage signing ONLY — no DB writes) ─────────────────
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -333,19 +336,24 @@ export async function fetchAllChildData(
 ): Promise<ChildPortalData> {
   const supabase = await createSupabaseServerClient();
 
+  // ── NOTE: student_competencies table does not exist in the DB. ───────────────
+  // TalentCompetency rows are not yet collected. The field is kept in
+  // ChildPortalData for future use; we always return [] here.
+  // When the table is created, add it back to this Promise.all.
+  const competencies: TalentCompetency[] = [];
+
   const [
-    { data: notifications, error: eNotif },
-    { data: diary, error: eDiary },
-    { data: attendance, error: eAttend },
-    { data: messages, error: eMsg },
-    { data: competencies, error: eComp },
+    { data: notifications },
+    { data: diary },
+    { data: attendance },
+    { data: messages },
     { data: galleryStudent, error: eGalStudent },
     { data: galleryClass, error: eGalClass },
     { data: gallerySchool, error: eGalSchool },
-    { data: pathway, error: ePathway },
-    { data: announcements, error: eAnnounce },
-    { data: events, error: eEvents },
-    { data: feePayments, error: eFees },
+    { data: pathway },
+    { data: announcements },
+    { data: events },
+    { data: feePayments },
   ] = await Promise.all([
     supabase
       .from("notifications")
@@ -370,12 +378,6 @@ export async function fetchAllChildData(
       .select("*")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
-
-    // ── Competencies — uses student_competencies table, NOT talent_gallery ──
-    supabase
-      .from("student_competencies")
-      .select("*")
-      .eq("student_id", studentId),
 
     // ── Gallery tier 1: child-specific ────────────────────────────────────
     supabase
@@ -441,7 +443,7 @@ export async function fetchAllChildData(
       .order("created_at", { ascending: false }),
   ]);
 
-  // Log any gallery query errors so they're visible in server logs
+  // Log gallery query errors so they're visible in server logs
   if (eGalStudent)
     console.error(
       "[gallery/student]",
@@ -452,7 +454,6 @@ export async function fetchAllChildData(
     console.error("[gallery/class]", eGalClass.message, eGalClass.details);
   if (eGalSchool)
     console.error("[gallery/school]", eGalSchool.message, eGalSchool.details);
-  if (eComp) console.error("[competencies]", eComp.message);
 
   // ── Merge gallery tiers, de-dupe by id ────────────────────────────────────
   const seenIds = new Set<string>();
@@ -484,7 +485,7 @@ export async function fetchAllChildData(
     diary: diary ?? [],
     attendance: attendance ?? [],
     messages: messages ?? [],
-    competencies: competencies ?? [],
+    competencies, // always [] until student_competencies table is created
     gallery,
     pathway: pathway ?? null,
     announcements: announcements ?? [],

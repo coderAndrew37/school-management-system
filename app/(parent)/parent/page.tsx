@@ -48,7 +48,8 @@ export default async function ParentDashboard({ searchParams }: PageProps) {
   const session = await getSession();
   if (!session || session.profile.role !== "parent") redirect("/login");
 
-  const { child: childParam } = await searchParams;
+  const _sp = await searchParams;
+  const childParam = _sp?.child;
   const children: ChildWithAssessments[] = await fetchMyChildren();
 
   if (children.length === 0) {
