@@ -1,14 +1,8 @@
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
 
 export interface ActionResult {
   success: boolean;
@@ -104,7 +98,7 @@ export async function updateDiaryEntryAction(
 
 const attendanceSchema = z.object({
   studentId: z.string().uuid(),
-  status: z.enum(["Present", "Absent", "Late"]),
+  status: z.enum(["Present", "Absent", "Late", "Excused"]),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format"),
   remarks: z.string().optional().nullable(),
 });
@@ -161,7 +155,7 @@ export async function recordAttendanceAction(
 export async function bulkRecordAttendanceAction(
   records: {
     studentId: string;
-    status: "Present" | "Absent" | "Late";
+    status: "Present" | "Absent" | "Late" | "Excused";
     date: string;
     remarks?: string;
   }[],

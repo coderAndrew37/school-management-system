@@ -16,6 +16,7 @@ import { getSession } from "@/lib/actions/auth";
 import { fetchTeacherAssessmentAllocations } from "@/lib/data/assessment";
 import type { SubjectLevel } from "@/lib/types/allocation";
 import { TopNav } from "@/app/_components/nav/TopNav";
+import { ClassTeacherBanner } from "@/app/_components/teachers/ClassTeacherBanner";
 
 export const metadata = { title: "Teacher Portal | Kibali Academy" };
 export const revalidate = 0;
@@ -124,6 +125,8 @@ export default async function TeacherDashboard() {
     return (
       <div className="min-h-screen bg-[#F8F7F2]">
         <TopNav profile={session.profile} email={session.user.email ?? ""} />
+
+        <ClassTeacherBanner />
         <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
           <p className="text-4xl mb-4">⚠️</p>
           <p className="text-slate-800 font-bold text-lg">Account not linked</p>

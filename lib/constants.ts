@@ -53,6 +53,12 @@ export const ADMIN_LINKS: NavLink[] = [
     icon: BookMarked,
     group: "Academic",
   },
+  {
+    name: "Class Teachers",
+    href: "/class-teachers",
+    icon: Users,
+    group: "Academic",
+  },
   { name: "Timetable", href: "/timetable", icon: Calendar, group: "Academic" },
   { name: "Report Cards", href: "/reports", icon: FileText, group: "Academic" },
   {
