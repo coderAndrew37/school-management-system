@@ -144,7 +144,7 @@ export function AdminSidebar({ links, isOpen, onClose }: AdminSidebarProps) {
                         <Icon className="h-4 w-4" />
                       </div>
 
-                      <span className="truncate">{link.name}</span>
+                      <span className="truncate">{link.label}</span>
 
                       {active && (
                         <div className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />

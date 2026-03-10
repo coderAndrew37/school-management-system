@@ -56,7 +56,7 @@ export async function bulkAddTeachersAction(rows: BulkTeacherRow[]): Promise<{
         index: i,
         fullName: row.fullName,
         success: false,
-        message: parsed.error.errors.map((e) => e.message).join("; "),
+        message: parsed.error.issues.map((e) => e.message).join("; "),
       });
       continue;
     }

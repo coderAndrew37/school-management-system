@@ -1,6 +1,7 @@
 // lib/helpers/parent.ts — Light-mode helper types and utilities
 import type { Student } from "@/lib/types/dashboard";
 import type { CbcScore } from "@/lib/types/assessment";
+import { Assessment, RadarPoint } from "../types/parent";
 
 export interface AssessmentRow {
   subject_name: string;
@@ -93,6 +94,7 @@ export function getOverallLevel(assessments: AssessmentRow[]): {
   emoji: string;
   label: string;
   score: CbcScore | null;
+  color?: string;
 } {
   const valid = assessments.filter((a) => a.score) as (AssessmentRow & {
     score: CbcScore;
@@ -127,5 +129,51 @@ export function getSubjectSummary(
   return [...bySubject.entries()].map(([subject, score]) => ({
     subject,
     score,
+  }));
+}
+
+export function getTerms(assessments: Assessment[]): number[] {
+  const terms = new Set(assessments.map((a) => a.term));
+  return Array.from(terms).sort((a, b) => a - b);
+}
+
+/**
+ * Groups assessments by their subject name
+ */
+export function groupBySubject(
+  assessments: Assessment[],
+): Map<string, Assessment[]> {
+  const map = new Map<string, Assessment[]>();
+  assessments.forEach((a) => {
+    const list = map.get(a.subject_name) || [];
+    list.push(a);
+    map.set(a.subject_name, list);
+  });
+  return map;
+}
+
+/**
+ * Converts CBC scores to numeric values for the Radar Chart
+ */
+const SCORE_MAP: Record<CbcScore, number> = {
+  EE: 4,
+  ME: 3,
+  AE: 2,
+  BE: 1,
+};
+
+export function buildRadarData(assessments: Assessment[]): RadarPoint[] {
+  const latestBySubject = new Map<string, number>();
+
+  assessments.forEach((a) => {
+    if (a.score) {
+      latestBySubject.set(a.subject_name, SCORE_MAP[a.score]);
+    }
+  });
+
+  return Array.from(latestBySubject.entries()).map(([subject, score]) => ({
+    subject,
+    score: score as 1 | 2 | 3 | 4,
+    fullMark: 4,
   }));
 }

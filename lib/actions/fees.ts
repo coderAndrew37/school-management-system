@@ -116,7 +116,7 @@ export async function upsertFeeStructureAction(input: {
   await requireAdmin();
   const parsed = feeStructureSchema.safeParse(input);
   if (!parsed.success)
-    return { success: false, error: parsed.error.errors[0]?.message };
+    return { success: false, error: parsed.error.issues[0]?.message };
 
   const { error } = await supabaseAdmin
     .from("fee_structures")
@@ -201,7 +201,7 @@ export async function recordPaymentAction(input: {
 
   const parsed = recordPaymentSchema.safeParse(input);
   if (!parsed.success)
-    return { success: false, error: parsed.error.errors[0]?.message };
+    return { success: false, error: parsed.error.issues[0]?.message };
 
   const {
     student_id,

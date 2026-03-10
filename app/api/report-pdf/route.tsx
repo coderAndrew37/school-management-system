@@ -1,10 +1,8 @@
+"use server";
+
 // app/api/report-pdf/route.ts
 // Phase 4: Report card PDF generator
 // GET /api/report-pdf?studentId=xxx&term=1&year=2026
-//
-// Returns a PDF as application/pdf stream.
-// Protected: must be authenticated as the student's parent OR a teacher for that grade.
-// Uses @react-pdf/renderer — install with: npm install @react-pdf/renderer
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -204,7 +202,8 @@ export async function GET(req: NextRequest) {
 
     const safeFilename = `${studentRes.data.full_name.replace(/\s+/g, "_")}_Term${term}_${academicYear}.pdf`;
 
-    return new NextResponse(buffer, {
+    // FIX: Cast Buffer to any or wrap in a new Response to ensure compatibility with Next.js/Web API
+    return new NextResponse(buffer as any, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",

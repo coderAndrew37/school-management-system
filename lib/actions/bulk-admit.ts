@@ -9,11 +9,7 @@ import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/actions/auth";
 import { sendWelcomeEmail } from "@/lib/mail";
 import { z } from "zod";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+import { supabaseAdmin } from "../supabase/admin";
 
 const rowSchema = z.object({
   studentName: z.string().min(2).max(100),
@@ -64,7 +60,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
         index: i,
         studentName: row.studentName,
         success: false,
-        message: parsed.error.errors.map((e) => e.message).join("; "),
+        message: parsed.error.issues.map((e) => e.message).join("; "),
       });
       continue;
     }
@@ -81,7 +77,6 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
 
     try {
       // ── 1. Upsert parent auth user ─────────────────────────────────────────
-      // Check if parent email already exists in parents table
       const { data: existingParent } = await supabaseAdmin
         .from("parents")
         .select("id")
@@ -164,18 +159,26 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
                 redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
               },
             });
-          if (linkData) {
+
+          // FIX: Check for linkData and the string existence of action_link
+          const actionLink = linkData?.properties?.action_link;
+
+          if (actionLink) {
             await sendWelcomeEmail({
               parentEmail,
               parentName,
               studentName,
               grade: currentGrade,
-              setupLink: linkData.properties.action_link,
+              setupLink: actionLink,
             });
+          } else {
+            console.warn(
+              `[bulkAdmit] No action link generated for ${parentEmail}`,
+            );
           }
         } catch (mailErr) {
           console.error("[bulkAdmit mail]", mailErr);
-          // Non-fatal
+          // Non-fatal, student is still admitted
         }
       }
 

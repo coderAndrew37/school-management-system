@@ -74,7 +74,7 @@ function ScoreLegend() {
 
 // ── Radar chart ───────────────────────────────────────────────────────────────
 
-const RADAR_SCORE_LABELS: Record<1 | 2 | 3 | 4, CbcScore> = {
+const RADAR_SCORE_LABELS: Record<number, CbcScore> = {
   1: "BE",
   2: "AE",
   3: "ME",
@@ -113,16 +113,11 @@ function CompetencyRadar({ data }: CompetencyRadarProps) {
             dot={{ fill: "#f59e0b", r: 4, strokeWidth: 0 }}
           />
           <Tooltip
-            formatter={(value: number | undefined) => {
-              // 1. Handle undefined or invalid values gracefully
-              if (value === undefined) return ["N/A", "Level"];
-
-              // 2. Map the numeric score to the CBC Label
-              const label =
-                RADAR_SCORE_LABELS[value as 1 | 2 | 3 | 4] ?? value.toString();
-
-              // 3. Return as a tuple that satisfies the Tooltip's expected return type
-              return [label, "Level"] as [string, string];
+            // FIX: Refined types for Recharts Tooltip compatibility
+            formatter={(value: any) => {
+              const numericValue = Number(value);
+              const label = RADAR_SCORE_LABELS[numericValue] || "N/A";
+              return [label, "Level"];
             }}
             contentStyle={{
               borderRadius: "12px",
@@ -150,6 +145,7 @@ function TermTabs({ terms, active, onSelect }: TermTabsProps) {
   return (
     <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
       <button
+        type="button"
         onClick={() => onSelect(0)}
         className={`${baseClass} ${active === 0 ? activeClass : inactiveClass}`}
       >
@@ -158,6 +154,7 @@ function TermTabs({ terms, active, onSelect }: TermTabsProps) {
       {terms.map((term) => (
         <button
           key={term}
+          type="button"
           onClick={() => onSelect(term)}
           className={`${baseClass} ${active === term ? activeClass : inactiveClass}`}
         >
@@ -175,7 +172,6 @@ function AssessmentCard({ assessment }: AssessmentCardProps) {
 
   return (
     <div className="rounded-2xl bg-white border border-stone-100 p-4 shadow-sm space-y-3">
-      {/* Header row */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2.5">
           <div className="h-8 w-8 rounded-xl bg-amber-50 flex items-center justify-center flex-shrink-0">
@@ -193,8 +189,7 @@ function AssessmentCard({ assessment }: AssessmentCardProps) {
         {assessment.score !== null && <ScoreBadge score={assessment.score} />}
       </div>
 
-      {/* Teacher remarks */}
-      {assessment.teacher_remarks !== null && (
+      {assessment.teacher_remarks && (
         <div className="flex gap-2 rounded-xl bg-stone-50 border border-stone-100 p-3">
           <MessageSquare className="h-4 w-4 text-stone-400 flex-shrink-0 mt-0.5" />
           <p className="text-xs text-stone-600 leading-relaxed">
@@ -203,10 +198,11 @@ function AssessmentCard({ assessment }: AssessmentCardProps) {
         </div>
       )}
 
-      {/* Evidence photo */}
-      {assessment.evidence_url !== null && (
+      {/* FIX: Better check for evidence existence */}
+      {assessment.evidence_url && assessment.evidence_url.length > 0 && (
         <div>
           <button
+            type="button"
             onClick={() => setShowEvidence((prev) => !prev)}
             className="flex items-center gap-1.5 text-xs font-semibold text-sky-600 hover:text-sky-700 transition-colors"
           >
@@ -217,8 +213,9 @@ function AssessmentCard({ assessment }: AssessmentCardProps) {
             <div className="mt-2 rounded-xl overflow-hidden border border-stone-100">
               <img
                 src={assessment.evidence_url}
-                alt={`Evidence for ${assessment.subject_name} — ${assessment.strand_id}`}
+                alt={`Evidence for ${assessment.subject_name}`}
                 className="w-full object-cover max-h-48"
+                onError={(e) => (e.currentTarget.style.display = "none")}
               />
             </div>
           )}
@@ -249,12 +246,10 @@ export function ProgressReportClient({ child }: ProgressReportClientProps) {
   );
 
   const radarData = useMemo(() => buildRadarData(filtered), [filtered]);
-
   const bySubject = useMemo(() => groupBySubject(filtered), [filtered]);
 
   return (
     <div className="space-y-6">
-      {/* Back + header */}
       <div className="flex items-center gap-3">
         <Link
           href={`/parent/child/${child.id}`}
@@ -279,7 +274,6 @@ export function ProgressReportClient({ child }: ProgressReportClientProps) {
         </div>
       </div>
 
-      {/* Overall level banner */}
       <div className="flex items-center gap-3 rounded-2xl bg-white border border-stone-100 px-4 py-3.5 shadow-sm">
         <TrendingUp className="h-5 w-5 text-amber-500 flex-shrink-0" />
         <div>
@@ -294,10 +288,8 @@ export function ProgressReportClient({ child }: ProgressReportClientProps) {
         </p>
       </div>
 
-      {/* CBC score legend */}
       <ScoreLegend />
 
-      {/* Radar chart card */}
       <div className="rounded-3xl bg-white border border-stone-100 p-5 shadow-sm">
         <h2 className="text-sm font-bold text-stone-600 mb-1">
           Competency Overview
@@ -308,12 +300,14 @@ export function ProgressReportClient({ child }: ProgressReportClientProps) {
         <CompetencyRadar data={radarData} />
       </div>
 
-      {/* Term filter tabs */}
       {terms.length > 1 && (
-        <TermTabs terms={terms} active={activeTerm} onSelect={setActiveTerm} />
+        <TermTabs
+          terms={terms as Array<1 | 2 | 3>}
+          active={activeTerm}
+          onSelect={setActiveTerm}
+        />
       )}
 
-      {/* Assessments grouped by subject */}
       {bySubject.size === 0 ? (
         <div className="rounded-2xl bg-white border border-stone-100 p-10 text-center shadow-sm">
           <p className="text-4xl mb-3">📋</p>
