@@ -1,30 +1,30 @@
 "use client";
 
-import Link from "next/link";
+import type {
+  CbcScore,
+  ChildProfileClientProps,
+  ScoreBadgeProps,
+  StatTileProps,
+} from "@/lib/helpers/parent";
+import {
+  calcAge,
+  CBC_SCORES,
+  formatDOB,
+  getAvatarColor,
+  getInitials,
+  getOverallLevel,
+  getSubjectSummary,
+} from "@/lib/helpers/parent";
 import {
   ArrowLeft,
   BadgeCheck,
   Calendar,
   GraduationCap,
   Hash,
-  User,
   Phone,
+  User,
 } from "lucide-react";
-import type {
-  ChildProfileClientProps,
-  CbcScore,
-  ScoreBadgeProps,
-  StatTileProps,
-} from "@/lib/helpers/parent";
-import {
-  CBC_SCORES,
-  getInitials,
-  getAvatarColor,
-  calcAge,
-  getOverallLevel,
-  getSubjectSummary,
-  formatDOB,
-} from "@/lib/helpers/parent";
+import Link from "next/link";
 
 // ── Stat tile — matches .stat-card pattern ────────────────────────────────────
 const TILE: Record<

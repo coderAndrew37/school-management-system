@@ -28,7 +28,7 @@ const FULL_MONTHS = [
 ];
 const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
-// Light-mode semantic pairs matching prototype .att-present / .att-absent etc.
+// Fixed keys to PascalCase to match the AttendanceStatus type definition
 const S: Record<
   AttendanceStatus,
   {
@@ -46,7 +46,7 @@ const S: Record<
     icon: React.ReactNode;
   }
 > = {
-  present: {
+  Present: {
     statBg: "bg-emerald-50",
     statBorder: "border-emerald-200",
     statText: "text-emerald-700",
@@ -60,7 +60,7 @@ const S: Record<
     label: "Present",
     icon: <CheckCircle2 className="h-4 w-4" />,
   },
-  absent: {
+  Absent: {
     statBg: "bg-red-50",
     statBorder: "border-red-200",
     statText: "text-red-700",
@@ -74,7 +74,7 @@ const S: Record<
     label: "Absent",
     icon: <XCircle className="h-4 w-4" />,
   },
-  late: {
+  Late: {
     statBg: "bg-amber-50",
     statBorder: "border-amber-200",
     statText: "text-amber-700",
@@ -88,7 +88,7 @@ const S: Record<
     label: "Late",
     icon: <Clock className="h-4 w-4" />,
   },
-  excused: {
+  Excused: {
     statBg: "bg-cyan-50",
     statBorder: "border-cyan-200",
     statText: "text-cyan-700",
@@ -134,25 +134,30 @@ export function AttendancePanel({ records, studentName }: Props) {
     const d = new Date(r.date);
     return d.getFullYear() === viewYear && d.getMonth() === viewMonth;
   });
-  const counts = { present: 0, late: 0, absent: 0, excused: 0 } as Record<
+
+  // Updated initialization with PascalCase keys
+  const counts = { Present: 0, Late: 0, Absent: 0, Excused: 0 } as Record<
     AttendanceStatus,
     number
   >;
   for (const r of monthRecords) counts[r.status]++;
+
+  // Updated rate calculation to use correct keys
   const rate =
     monthRecords.length > 0
-      ? Math.round(((counts.present + counts.late) / monthRecords.length) * 100)
+      ? Math.round(((counts.Present + counts.Late) / monthRecords.length) * 100)
       : null;
 
+  // Updated filter with PascalCase
   const issues = records
-    .filter((r) => r.status === "absent" || r.status === "late")
+    .filter((r) => r.status === "Absent" || r.status === "Late")
     .slice(0, 8);
 
   return (
     <div className="space-y-4">
       {/* ── Stat cards ────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-4 gap-2.5">
-        {(["present", "absent", "late", "excused"] as AttendanceStatus[]).map(
+        {(["Present", "Absent", "Late", "Excused"] as AttendanceStatus[]).map(
           (s) => (
             <div
               key={s}
@@ -253,7 +258,7 @@ export function AttendancePanel({ records, studentName }: Props) {
             ))}
           </div>
 
-          {/* Day cells — matches .att-present / .att-absent / .att-cell */}
+          {/* Day cells */}
           <div className="grid grid-cols-7 gap-1">
             {Array.from({ length: startOffset }).map((_, i) => (
               <div key={`e${i}`} />
@@ -295,7 +300,7 @@ export function AttendancePanel({ records, studentName }: Props) {
           {/* Legend */}
           <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-x-4 gap-y-1">
             {(
-              ["present", "late", "absent", "excused"] as AttendanceStatus[]
+              ["Present", "Late", "Absent", "Excused"] as AttendanceStatus[]
             ).map((s) => (
               <span
                 key={s}

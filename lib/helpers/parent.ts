@@ -3,6 +3,9 @@ import type { Student } from "@/lib/types/dashboard";
 import type { CbcScore } from "@/lib/types/assessment";
 import { Assessment, RadarPoint } from "../types/parent";
 
+// Add this line at the top with your other imports/exports
+export type { CbcScore } from "@/lib/types/assessment";
+
 export interface AssessmentRow {
   subject_name: string;
   strand_id: string;

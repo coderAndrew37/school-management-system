@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { SubjectLevel } from "@/lib/types/allocation";
+import type { CbcScore } from "@/lib/types/assessment";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -21,18 +22,15 @@ export interface ClassStudent {
   current_grade: string;
 }
 
-export interface AssessmentGridRow {
-  studentId: string;
-  strandId: string;
-  score: "EE" | "ME" | "AE" | "BE" | null;
-  teacherRemarks: string | null;
-  evidenceUrl: string | null;
+// Updated to match the "Flat Key" requirement of the UI Grid
+export interface AssessmentCell {
+  assessmentId: string | null;
+  score: CbcScore | null;
+  dirty: boolean;
 }
 
-export type AssessmentGridState = Record<
-  string, // studentId
-  Record<string, AssessmentGridRow> // strandId → row
->;
+// Key format: `${studentId}:${subjectName}:${strandId}`
+export type AssessmentGridState = Record<string, AssessmentCell>;
 
 export interface ClassAssessmentData {
   students: ClassStudent[];
@@ -110,7 +108,6 @@ async function fetchStudentCountsByGrade(
 
 /**
  * All allocations for a teacher, enriched with student counts.
- * Used by both the dashboard and the assess page.
  */
 export async function fetchTeacherAssessmentAllocations(
   teacherId: string,
@@ -152,7 +149,7 @@ export async function fetchTeacherAssessmentAllocations(
 
 /**
  * All students + existing assessments for one class/subject/term.
- * Builds the grid state keyed by studentId → strandId.
+ * Builds the flat grid state keyed by "studentId:subjectName:strandId".
  */
 export async function fetchClassAssessments(
   grade: string,
@@ -172,7 +169,7 @@ export async function fetchClassAssessments(
 
     supabase
       .from("assessments")
-      .select("student_id, strand_id, score, teacher_remarks, evidence_url")
+      .select("id, student_id, strand_id, score")
       .eq("subject_name", subjectName)
       .eq("term", term)
       .eq("academic_year", academicYear),
@@ -180,24 +177,13 @@ export async function fetchClassAssessments(
 
   const gridState: AssessmentGridState = {};
 
-  for (const student of (students ?? []) as ClassStudent[]) {
-    gridState[student.id] = {};
-  }
-
-  for (const row of (assessments ?? []) as {
-    student_id: string;
-    strand_id: string;
-    score: "EE" | "ME" | "AE" | "BE" | null;
-    teacher_remarks: string | null;
-    evidence_url: string | null;
-  }[]) {
-    if (!gridState[row.student_id]) gridState[row.student_id] = {};
-    gridState[row.student_id]![row.strand_id] = {
-      studentId: row.student_id,
-      strandId: row.strand_id,
-      score: row.score,
-      teacherRemarks: row.teacher_remarks,
-      evidenceUrl: row.evidence_url,
+  // Map database rows to the flat grid state format
+  for (const row of (assessments ?? []) as any[]) {
+    const key = `${row.student_id}:${subjectName}:${row.strand_id}`;
+    gridState[key] = {
+      assessmentId: row.id,
+      score: row.score as CbcScore,
+      dirty: false,
     };
   }
 
@@ -230,7 +216,6 @@ export async function fetchClassStudents(
 
 /**
  * Attendance records for a class on a specific date.
- * Used by the teacher to take or review roll call.
  */
 export async function fetchClassAttendance(
   grade: string,
@@ -238,7 +223,6 @@ export async function fetchClassAttendance(
 ): Promise<AttendanceRecord[]> {
   const supabase = await createSupabaseServerClient();
 
-  // Get student ids in this grade first
   const students = await fetchClassStudents(grade);
   if (students.length === 0) return [];
 
@@ -261,7 +245,6 @@ export async function fetchClassAttendance(
 
 /**
  * Recent diary entries across all grades this teacher covers.
- * Joined with student name for display.
  */
 export async function fetchTeacherDiaryEntries(
   grades: string[],
@@ -270,18 +253,13 @@ export async function fetchTeacherDiaryEntries(
   if (grades.length === 0) return [];
   const supabase = await createSupabaseServerClient();
 
-  // Get student ids in these grades
   const { data: studentRows } = await supabase
     .from("students")
     .select("id, full_name, current_grade")
     .in("current_grade", grades);
 
   const studentMap: Record<string, { name: string; grade: string }> = {};
-  for (const s of (studentRows ?? []) as {
-    id: string;
-    full_name: string;
-    current_grade: string;
-  }[]) {
+  for (const s of (studentRows ?? []) as any[]) {
     studentMap[s.id] = { name: s.full_name, grade: s.current_grade };
   }
 

@@ -380,13 +380,17 @@ export const JSS_PATHWAY_CLUSTERS: Record<
 
 // ── Notifications ─────────────────────────────────────────────────────────────
 
+// ── Notifications ─────────────────────────────────────────────────────────────
+
 export type NotificationType =
-  | "attendance"
-  | "diary"
-  | "message"
-  | "finance"
-  | "academic"
-  | "system";
+  | "attendance_absent"
+  | "attendance_late"
+  | "diary_entry"
+  | "communication_received"
+  | "assessment_result"
+  | "announcement"
+  | "fee_reminder"
+  | "system"; // Keep system if you plan to use it later
 
 export interface StudentNotification {
   id: string;
@@ -403,11 +407,13 @@ export const NOTIF_STYLE: Record<
   NotificationType,
   { icon: string; color: string }
 > = {
-  attendance: { icon: "📅", color: "sky" },
-  diary: { icon: "📔", color: "amber" },
-  message: { icon: "💬", color: "emerald" },
-  finance: { icon: "💳", color: "rose" },
-  academic: { icon: "🎓", color: "purple" },
+  attendance_absent: { icon: "❌", color: "rose" },
+  attendance_late: { icon: "⏰", color: "amber" },
+  diary_entry: { icon: "📔", color: "cyan" },
+  communication_received: { icon: "💬", color: "purple" },
+  assessment_result: { icon: "📊", color: "emerald" },
+  announcement: { icon: "📢", color: "blue" },
+  fee_reminder: { icon: "💳", color: "rose" },
   system: { icon: "⚙️", color: "slate" },
 };
 

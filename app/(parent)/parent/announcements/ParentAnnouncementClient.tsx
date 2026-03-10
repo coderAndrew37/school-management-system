@@ -1,9 +1,9 @@
 "use client";
 
+import { Announcement, SchoolEvent } from "@/lib/types/governance";
 // app/parent/announcements/_components/ParentAnnouncementsClient.tsx
 // Read-only announcements + events calendar for parents.
 
-import type { Announcement, SchoolEvent } from "@/lib/data/parent";
 import {
   Megaphone,
   CalendarDays,
@@ -383,7 +383,8 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
                           {e.end_date &&
                             e.end_date !== e.start_date &&
                             ` – ${formatShort(e.end_date)}`}
-                          {e.target_grade && ` · ${e.target_grade}`}
+                          {e.target_grades &&
+                            ` · ${e.target_grades.join(", ")}`}
                         </p>
                       </div>
                     </div>

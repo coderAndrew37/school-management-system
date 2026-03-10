@@ -14,49 +14,17 @@ import type {
 } from "@/lib/types/parent";
 import { supabaseAdmin } from "../supabase/admin";
 
-// NOTE: student_competencies table does not exist in the DB.
-// TalentCompetency type is kept for future use; competencies always returns [].
+// ── IMPORT GOVERNANCE TYPES ──────────────────────────────────────────────────
+import type {
+  Announcement,
+  SchoolEvent,
+  FeePayment,
+} from "@/lib/types/governance";
 
-// ── Re-export types that components import from this module ───────────────────
-// These are defined in @/lib/types/parent but some components (e.g. the
-// ParentAnnouncementsClient and MyChildTodayWidget) import them from
-// "@/lib/data/parent" — re-exporting here keeps both paths working.
+// ── Re-export types for components ───────────────────────────────────────────
 export type { AttendanceRecord, DiaryEntry } from "@/lib/types/parent";
 
 // ── Exported aggregate types ──────────────────────────────────────────────────
-
-export type Announcement = {
-  id: string;
-  title: string;
-  body: string;
-  audience: string;
-  target_grade: string | null;
-  priority: string;
-  expires_at: string | null;
-  created_at: string;
-};
-
-export type SchoolEvent = {
-  id: string;
-  title: string;
-  description: string | null;
-  start_date: string;
-  end_date: string | null;
-  audience: string;
-  target_grade: string | null;
-  created_at: string;
-};
-
-export type FeePayment = {
-  id: string;
-  student_id: string;
-  amount: number;
-  status: string;
-  term: number;
-  academic_year: number;
-  paid_at: string | null;
-  created_at: string;
-};
 
 export interface ChildPortalData {
   notifications: StudentNotification[];
@@ -73,13 +41,6 @@ export interface ChildPortalData {
 }
 
 // ── Raw DB shape for talent_gallery ──────────────────────────────────────────
-// Matches the ACTUAL column names in the DB schema:
-//   tags         text[]   (NOT skills_tagged)
-//   description text     (NOT caption-only — both exist)
-//   media_url    text     (storage path)
-//   image_url    text     (legacy public URL column — may be populated)
-// NOTE: `captured_on` does NOT exist in the DB. Do not select it.
-
 interface RawGalleryRow {
   id: string;
   student_id: string | null;
@@ -91,15 +52,14 @@ interface RawGalleryRow {
   description: string | null;
   category: string | null;
   media_type: string | null;
-  media_url: string; // storage path (NOT a usable URL)
-  image_url: string | null; // legacy public URL — use as fallback
+  media_url: string;
+  image_url: string | null;
   tags: string[] | null;
   term: number | null;
   academic_year: number | null;
   created_at: string;
 }
 
-// ── GALLERY_SELECT — only columns that ACTUALLY exist in the DB ───────────────
 const GALLERY_SELECT =
   "id, student_id, target_grade, audience, teacher_id, " +
   "title, caption, description, category, media_type, " +
@@ -260,10 +220,7 @@ export async function fetchMyProfile(): Promise<Parent | null> {
       .select("id, full_name, email, phone_number, created_at")
       .eq("email", user.email ?? "")
       .single<Parent>();
-    if (emailErr) {
-      console.error("[fetchMyProfile] both lookups failed:", emailErr.message);
-      return null;
-    }
+    if (emailErr) return null;
     return byEmail;
   }
   return data;
@@ -277,10 +234,7 @@ export async function fetchMyChildren(): Promise<ChildWithAssessments[]> {
     .order("full_name", { ascending: true })
     .returns<RawStudentRow[]>();
 
-  if (error) {
-    console.error("[fetchMyChildren]", error.message, error.details);
-    return [];
-  }
+  if (error) return [];
   return (data ?? []).map(mapStudentRow);
 }
 
@@ -294,10 +248,7 @@ export async function fetchChild(
     .eq("id", studentId)
     .single<RawStudentRow>();
 
-  if (error) {
-    console.error("[fetchChild]", error.message);
-    return null;
-  }
+  if (error) return null;
   return data ? mapStudentRow(data) : null;
 }
 
@@ -313,9 +264,9 @@ export async function fetchAllChildData(
     { data: diary },
     { data: attendance },
     { data: messages },
-    { data: galleryStudent, error: eGalStudent },
-    { data: galleryClass, error: eGalClass },
-    { data: gallerySchool, error: eGalSchool },
+    { data: galleryStudent },
+    { data: galleryClass },
+    { data: gallerySchool },
     { data: pathway },
     { data: announcements },
     { data: events },
@@ -326,26 +277,23 @@ export async function fetchAllChildData(
       .select("*")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
-
     supabase
       .from("student_diary")
       .select("*")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
-
     supabase
       .from("attendance")
       .select("*")
       .eq("student_id", studentId)
       .order("date", { ascending: false }),
-
     supabase
       .from("communication_book")
       .select("*")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
 
-    // Gallery tier 1: child-specific
+    // Gallery tier fetches
     supabase
       .from("talent_gallery")
       .select(GALLERY_SELECT)
@@ -354,8 +302,6 @@ export async function fetchAllChildData(
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(60),
-
-    // Gallery tier 2: class-wide
     supabase
       .from("talent_gallery")
       .select(GALLERY_SELECT)
@@ -364,8 +310,6 @@ export async function fetchAllChildData(
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(40),
-
-    // Gallery tier 3: school-wide
     supabase
       .from("talent_gallery")
       .select(GALLERY_SELECT)
@@ -380,10 +324,11 @@ export async function fetchAllChildData(
       .eq("student_id", studentId)
       .maybeSingle(),
 
+    // ── GOVERNANCE DATA FETCHES (Strict Columns) ─────────────────────────────
     supabase
       .from("announcements")
       .select(
-        "id, title, body, audience, target_grade, priority, expires_at, created_at",
+        `id, title, body, audience, target_grade, priority, pinned, published_at, expires_at, author_id, created_at, updated_at`,
       )
       .order("created_at", { ascending: false })
       .limit(50),
@@ -391,7 +336,7 @@ export async function fetchAllChildData(
     supabase
       .from("school_events")
       .select(
-        "id, title, description, start_date, end_date, audience, target_grade, created_at",
+        `id, title, description, category, start_date, end_date, start_time, end_time, location, target_grades, is_public, author_id, created_at, updated_at`,
       )
       .gte(
         "start_date",
@@ -403,39 +348,25 @@ export async function fetchAllChildData(
     supabase
       .from("fee_payments")
       .select(
-        "id, student_id, amount, status, term, academic_year, paid_at, created_at",
+        `id, student_id, fee_structure_id, term, academic_year, amount_due, amount_paid, status, payment_method, mpesa_code, paid_at, notes, recorded_by, created_at, updated_at, payment_date, reference_number`,
       )
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
   ]);
 
-  if (eGalStudent)
-    console.error(
-      "[gallery/student]",
-      eGalStudent.message,
-      eGalStudent.details,
-    );
-  if (eGalClass)
-    console.error("[gallery/class]", eGalClass.message, eGalClass.details);
-  if (eGalSchool)
-    console.error("[gallery/school]", eGalSchool.message, eGalSchool.details);
-
-  // Merge gallery tiers, de-dupe by id
+  // Gallery merging
   const seenIds = new Set<string>();
   const rawGallery: RawGalleryRow[] = [];
-
-  // FIX: Using 'unknown' intermediary to bypass TS2352 overlap error
   for (const row of [
-    ...((galleryStudent ?? []) as unknown as RawGalleryRow[]),
-    ...((galleryClass ?? []) as unknown as RawGalleryRow[]),
-    ...((gallerySchool ?? []) as unknown as RawGalleryRow[]),
-  ]) {
-    if (row && typeof row === "object" && "id" in row && !seenIds.has(row.id)) {
+    ...(galleryStudent ?? []),
+    ...(galleryClass ?? []),
+    ...(gallerySchool ?? []),
+  ] as unknown as RawGalleryRow[]) {
+    if (row && row.id && !seenIds.has(row.id)) {
       seenIds.add(row.id);
       rawGallery.push(row);
     }
   }
-
   const gallery: GalleryItem[] = await Promise.all(
     rawGallery.map(mapGalleryRow),
   );
@@ -453,9 +384,9 @@ export async function fetchAllChildData(
     competencies,
     gallery,
     pathway: pathway ?? null,
-    announcements: announcements ?? [],
-    events: events ?? [],
-    feePayments: feePayments ?? [],
+    announcements: (announcements as unknown as Announcement[]) ?? [],
+    events: (events as unknown as SchoolEvent[]) ?? [],
+    feePayments: (feePayments as unknown as FeePayment[]) ?? [],
     unreadCount,
   };
 }

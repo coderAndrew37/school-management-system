@@ -13,6 +13,7 @@ import {
   BarChart2,
   Megaphone,
   CreditCard,
+  Settings,
 } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -23,8 +24,8 @@ const TYPE_CFG: Record<
   {
     icon: React.ReactNode;
     label: string;
-    dot: string; // unread indicator colour
-    rowBg: string; // unread row tint
+    dot: string;
+    rowBg: string;
     iconBg: string;
     iconText: string;
     pill: string;
@@ -92,6 +93,15 @@ const TYPE_CFG: Record<
     iconBg: "bg-red-100",
     iconText: "text-red-700",
     pill: "bg-red-100 text-red-700 border-red-200",
+  },
+  system: {
+    icon: <Settings className="h-4 w-4" />,
+    label: "System",
+    dot: "bg-slate-500",
+    rowBg: "bg-slate-50",
+    iconBg: "bg-slate-100",
+    iconText: "text-slate-700",
+    pill: "bg-slate-100 text-slate-700 border-slate-200",
   },
 };
 

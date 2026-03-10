@@ -152,6 +152,7 @@ export interface FeePayment {
   } | null;
   payment_date: string;
   reference_number: number;
+  total_due: number;
 }
 
 // ── Attendance ────────────────────────────────────────────────────────────────

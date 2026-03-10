@@ -136,6 +136,7 @@ export function SchoolCalendarView({ events, childGrade }: Props) {
       <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm">
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
           <button
+            aria-label="previous month"
             onClick={prevMonth}
             className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 active:scale-90"
           >
@@ -145,6 +146,7 @@ export function SchoolCalendarView({ events, childGrade }: Props) {
             {FULL_MONTHS[viewMonth]} {viewYear}
           </p>
           <button
+            aria-label="next month"
             onClick={nextMonth}
             className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 active:scale-90"
           >

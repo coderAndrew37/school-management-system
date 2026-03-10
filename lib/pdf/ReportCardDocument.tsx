@@ -2,13 +2,12 @@
 // Phase 4: CBC Report Card PDF using @react-pdf/renderer
 // npm install @react-pdf/renderer
 
-import React from "react";
 import {
   Document,
   Page,
+  StyleSheet,
   Text,
   View,
-  StyleSheet,
   Font,
 } from "@react-pdf/renderer";
 
@@ -74,6 +73,7 @@ const SCORE_COLOR: Record<string, { bg: string; text: string }> = {
   AE: { bg: "#fef3c7", text: "#92400e" },
   BE: { bg: "#fee2e2", text: "#991b1b" },
 };
+
 const SCORE_LABEL: Record<string, string> = {
   EE: "Exceeding Expectations",
   ME: "Meeting Expectations",
@@ -235,6 +235,7 @@ const s = StyleSheet.create({
     gap: 3,
     flexWrap: "wrap",
     flex: 2,
+    marginTop: 2,
   },
   strandPill: {
     borderRadius: 4,
@@ -255,7 +256,7 @@ const s = StyleSheet.create({
   teacherRemark: {
     fontSize: 7.5,
     color: C.slate600,
-    marginTop: 3,
+    marginTop: 4,
     fontStyle: "italic",
   },
 
@@ -408,6 +409,7 @@ const s = StyleSheet.create({
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function calcAge(dob: string): number {
+  if (!dob) return 0;
   const b = new Date(dob),
     n = new Date();
   let a = n.getFullYear() - b.getFullYear();
@@ -424,300 +426,23 @@ function attRate(present: number, late: number, total: number): string {
   return `${Math.round(((present + late) / total) * 100)}%`;
 }
 
-// ── Document ──────────────────────────────────────────────────────────────────
+// ── Components ────────────────────────────────────────────────────────────────
 
-export function ReportCardDocument(props: ReportCardProps) {
-  const { student, report, subjects, attendance } = props;
+/**
+ * Shared content rendered in both Document and Page-only modes.
+ */
+const ReportCardContent = ({
+  student,
+  report,
+  subjects,
+  attendance,
+}: ReportCardProps) => {
   const { present, absent, late, total } = attendance;
   const rate = attRate(present, late, total);
-  const attRateNum =
-    total > 0 ? Math.round(((present + late) / total) * 100) : 0;
-  const attColor =
-    attRateNum >= 90 ? C.emerald : attRateNum >= 75 ? C.amber : C.rose;
 
   return (
-    <Document
-      title={`${student.fullName} — Term ${report.term} Report`}
-      author="Kibali Academy"
-    >
-      <Page size="A4" style={s.page}>
-        {/* ── Header ── */}
-        <View style={s.header}>
-          <View style={s.headerTop}>
-            <View style={s.schoolBadge}>
-              <Text style={s.badgeText}>K</Text>
-            </View>
-            <View>
-              <Text style={s.schoolName}>Kibali Academy</Text>
-              <Text style={s.schoolSub}>CBC Competency-Based Curriculum</Text>
-            </View>
-          </View>
-          <Text style={s.reportTitle}>Student Progress Report Card</Text>
-          <View style={s.termBadge}>
-            <Text style={s.termBadgeText}>
-              Term {report.term} · Academic Year {report.academicYear} ·{" "}
-              {student.grade}
-            </Text>
-          </View>
-        </View>
-
-        <View style={s.content}>
-          {/* ── Student Info ── */}
-          <View style={s.infoCard}>
-            <View style={s.infoCol}>
-              <View style={s.infoRow}>
-                <Text style={s.infoLabel}>Student</Text>
-                <Text style={s.infoValue}>{student.fullName}</Text>
-              </View>
-              <View style={s.infoRow}>
-                <Text style={s.infoLabel}>Grade</Text>
-                <Text style={s.infoValue}>{student.grade}</Text>
-              </View>
-              <View style={s.infoRow}>
-                <Text style={s.infoLabel}>Gender</Text>
-                <Text style={s.infoValue}>{student.gender ?? "—"}</Text>
-              </View>
-            </View>
-            <View style={s.infoCol}>
-              <View style={s.infoRow}>
-                <Text style={s.infoLabel}>Age</Text>
-                <Text style={s.infoValue}>
-                  {calcAge(student.dateOfBirth)} years
-                </Text>
-              </View>
-              {student.upiNumber && (
-                <View style={s.infoRow}>
-                  <Text style={s.infoLabel}>UPI No.</Text>
-                  <Text style={s.infoValue}>{student.upiNumber}</Text>
-                </View>
-              )}
-              {student.readableId && (
-                <View style={s.infoRow}>
-                  <Text style={s.infoLabel}>Adm. No.</Text>
-                  <Text style={s.infoValue}>{student.readableId}</Text>
-                </View>
-              )}
-              <View style={s.infoRow}>
-                <Text style={s.infoLabel}>Class Teacher</Text>
-                <Text style={s.infoValue}>{report.classTeacherName}</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* ── Attendance ── */}
-          <View style={s.sectionHeader}>
-            <View style={s.sectionDot} />
-            <Text style={s.sectionTitle}>Attendance</Text>
-          </View>
-
-          <View style={s.attGrid}>
-            {[
-              {
-                label: "Present",
-                value: present,
-                bg: C.emeraldLight,
-                text: C.emeraldDark,
-              },
-              {
-                label: "Absent",
-                value: absent,
-                bg: C.roseLight,
-                text: "#991b1b",
-              },
-              { label: "Late", value: late, bg: C.amberLight, text: "#92400e" },
-              {
-                label: "Total Days",
-                value: total,
-                bg: C.slate100,
-                text: C.slate600,
-              },
-              { label: "Rate", value: rate, bg: C.skyLight, text: "#075985" },
-            ].map(({ label, value, bg, text }) => (
-              <View key={label} style={[s.attBox, { backgroundColor: bg }]}>
-                <Text style={[s.attValue, { color: text }]}>{value}</Text>
-                <Text style={[s.attLabel, { color: text }]}>{label}</Text>
-              </View>
-            ))}
-          </View>
-
-          {/* ── Conduct & Effort ── */}
-          {(report.conductGrade || report.effortGrade) && (
-            <>
-              <View style={s.sectionHeader}>
-                <View style={s.sectionDot} />
-                <Text style={s.sectionTitle}>Conduct & Effort</Text>
-              </View>
-              <View style={s.conductGrid}>
-                <View style={s.conductBox}>
-                  <Text style={s.conductLabel}>Conduct</Text>
-                  <Text style={s.conductValue}>
-                    {report.conductGrade ?? "Not graded"}
-                  </Text>
-                </View>
-                <View style={s.conductBox}>
-                  <Text style={s.conductLabel}>Effort</Text>
-                  <Text style={s.conductValue}>
-                    {report.effortGrade ?? "Not graded"}
-                  </Text>
-                </View>
-              </View>
-            </>
-          )}
-
-          {/* ── Subject Results ── */}
-          <View style={s.sectionHeader}>
-            <View style={s.sectionDot} />
-            <Text style={s.sectionTitle}>
-              Subject Results ({subjects.length} subjects)
-            </Text>
-          </View>
-
-          {subjects.length === 0 ? (
-            <View
-              style={[
-                s.remarksBox,
-                { backgroundColor: C.amberLight, borderColor: "#fde68a" },
-              ]}
-            >
-              <Text style={[s.remarksText, { color: "#92400e" }]}>
-                No subject assessments have been recorded for this term.
-              </Text>
-            </View>
-          ) : (
-            subjects.map((subj) => {
-              const sc = SCORE_COLOR[subj.overallScore] ?? SCORE_COLOR.ME;
-              return (
-                <View key={subj.name} style={s.subjectRow}>
-                  <View style={{ flex: 3 }}>
-                    <Text style={s.subjectName}>{subj.name}</Text>
-                    {/* Strand pills */}
-                    <View style={s.strandPills}>
-                      {subj.strands.map((strand) => {
-                        const ssc = SCORE_COLOR[strand.score] ?? SCORE_COLOR.ME;
-                        return (
-                          <Text
-                            key={strand.strand_id}
-                            style={[
-                              s.strandPill,
-                              { backgroundColor: ssc.bg, color: ssc.text },
-                            ]}
-                            title={strand.strand_id}
-                          >
-                            {strand.score}
-                          </Text>
-                        );
-                      })}
-                    </View>
-                    {/* First teacher remark */}
-                    {subj.strands.find((st) => st.teacher_remarks) && (
-                      <Text style={s.teacherRemark}>
-                        {
-                          subj.strands.find((st) => st.teacher_remarks)!
-                            .teacher_remarks
-                        }
-                      </Text>
-                    )}
-                  </View>
-                  <Text
-                    style={[
-                      s.subjectOverall,
-                      { backgroundColor: sc.bg, color: sc.text },
-                    ]}
-                  >
-                    {subj.overallScore}
-                  </Text>
-                </View>
-              );
-            })
-          )}
-
-          {/* ── Class Teacher Remarks ── */}
-          <View style={s.sectionHeader}>
-            <View style={s.sectionDot} />
-            <Text style={s.sectionTitle}>Class Teacher Remarks</Text>
-          </View>
-
-          <View style={s.remarksBox}>
-            <Text style={s.remarksLabel}>
-              Remarks by {report.classTeacherName}
-            </Text>
-            {report.classTeacherRemarks ? (
-              <Text style={s.remarksText}>{report.classTeacherRemarks}</Text>
-            ) : (
-              <Text style={s.remarksEmpty}>
-                No remarks have been added for this term.
-              </Text>
-            )}
-          </View>
-
-          {/* ── Signature row ── */}
-          <View style={s.sigRow}>
-            <View style={s.sigBox}>
-              <Text style={s.sigLabel}>Class Teacher</Text>
-              <Text style={s.sigName}>{report.classTeacherName}</Text>
-            </View>
-            <View style={s.sigBox}>
-              <Text style={s.sigLabel}>Head Teacher</Text>
-              <Text style={s.sigName}>_______________________</Text>
-            </View>
-            <View style={s.sigBox}>
-              <Text style={s.sigLabel}>Parent / Guardian</Text>
-              <Text style={s.sigName}>_______________________</Text>
-            </View>
-          </View>
-
-          {/* ── CBC Legend ── */}
-          <View style={s.legend}>
-            {(["EE", "ME", "AE", "BE"] as const).map((code) => {
-              const c = SCORE_COLOR[code];
-              return (
-                <View key={code} style={s.legendItem}>
-                  <View style={[s.legendDot, { backgroundColor: c.bg }]} />
-                  <Text style={s.legendText}>
-                    <Text style={{ fontFamily: "Helvetica-Bold" }}>{code}</Text>
-                    {" — "}
-                    {SCORE_LABEL[code]}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* ── Footer ── */}
-        <View style={s.footer}>
-          <Text style={s.footerText}>
-            Kibali Academy · Nairobi, Kenya · admin@kibali.ac.ke
-          </Text>
-          <Text style={s.footerText}>
-            Generated:{" "}
-            {new Date().toLocaleDateString("en-KE", {
-              day: "numeric",
-              month: "long",
-              year: "numeric",
-            })}
-          </Text>
-        </View>
-      </Page>
-    </Document>
-  );
-}
-
-// ── ReportCardPageOnly ────────────────────────────────────────────────────────
-// Same content as ReportCardDocument but returns just the <Page>.
-// Used by the bulk generator (/api/reports/generate) which wraps multiple
-// students' pages inside a single <Document>.
-
-export function ReportCardPageOnly(props: ReportCardProps) {
-  const { student, report, subjects, attendance } = props;
-  const { present, absent, late, total } = attendance;
-  const rate = attRate(present, late, total);
-  const attRateNum =
-    total > 0 ? Math.round(((present + late) / total) * 100) : 0;
-
-  return (
-    <Page size="A4" style={s.page}>
-      {/* Header */}
+    <>
+      {/* ── Header ── */}
       <View style={s.header}>
         <View style={s.headerTop}>
           <View style={s.schoolBadge}>
@@ -738,7 +463,7 @@ export function ReportCardPageOnly(props: ReportCardProps) {
       </View>
 
       <View style={s.content}>
-        {/* Student info */}
+        {/* ── Student Info ── */}
         <View style={s.infoCard}>
           <View style={s.infoCol}>
             <View style={s.infoRow}>
@@ -780,11 +505,12 @@ export function ReportCardPageOnly(props: ReportCardProps) {
           </View>
         </View>
 
-        {/* Attendance */}
+        {/* ── Attendance ── */}
         <View style={s.sectionHeader}>
           <View style={s.sectionDot} />
           <Text style={s.sectionTitle}>Attendance</Text>
         </View>
+
         <View style={s.attGrid}>
           {[
             {
@@ -815,7 +541,7 @@ export function ReportCardPageOnly(props: ReportCardProps) {
           ))}
         </View>
 
-        {/* Conduct & Effort */}
+        {/* ── Conduct & Effort ── */}
         {(report.conductGrade || report.effortGrade) && (
           <>
             <View style={s.sectionHeader}>
@@ -839,13 +565,14 @@ export function ReportCardPageOnly(props: ReportCardProps) {
           </>
         )}
 
-        {/* Subject results */}
+        {/* ── Subject Results ── */}
         <View style={s.sectionHeader}>
           <View style={s.sectionDot} />
           <Text style={s.sectionTitle}>
             Subject Results ({subjects.length} subjects)
           </Text>
         </View>
+
         {subjects.length === 0 ? (
           <View
             style={[
@@ -854,12 +581,15 @@ export function ReportCardPageOnly(props: ReportCardProps) {
             ]}
           >
             <Text style={[s.remarksText, { color: "#92400e" }]}>
-              No subject assessments recorded for this term.
+              No subject assessments have been recorded for this term.
             </Text>
           </View>
         ) : (
           subjects.map((subj) => {
             const sc = SCORE_COLOR[subj.overallScore] ?? SCORE_COLOR.ME;
+            const strandWithRemark = subj.strands.find(
+              (st) => st.teacher_remarks,
+            );
             return (
               <View key={subj.name} style={s.subjectRow}>
                 <View style={{ flex: 3 }}>
@@ -880,14 +610,9 @@ export function ReportCardPageOnly(props: ReportCardProps) {
                       );
                     })}
                   </View>
-                  {subj.strands.find((st) => st.teacher_remarks) && (
+                  {strandWithRemark && (
                     <Text style={s.teacherRemark}>
-                      "
-                      {
-                        subj.strands.find((st) => st.teacher_remarks)!
-                          .teacher_remarks
-                      }
-                      "
+                      "{strandWithRemark.teacher_remarks}"
                     </Text>
                   )}
                 </View>
@@ -904,11 +629,12 @@ export function ReportCardPageOnly(props: ReportCardProps) {
           })
         )}
 
-        {/* Remarks */}
+        {/* ── Class Teacher Remarks ── */}
         <View style={s.sectionHeader}>
           <View style={s.sectionDot} />
           <Text style={s.sectionTitle}>Class Teacher Remarks</Text>
         </View>
+
         <View style={s.remarksBox}>
           <Text style={s.remarksLabel}>
             Remarks by {report.classTeacherName}
@@ -922,7 +648,7 @@ export function ReportCardPageOnly(props: ReportCardProps) {
           )}
         </View>
 
-        {/* Signatures */}
+        {/* ── Signature row ── */}
         <View style={s.sigRow}>
           <View style={s.sigBox}>
             <Text style={s.sigLabel}>Class Teacher</Text>
@@ -938,7 +664,7 @@ export function ReportCardPageOnly(props: ReportCardProps) {
           </View>
         </View>
 
-        {/* CBC legend */}
+        {/* ── CBC Legend ── */}
         <View style={s.legend}>
           {(["EE", "ME", "AE", "BE"] as const).map((code) => {
             const c = SCORE_COLOR[code];
@@ -946,8 +672,7 @@ export function ReportCardPageOnly(props: ReportCardProps) {
               <View key={code} style={s.legendItem}>
                 <View style={[s.legendDot, { backgroundColor: c.bg }]} />
                 <Text style={s.legendText}>
-                  <Text style={{ fontFamily: "Helvetica-Bold" }}>{code}</Text>
-                  {" — "}
+                  <Text style={{ fontFamily: "Helvetica-Bold" }}>{code}</Text> —{" "}
                   {SCORE_LABEL[code]}
                 </Text>
               </View>
@@ -956,7 +681,7 @@ export function ReportCardPageOnly(props: ReportCardProps) {
         </View>
       </View>
 
-      {/* Footer */}
+      {/* ── Footer ── */}
       <View style={s.footer}>
         <Text style={s.footerText}>
           Kibali Academy · Nairobi, Kenya · admin@kibali.ac.ke
@@ -970,6 +695,29 @@ export function ReportCardPageOnly(props: ReportCardProps) {
           })}
         </Text>
       </View>
+    </>
+  );
+};
+
+// ── Exported Components ───────────────────────────────────────────────────────
+
+export function ReportCardDocument(props: ReportCardProps) {
+  return (
+    <Document
+      title={`${props.student.fullName} — Term ${props.report.term} Report`}
+      author="Kibali Academy"
+    >
+      <Page size="A4" style={s.page}>
+        <ReportCardContent {...props} />
+      </Page>
+    </Document>
+  );
+}
+
+export function ReportCardPageOnly(props: ReportCardProps) {
+  return (
+    <Page size="A4" style={s.page}>
+      <ReportCardContent {...props} />
     </Page>
   );
 }

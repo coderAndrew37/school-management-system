@@ -1,25 +1,25 @@
 "use client";
 
-import { useState, useCallback, useTransition, useRef, useEffect } from "react";
-import { toast } from "sonner";
-import {
-  Save,
-  Loader2,
-  ChevronDown,
-  Edit3,
-  X,
-  CheckCircle2,
-} from "lucide-react";
 import {
   batchUpsertAssessmentsAction,
   saveNarrativeAction,
 } from "@/lib/actions/assessment";
-import { getStrands, formatStrand, SCORE_COLORS } from "@/lib/types/assessment";
 import type {
-  CbcScore,
   AssessmentGridState,
+  CbcScore,
   GridStudent,
 } from "@/lib/types/assessment";
+import { formatStrand, getStrands } from "@/lib/types/assessment";
+import {
+  CheckCircle2,
+  ChevronDown,
+  Edit3,
+  Loader2,
+  Save,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { toast } from "sonner";
 
 const SCORES: CbcScore[] = ["EE", "ME", "AE", "BE"];
 
