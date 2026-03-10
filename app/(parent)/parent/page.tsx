@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { MyChildTodayWidget } from "./_components/ParentOverviewWidget";
 
 export const metadata = { title: "Parent Portal | Kibali Academy" };
 export const revalidate = 0;
@@ -311,6 +312,15 @@ export default async function ParentDashboard({ searchParams }: PageProps) {
             )}
           </div>
         </div>
+
+        {/* ── My Child Today widget ────────────────────────────────────────── */}
+        {/* Shows today's attendance status, last diary entry, last CBC score. */}
+        {/* Renders nothing if there is no data yet — no empty state needed.   */}
+        <MyChildTodayWidget
+          child={activeChild}
+          attendance={childData.attendance}
+          diary={childData.diary}
+        />
 
         {/* ── Quick nav tiles ───────────────────────────────────────────────── */}
         <div className="grid grid-cols-4 gap-3">

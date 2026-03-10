@@ -1,9 +1,6 @@
 "use server";
 
-// lib/actions/class-teacher.ts
-
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { supabaseAdmin } from "../supabase/admin";
@@ -19,13 +16,13 @@ export interface Assignment {
 
 /** Used by ClassTeacherAssignmentClient (admin UI) */
 export type AssignResult =
-  | { success: true; assignment: Assignment }
-  | { success: false; error: string };
+  | { success: true; assignment: Assignment; message: string }
+  | { success: false; error: string; message: string };
 
 /** Used by removeClassTeacherAction */
 export type RemoveResult =
-  | { success: true }
-  | { success: false; error: string };
+  | { success: true; message: string }
+  | { success: false; error: string; message: string };
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -36,7 +33,6 @@ const assignSchema = z.object({
 });
 
 // ── Assign (upsert) a class teacher for a grade ───────────────────────────────
-// Used by: /admin/class-teachers  (ClassTeacherAssignmentClient)
 
 export async function assignClassTeacherAction(
   data: z.infer<typeof assignSchema>,
@@ -45,17 +41,25 @@ export async function assignClassTeacherAction(
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { success: false, error: "Not authenticated." };
+
+  if (!user) {
+    return {
+      success: false,
+      error: "AUTH_ERROR",
+      message: "Not authenticated.",
+    };
+  }
 
   const parsed = assignSchema.safeParse(data);
   if (!parsed.success) {
     return {
       success: false,
-      error: parsed.error.issues[0]?.message ?? "Invalid input",
+      error: "VALIDATION_ERROR",
+      message: parsed.error.issues[0]?.message ?? "Invalid input",
     };
   }
 
-  // Admins and superadmins only
+  // Permissions check
   const { data: profile } = await supabase
     .from("profiles")
     .select("role")
@@ -63,9 +67,14 @@ export async function assignClassTeacherAction(
     .single();
 
   if (!profile || !["admin", "superadmin"].includes(profile.role)) {
-    return { success: false, error: "Insufficient permissions." };
+    return {
+      success: false,
+      error: "FORBIDDEN",
+      message: "Insufficient permissions.",
+    };
   }
 
+  // Perform Upsert
   const { data: result, error } = await supabaseAdmin
     .from("class_teacher_assignments")
     .upsert(
@@ -82,16 +91,24 @@ export async function assignClassTeacherAction(
 
   if (error) {
     console.error("[assignClassTeacherAction]", error.message);
-    return { success: false, error: `Failed to assign: ${error.message}` };
+    return {
+      success: false,
+      error: error.message,
+      message: `Failed to assign: ${error.message}`,
+    };
   }
 
   revalidatePath("/admin/class-teachers");
   revalidatePath("/teacher");
-  return { success: true, assignment: result as Assignment };
+
+  return {
+    success: true,
+    assignment: result as Assignment,
+    message: `Successfully assigned to ${parsed.data.grade}`,
+  };
 }
 
 // ── Remove a class teacher assignment ─────────────────────────────────────────
-// Used by: /admin/class-teachers  (ClassTeacherAssignmentClient)
 
 export async function removeClassTeacherAction(
   assignmentId: string,
@@ -100,7 +117,14 @@ export async function removeClassTeacherAction(
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { success: false, error: "Not authenticated." };
+
+  if (!user) {
+    return {
+      success: false,
+      error: "AUTH_ERROR",
+      message: "Not authenticated.",
+    };
+  }
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -109,7 +133,11 @@ export async function removeClassTeacherAction(
     .single();
 
   if (!profile || !["admin", "superadmin"].includes(profile.role)) {
-    return { success: false, error: "Insufficient permissions." };
+    return {
+      success: false,
+      error: "FORBIDDEN",
+      message: "Insufficient permissions.",
+    };
   }
 
   const { error } = await supabaseAdmin
@@ -119,16 +147,23 @@ export async function removeClassTeacherAction(
 
   if (error) {
     console.error("[removeClassTeacherAction]", error.message);
-    return { success: false, error: "Failed to remove assignment." };
+    return {
+      success: false,
+      error: error.message,
+      message: "Failed to remove assignment.",
+    };
   }
 
   revalidatePath("/admin/class-teachers");
   revalidatePath("/teacher");
-  return { success: true };
+
+  return {
+    success: true,
+    message: "Assignment removed successfully.",
+  };
 }
 
-// ── Fetch: is current teacher a class teacher, and for which grade? ───────────
-// Used by: all /teacher/class/* pages + ClassTeacherBanner
+// ── Fetch: Get current teacher's assignment ──────────────────────────────────
 
 export async function fetchMyClassTeacherAssignment(): Promise<{
   isClassTeacher: boolean;
