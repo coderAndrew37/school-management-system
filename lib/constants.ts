@@ -1,120 +1,104 @@
+// lib/constants.ts — updated with Fees + Communications nav links
+
 import {
-  BarChart3,
-  Bell,
-  BookMarked,
-  Calendar,
-  ClipboardCheck,
-  ClipboardList,
-  FileText,
-  GraduationCap,
-  Landmark,
   LayoutDashboard,
-  Mail,
-  UserRoundPlus,
   Users,
-  type LucideIcon,
+  GraduationCap,
+  BookUser,
+  BarChart3,
+  PlusCircle,
+  Upload,
+  MailCheck,
+  Wallet,
+  Megaphone,
+  CalendarDays,
+  Settings,
+  Bell,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 export interface NavLink {
-  name: string;
+  label: string;
   href: string;
   icon: LucideIcon;
-  group?: string; // optional section label
+  group?: string;
 }
 
-// ── Admin navigation ──────────────────────────────────────────────────────────
-
 export const ADMIN_LINKS: NavLink[] = [
-  // Main
+  // ── Overview ──────────────────────────────────────────────────────────────
   {
-    name: "Dashboard",
-    href: "/dashboard",
+    label: "Dashboard",
+    href: "/",
     icon: LayoutDashboard,
-    group: "Main",
-  },
-  { name: "Students", href: "/students", icon: Users, group: "Main" },
-  {
-    name: "Analytics",
-    href: "/analytics",
-    icon: BarChart3,
-    group: "Main",
+    group: "Overview",
   },
 
-  // Academic
+  // ── People ────────────────────────────────────────────────────────────────
+  { label: "Students", href: "/students", icon: Users, group: "People" },
   {
-    name: "Admit Student",
+    label: "Admit Student",
     href: "/admission",
-    icon: UserRoundPlus,
-    group: "Academic",
+    icon: PlusCircle,
+    group: "People",
   },
   {
-    name: "Allocation",
-    href: "/allocation",
-    icon: BookMarked,
-    group: "Academic",
+    label: "Bulk Admission",
+    href: "/bulk-admit",
+    icon: Upload,
+    group: "People",
   },
   {
-    name: "Class Teachers",
+    label: "Teachers",
+    href: "/teachers",
+    icon: BookUser,
+    group: "People",
+  },
+  {
+    label: "Class Teachers",
     href: "/class-teachers",
-    icon: Users,
-    group: "Academic",
+    icon: GraduationCap,
+    group: "People",
   },
-  { name: "Timetable", href: "/timetable", icon: Calendar, group: "Academic" },
-  { name: "Report Cards", href: "/reports", icon: FileText, group: "Academic" },
   {
-    name: "Promote Students",
-    href: "/promotion",
-    icon: UserRoundPlus,
-    group: "Academic",
+    label: "Parent Invites",
+    href: "/invites",
+    icon: MailCheck,
+    group: "People",
   },
 
-  // Admin
+  // ── Finance ───────────────────────────────────────────────────────────────
   {
-    name: "Governance",
-    href: "/governance",
-    icon: Landmark,
-    group: "Administration",
+    label: "Fee Management",
+    href: "/fees",
+    icon: Wallet,
+    group: "Finance",
   },
-  {
-    name: "Communications",
-    href: "/communications",
-    icon: Mail,
-    group: "Administration",
-  },
-];
 
-// ── Teacher navigation ────────────────────────────────────────────────────────
-
-export const TEACHER_LINKS: NavLink[] = [
+  // ── Academics ─────────────────────────────────────────────────────────────
   {
-    name: "My Dashboard",
-    href: "/teacher",
-    icon: LayoutDashboard,
-    group: "Main",
+    label: "Performance",
+    href: "/heatmap",
+    icon: BarChart3,
+    group: "Academics",
+  },
+
+  // ── Communications ────────────────────────────────────────────────────────
+  {
+    label: "Announcements",
+    href: "/announcements",
+    icon: Megaphone,
+    group: "Comms",
   },
   {
-    name: "Assessments",
-    href: "/teacher/assess",
-    icon: ClipboardList,
-    group: "Teaching",
+    label: "Events",
+    href: "/events",
+    icon: CalendarDays,
+    group: "Comms",
   },
   {
-    name: "Attendance",
-    href: "/teacher/attendance",
-    icon: ClipboardCheck,
-    group: "Teaching",
-  },
-  { name: "Timetable", href: "/timetable", icon: Calendar, group: "Teaching" },
-];
-
-// ── Parent navigation ─────────────────────────────────────────────────────────
-
-export const PARENT_LINKS: NavLink[] = [
-  { name: "My Children", href: "/parent", icon: GraduationCap, group: "Main" },
-  {
-    name: "Notifications",
-    href: "/parent#notifications",
+    label: "Notifications",
+    href: "/notifications",
     icon: Bell,
-    group: "Main",
+    group: "Comms",
   },
 ];

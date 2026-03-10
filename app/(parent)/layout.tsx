@@ -1,5 +1,7 @@
 "use client";
 
+// app/parent/layout.tsx — updated with Notices + Events nav items
+
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
@@ -11,12 +13,15 @@ import {
   Image,
   Wallet,
   Compass,
-  ChevronRight,
   School,
+  Bell,
+  CalendarDays,
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { label: "Overview", href: "/parent", icon: LayoutDashboard },
+  { label: "Notices", href: "/parent/announcements", icon: Bell },
+  { label: "Events", href: "/parent/events", icon: CalendarDays },
   { label: "Diary", href: "/parent/diary", icon: BookOpen },
   { label: "Attendance", href: "/parent/attendance", icon: CalendarCheck },
   { label: "Messages", href: "/parent/messages", icon: MessageSquare },
@@ -24,6 +29,15 @@ const NAV_ITEMS = [
   { label: "Academics", href: "/parent/academics", icon: GraduationCap },
   { label: "Fees", href: "/parent/fees", icon: Wallet },
   { label: "Pathway", href: "/parent/pathway", icon: Compass },
+];
+
+// Bottom nav shows 5 most-used items on mobile
+const BOTTOM_NAV = [
+  { label: "Home", href: "/parent", icon: LayoutDashboard },
+  { label: "Notices", href: "/parent/announcements", icon: Bell },
+  { label: "Diary", href: "/parent/diary", icon: BookOpen },
+  { label: "Messages", href: "/parent/messages", icon: MessageSquare },
+  { label: "Academics", href: "/parent/academics", icon: GraduationCap },
 ];
 
 export default function ParentLayout({
@@ -35,7 +49,7 @@ export default function ParentLayout({
 
   return (
     <div className="min-h-screen bg-[#f5f6fa] flex">
-      {/* ── Sidebar ────────────────────────────────────────────────────────── */}
+      {/* ── Sidebar (desktop) ─────────────────────────────────────────────── */}
       <aside className="hidden lg:flex flex-col w-60 shrink-0 bg-white border-r border-slate-200 fixed top-0 left-0 h-screen z-30">
         {/* Logo */}
         <div className="flex items-center gap-3 px-5 py-5 border-b border-slate-100">
@@ -66,17 +80,14 @@ export default function ParentLayout({
                 className={[
                   "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all group",
                   active
-                    ? "bg-blue-50 text-blue-700"
-                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-700",
+                    ? "bg-blue-600 text-white shadow-sm shadow-blue-200"
+                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-800",
                 ].join(" ")}
               >
                 <Icon
-                  className={`h-4 w-4 shrink-0 ${active ? "text-blue-600" : "text-slate-400 group-hover:text-slate-500"}`}
+                  className={`h-4 w-4 shrink-0 ${active ? "text-white" : "text-slate-400 group-hover:text-slate-600"}`}
                 />
-                <span className="flex-1">{label}</span>
-                {active && (
-                  <ChevronRight className="h-3.5 w-3.5 text-blue-400" />
-                )}
+                {label}
               </Link>
             );
           })}
@@ -84,40 +95,38 @@ export default function ParentLayout({
 
         {/* Footer */}
         <div className="px-5 py-4 border-t border-slate-100">
-          <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
-            Kibali Academy · CBC Curriculum
-            <br />
-            Academic Year 2026
+          <p className="text-[10px] text-slate-400 font-medium">
+            Kibali Academy · Parent Portal
           </p>
         </div>
       </aside>
 
-      {/* ── Mobile bottom nav ───────────────────────────────────────────────── */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-slate-200 flex items-center justify-around px-2 py-1 safe-area-bottom">
-        {NAV_ITEMS.slice(0, 5).map(({ label, href, icon: Icon }) => {
+      {/* ── Main content ──────────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col min-h-screen lg:pl-60 pb-16 lg:pb-0">
+        {children}
+      </div>
+
+      {/* ── Bottom nav (mobile) ───────────────────────────────────────────── */}
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 flex">
+        {BOTTOM_NAV.map(({ label, href, icon: Icon }) => {
           const exact = href === "/parent";
           const active = exact ? pathname === href : pathname.startsWith(href);
           return (
             <Link
               key={href}
               href={href}
-              className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl min-w-[52px] ${
+              className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 text-[9px] font-bold transition-colors ${
                 active ? "text-blue-600" : "text-slate-400"
               }`}
             >
-              <Icon className="h-5 w-5" />
-              <span className="text-[9px] font-bold tracking-wide">
-                {label}
-              </span>
+              <Icon
+                className={`h-5 w-5 ${active ? "text-blue-600" : "text-slate-400"}`}
+              />
+              {label}
             </Link>
           );
         })}
       </nav>
-
-      {/* ── Main content ────────────────────────────────────────────────────── */}
-      <div className="flex-1 lg:ml-60 min-h-screen pb-20 lg:pb-0">
-        {children}
-      </div>
     </div>
   );
 }

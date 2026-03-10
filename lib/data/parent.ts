@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+// lib/data/parent.ts
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Parent } from "@/lib/types/dashboard";
 import type {
@@ -12,15 +12,16 @@ import type {
   StudentNotification,
   TalentCompetency,
 } from "@/lib/types/parent";
+import { supabaseAdmin } from "../supabase/admin";
 
 // NOTE: student_competencies table does not exist in the DB.
 // TalentCompetency type is kept for future use; competencies always returns [].
 
-// ── Service-role client (storage signing ONLY — no DB writes) ─────────────────
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+// ── Re-export types that components import from this module ───────────────────
+// These are defined in @/lib/types/parent but some components (e.g. the
+// ParentAnnouncementsClient and MyChildTodayWidget) import them from
+// "@/lib/data/parent" — re-exporting here keeps both paths working.
+export type { AttendanceRecord, DiaryEntry } from "@/lib/types/parent";
 
 // ── Exported aggregate types ──────────────────────────────────────────────────
 
@@ -73,10 +74,10 @@ export interface ChildPortalData {
 
 // ── Raw DB shape for talent_gallery ──────────────────────────────────────────
 // Matches the ACTUAL column names in the DB schema:
-//   tags        text[]   (NOT skills_tagged)
+//   tags         text[]   (NOT skills_tagged)
 //   description text     (NOT caption-only — both exist)
-//   media_url   text     (storage path)
-//   image_url   text     (legacy public URL column — may be populated)
+//   media_url    text     (storage path)
+//   image_url    text     (legacy public URL column — may be populated)
 // NOTE: `captured_on` does NOT exist in the DB. Do not select it.
 
 interface RawGalleryRow {
@@ -99,9 +100,6 @@ interface RawGalleryRow {
 }
 
 // ── GALLERY_SELECT — only columns that ACTUALLY exist in the DB ───────────────
-// Root cause of images not showing: selecting `skills_tagged` and `captured_on`
-// (neither exists) caused PostgREST to return a GenericStringError instead of
-// rows, so every gallery array was actually an error object.
 const GALLERY_SELECT =
   "id, student_id, target_grade, audience, teacher_id, " +
   "title, caption, description, category, media_type, " +
@@ -191,28 +189,14 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
 }
 
 // ── signGalleryUrl ────────────────────────────────────────────────────────────
-
-/**
- * Resolve the best viewable URL for a gallery row:
- *
- * 1. If image_url is a full HTTP URL (legacy public-bucket rows) → use it directly.
- * 2. If media_url looks like a storage path → sign it via service-role client.
- * 3. If media_url is also a full HTTP URL (shouldn't happen but defensive) → use it.
- * 4. Anything else → return "" so the component shows a placeholder.
- */
 async function signGalleryUrl(
   mediaUrl: string,
   imageUrl: string | null,
 ): Promise<string> {
-  // Prefer legacy public URL if it's already a real URL
   if (imageUrl && imageUrl.startsWith("http")) return imageUrl;
-
   if (!mediaUrl) return "";
-
-  // Already a full URL — shouldn't happen for new uploads but handle defensively
   if (mediaUrl.startsWith("http")) return mediaUrl;
 
-  // It's a storage path — sign it
   const { data, error } = await supabaseAdmin.storage
     .from("gallery")
     .createSignedUrl(mediaUrl, 3600);
@@ -230,7 +214,6 @@ async function signGalleryUrl(
 }
 
 // ── mapGalleryRow ─────────────────────────────────────────────────────────────
-
 async function mapGalleryRow(row: RawGalleryRow): Promise<GalleryItem> {
   const signedUrl = await signGalleryUrl(row.media_url, row.image_url);
   return {
@@ -318,28 +301,11 @@ export async function fetchChild(
   return data ? mapStudentRow(data) : null;
 }
 
-/**
- * fetchAllChildData — aggregates all portal data for one child.
- *
- * Gallery fetch uses 3 separate queries (student / class / school) so we can
- * pass targeted filters to each. Results are merged and de-duped by id, then
- * signed URLs are hydrated in parallel.
- *
- * KEY FIX: GALLERY_SELECT only requests columns that actually exist in the DB.
- * Previously selecting `skills_tagged` and `captured_on` (neither exists) caused
- * PostgREST to return a GenericStringError, so gallery arrays were actually error
- * objects — hence "Property 'id' does not exist on type GenericStringError".
- */
 export async function fetchAllChildData(
   studentId: string,
   grade: string,
 ): Promise<ChildPortalData> {
   const supabase = await createSupabaseServerClient();
-
-  // ── NOTE: student_competencies table does not exist in the DB. ───────────────
-  // TalentCompetency rows are not yet collected. The field is kept in
-  // ChildPortalData for future use; we always return [] here.
-  // When the table is created, add it back to this Promise.all.
   const competencies: TalentCompetency[] = [];
 
   const [
@@ -379,7 +345,7 @@ export async function fetchAllChildData(
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
 
-    // ── Gallery tier 1: child-specific ────────────────────────────────────
+    // Gallery tier 1: child-specific
     supabase
       .from("talent_gallery")
       .select(GALLERY_SELECT)
@@ -389,7 +355,7 @@ export async function fetchAllChildData(
       .order("created_at", { ascending: false })
       .limit(60),
 
-    // ── Gallery tier 2: class-wide ─────────────────────────────────────────
+    // Gallery tier 2: class-wide
     supabase
       .from("talent_gallery")
       .select(GALLERY_SELECT)
@@ -399,7 +365,7 @@ export async function fetchAllChildData(
       .order("created_at", { ascending: false })
       .limit(40),
 
-    // ── Gallery tier 3: school-wide ────────────────────────────────────────
+    // Gallery tier 3: school-wide
     supabase
       .from("talent_gallery")
       .select(GALLERY_SELECT)
@@ -443,7 +409,6 @@ export async function fetchAllChildData(
       .order("created_at", { ascending: false }),
   ]);
 
-  // Log gallery query errors so they're visible in server logs
   if (eGalStudent)
     console.error(
       "[gallery/student]",
@@ -455,14 +420,15 @@ export async function fetchAllChildData(
   if (eGalSchool)
     console.error("[gallery/school]", eGalSchool.message, eGalSchool.details);
 
-  // ── Merge gallery tiers, de-dupe by id ────────────────────────────────────
+  // Merge gallery tiers, de-dupe by id
   const seenIds = new Set<string>();
   const rawGallery: RawGalleryRow[] = [];
 
+  // FIX: Using 'unknown' intermediary to bypass TS2352 overlap error
   for (const row of [
-    ...((galleryStudent ?? []) as RawGalleryRow[]),
-    ...((galleryClass ?? []) as RawGalleryRow[]),
-    ...((gallerySchool ?? []) as RawGalleryRow[]),
+    ...((galleryStudent ?? []) as unknown as RawGalleryRow[]),
+    ...((galleryClass ?? []) as unknown as RawGalleryRow[]),
+    ...((gallerySchool ?? []) as unknown as RawGalleryRow[]),
   ]) {
     if (row && typeof row === "object" && "id" in row && !seenIds.has(row.id)) {
       seenIds.add(row.id);
@@ -470,7 +436,6 @@ export async function fetchAllChildData(
     }
   }
 
-  // ── Hydrate signed URLs in parallel ───────────────────────────────────────
   const gallery: GalleryItem[] = await Promise.all(
     rawGallery.map(mapGalleryRow),
   );
@@ -485,7 +450,7 @@ export async function fetchAllChildData(
     diary: diary ?? [],
     attendance: attendance ?? [],
     messages: messages ?? [],
-    competencies, // always [] until student_competencies table is created
+    competencies,
     gallery,
     pathway: pathway ?? null,
     announcements: announcements ?? [],
