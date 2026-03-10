@@ -1,20 +1,21 @@
 "use client";
 
 import {
-  FileText,
-  ChevronDown,
-  Check,
-  Loader2,
-  Eye,
-  AlertTriangle,
-} from "lucide-react";
-import { useState, useTransition } from "react";
-import Link from "next/link";
-import {
-  saveReportCardAction,
   publishReportCardAction,
+  saveReportCardAction,
 } from "@/lib/actions/report-card";
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  Eye,
+  FileText,
+  Loader2,
+} from "lucide-react";
+import Link from "next/link";
+import { useState, useTransition } from "react";
 import { StudentReport, CbcScore, SubjectScore } from "./types";
+import { DownloadReportButton } from "@/app/_components/shared/DownloadReportButton";
 
 interface Props {
   students: StudentReport[];
@@ -104,6 +105,10 @@ export function ClassReportsClient({
   academicYear,
   classTeacherId,
 }: Props) {
+  // Derive current term from calendar month — mirrors server-side heuristic
+  const currentMonth = new Date().getMonth() + 1;
+  const currentTerm = currentMonth <= 4 ? 1 : currentMonth <= 8 ? 2 : 3;
+
   const [expanded, setExpanded] = useState<string | null>(null);
   const [remarks, setRemarks] = useState<Record<string, string>>({});
   const [conduct, setConduct] = useState<Record<string, string>>({});
@@ -342,7 +347,7 @@ export function ClassReportsClient({
                     {s.full_name
                       .split(" ")
                       .slice(0, 2)
-                      .map((n: string) => n[0])
+                      .map((n) => n[0])
                       .join("")
                       .toUpperCase()}
                   </div>
@@ -541,7 +546,7 @@ export function ClassReportsClient({
                           Conduct
                         </label>
                         <select
-                          aria-label="select conduct grade"
+                          aria-label="conduct selector"
                           value={conduct[s.id] ?? ""}
                           onChange={(e) => {
                             setConduct((c) => ({
@@ -565,7 +570,7 @@ export function ClassReportsClient({
                           Effort
                         </label>
                         <select
-                          aria-label="select efforts grade"
+                          aria-label="efforts selector"
                           value={effort[s.id] ?? ""}
                           onChange={(e) => {
                             setEffort((ef) => ({
@@ -635,9 +640,18 @@ export function ClassReportsClient({
                       )}
 
                       {s.status === "published" && (
-                        <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-600">
-                          <Check className="h-4 w-4" /> Live on parent portal
-                        </span>
+                        <div className="flex items-center gap-3">
+                          <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-600">
+                            <Check className="h-4 w-4" /> Live on parent portal
+                          </span>
+                          <DownloadReportButton
+                            studentId={s.id}
+                            studentName={s.full_name}
+                            term={currentTerm}
+                            year={academicYear}
+                            variant="link"
+                          />
+                        </div>
                       )}
                     </div>
                   </div>

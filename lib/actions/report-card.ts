@@ -2,14 +2,9 @@
 
 // lib/actions/report-card.ts
 
-import { createClient } from "@supabase/supabase-js";
-import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/actions/auth";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+import { revalidatePath } from "next/cache";
+import { supabaseAdmin } from "../supabase/admin";
 
 interface SaveArgs {
   studentId: string;
@@ -168,8 +163,26 @@ export async function publishReportCardAction(
     if (error) return { success: false, error: error.message };
   }
 
-  // TODO: trigger parent notification (Phase 3)
-  // await sendParentNotification(studentId, "report_ready", { term, academicYear });
+  // Phase 3: notify parents (non-blocking)
+  supabaseAdmin
+    .from("students")
+    .select("full_name, current_grade")
+    .eq("id", studentId)
+    .single()
+    .then(({ data: student }) => {
+      if (!student) return;
+      import("@/lib/notifications/parent-notify").then(
+        ({ notifyReportReady }) =>
+          notifyReportReady({
+            studentId,
+            studentName: student.full_name,
+            grade: student.current_grade,
+            term,
+            academicYear,
+          }),
+      );
+    });
+  // .catch((err) => console.error("[publishReport notify]", err));
 
   revalidatePath("/teacher/class/reports");
   revalidatePath("/parent");

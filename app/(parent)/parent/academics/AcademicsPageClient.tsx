@@ -1,5 +1,6 @@
 "use client";
 
+import { DownloadReportButton } from "@/app/_components/shared/DownloadReportButton";
 import type {
   Assessment,
   CbcScore,
@@ -154,6 +155,10 @@ export function AcademicsPageClient({ child, children }: Props) {
   // (not filtered — gives full picture of the child's strengths)
   const competencies = deriveCompetencies(allAssessments);
 
+  // Academic year from assessments (fallback to current year)
+  const academicYear =
+    allAssessments.find((a) => a.academic_year)?.academic_year ?? 2026;
+
   return (
     <div className="min-h-screen bg-[#f5f6fa]">
       {/* Header */}
@@ -204,6 +209,27 @@ export function AcademicsPageClient({ child, children }: Props) {
             </button>
           ))}
         </div>
+
+        {/* Download report card — shown when a specific term is selected */}
+        {activeTerm !== 0 && (
+          <div className="bg-white rounded-2xl border border-slate-200 px-4 py-3 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-black text-slate-700">
+                Term {activeTerm} Report Card
+              </p>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                Download your child's official CBC report
+              </p>
+            </div>
+            <DownloadReportButton
+              studentId={child.id}
+              studentName={child.full_name}
+              term={activeTerm}
+              year={academicYear}
+              variant="link"
+            />
+          </div>
+        )}
 
         {/* Overall level */}
         <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex items-center gap-4">
