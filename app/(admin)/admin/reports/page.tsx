@@ -72,22 +72,25 @@ export default async function ReportsPage() {
 
           <nav className="flex items-center gap-2 flex-wrap">
             <NavLink
-              href="/dashboard"
+              href="/admin/dashboard"
               icon={<LayoutDashboard className="h-4 w-4" />}
             >
               Dashboard
             </NavLink>
             <NavLink
-              href="/allocation"
+              href="/admin/allocation"
               icon={<BookMarked className="h-4 w-4" />}
             >
               Allocations
             </NavLink>
-            <NavLink href="/timetable" icon={<Calendar className="h-4 w-4" />}>
+            <NavLink
+              href="/admin/timetable"
+              icon={<Calendar className="h-4 w-4" />}
+            >
               Timetable
             </NavLink>
             <NavLink
-              href="/admission"
+              href="/admin/admission"
               icon={<UserRoundPlus className="h-4 w-4" />}
               primary
             >
@@ -114,7 +117,7 @@ export default async function ReportsPage() {
               Admit students first before generating reports.
             </p>
             <Link
-              href="/admission"
+              href="/admin/admission"
               className="mt-5 flex items-center gap-2 rounded-xl bg-amber-400 hover:bg-amber-300 px-4 py-2.5 text-xs font-bold text-[#0c0f1a] transition-all"
             >
               <UserRoundPlus className="h-4 w-4" />

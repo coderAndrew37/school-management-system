@@ -116,7 +116,7 @@ export default function AuthConfirmPage() {
         }
 
         router.replace(
-          hashType === "recovery" ? "/auth/reset-password" : "/dashboard",
+          hashType === "recovery" ? "/auth/reset-password" : "/admin/dashboard",
         );
         return;
       }

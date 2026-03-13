@@ -3,7 +3,6 @@
 // SMS via Africa's Talking sandbox (free dev, prod = real Kenyan numbers)
 // Email via existing Resend setup
 
-import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
 import { supabaseAdmin } from "../supabase/admin";
 

@@ -3,10 +3,9 @@
 // lib/actions/bulk-teacher.ts
 // Bulk teacher addition — processes multiple rows from CSV or multi-row form.
 
-import { createClient } from "@supabase/supabase-js";
-import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/actions/auth";
 import { sendTeacherWelcomeEmail } from "@/lib/mail";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { supabaseAdmin } from "../supabase/admin";
 

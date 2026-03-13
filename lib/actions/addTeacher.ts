@@ -1,13 +1,8 @@
 "use server";
 
-import { createClient } from "@supabase/supabase-js";
-import { revalidatePath } from "next/cache";
 import { sendTeacherWelcomeEmail } from "@/lib/mail"; // Import the new function
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+import { revalidatePath } from "next/cache";
+import { supabaseAdmin } from "../supabase/admin";
 
 export async function addTeacherAction(formData: FormData) {
   const fullName = formData.get("fullName") as string;
@@ -74,7 +69,7 @@ export async function addTeacherAction(formData: FormData) {
     });
 
     revalidatePath("/teachers");
-    revalidatePath("/"); // Update dashboard stats too
+    revalidatePath("/admin"); // Update dashboard stats too
     return { success: true };
   } catch (error: any) {
     console.error("Add Teacher Action Failed:", error.message);

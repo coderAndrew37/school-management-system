@@ -3,14 +3,8 @@
 // Server component — fetches its own data.
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { CalendarCheck, FileText, Star, Users } from "lucide-react";
 import Link from "next/link";
-import {
-  CalendarCheck,
-  FileText,
-  Users,
-  ChevronRight,
-  Star,
-} from "lucide-react";
 
 async function getTodayAttendanceSummary(grade: string) {
   const supabase = await createSupabaseServerClient();

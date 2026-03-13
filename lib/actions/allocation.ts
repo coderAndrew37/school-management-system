@@ -93,8 +93,8 @@ export async function createAllocationAction(
     }
   }
 
-  revalidatePath("/allocation");
-  revalidatePath("/timetable");
+  revalidatePath("/admin/allocation");
+  revalidatePath("/admin/timetable");
   return { success: true, message: "Subject allocated and teacher notified." };
 }
 
@@ -117,8 +117,8 @@ export async function deleteAllocationAction(
     return { success: false, message: "Failed to remove allocation." };
   }
 
-  revalidatePath("/allocation");
-  revalidatePath("/timetable");
+  revalidatePath("/admin/allocation");
+  revalidatePath("/admin/timetable");
   return { success: true, message: "Allocation removed." };
 }
 
@@ -254,7 +254,7 @@ export async function generateTimetableAction(
     return { success: false, message: "Failed to save generated timetable." };
   }
 
-  revalidatePath("/timetable");
+  revalidatePath("/admin/timetable");
   return {
     success: true,
     message: `Timetable generated! ${slotsToInsert.length} lesson slots scheduled across ${byGrade.size} grades.`,

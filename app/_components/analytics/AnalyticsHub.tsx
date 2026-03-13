@@ -1,5 +1,8 @@
 "use client";
 
+// app/_components/analytics/AnalyticsHub.tsx
+// Drop this in app/_components/analytics/AnalyticsHub.tsx
+
 import { useState } from "react";
 import {
   BarChart3,
@@ -17,7 +20,7 @@ import type {
   StudentPerformanceSummary,
 } from "@/lib/data/analytics";
 
-// ── Colour helpers ─────────────────────────────────────────────────────────────
+// ── Colour helpers ────────────────────────────────────────────────────────────
 
 const SCORE_STYLE = {
   EE: {
@@ -77,7 +80,7 @@ const LEVEL_COLOR: Record<
   },
 };
 
-function meanLabel(wm: number): string {
+function meanLabel(wm: number): "EE" | "ME" | "AE" | "BE" {
   if (wm >= 3.5) return "EE";
   if (wm >= 2.5) return "ME";
   if (wm >= 1.5) return "AE";
@@ -119,7 +122,7 @@ function ScoreBar({
   );
 }
 
-// ── Tab type ──────────────────────────────────────────────────────────────────
+// ── Tabs ──────────────────────────────────────────────────────────────────────
 
 type Tab = "overview" | "grades" | "subjects" | "students";
 
@@ -146,18 +149,12 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   },
 ];
 
-// ── Main component ─────────────────────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────────────────
 
-interface Props {
-  data: AnalyticsOverview;
-}
-
-export function AnalyticsHub({ data }: Props) {
+export function AnalyticsHub({ data }: { data: AnalyticsOverview }) {
   const [tab, setTab] = useState<Tab>("overview");
-
   return (
     <div className="space-y-6">
-      {/* Tab bar */}
       <div className="flex items-center gap-1 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-1.5 w-max">
         {TABS.map((t) => (
           <button
@@ -175,7 +172,6 @@ export function AnalyticsHub({ data }: Props) {
           </button>
         ))}
       </div>
-
       {tab === "overview" && <OverviewTab data={data} />}
       {tab === "grades" && <GradesTab snapshots={data.gradeSnapshots} />}
       {tab === "subjects" && (
@@ -191,7 +187,7 @@ export function AnalyticsHub({ data }: Props) {
   );
 }
 
-// ── Tab: Overview ─────────────────────────────────────────────────────────────
+// ── Overview tab ──────────────────────────────────────────────────────────────
 
 function OverviewTab({ data }: { data: AnalyticsOverview }) {
   return (
@@ -224,8 +220,6 @@ function OverviewTab({ data }: { data: AnalyticsOverview }) {
             );
           })}
         </div>
-
-        {/* Stacked bar */}
         <div className="space-y-1">
           <p className="text-[10px] uppercase tracking-wider text-white/30">
             Distribution across all {data.totalAssessments.toLocaleString()}{" "}
@@ -261,86 +255,90 @@ function OverviewTab({ data }: { data: AnalyticsOverview }) {
         </div>
       </div>
 
-      {/* Grade enrollment + performance grid */}
+      {/* Grade table */}
       <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-6">
         <h3 className="text-base font-bold text-white mb-4">
           Grade Performance at a Glance
         </h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-white/[0.07]">
-                <th className="text-left pb-3 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                  Grade
-                </th>
-                <th className="text-left pb-3 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                  Level
-                </th>
-                <th className="text-center pb-3 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                  Students
-                </th>
-                <th className="text-center pb-3 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                  Assessed
-                </th>
-                <th className="text-center pb-3 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                  Mean
-                </th>
-                <th className="pb-3 text-[10px] font-bold uppercase tracking-wider text-white/30 min-w-[140px]">
-                  Distribution
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/[0.04]">
-              {data.gradeSnapshots.map((g) => {
-                const dom = meanLabel(g.weightedMean);
-                const s = SCORE_STYLE[dom as keyof typeof SCORE_STYLE];
-                const lc = LEVEL_COLOR[g.level] ?? LEVEL_COLOR.lower_primary!;
-                return (
-                  <tr
-                    key={g.grade}
-                    className="hover:bg-white/[0.02] transition-colors"
-                  >
-                    <td className="py-3 pr-4 font-semibold text-white">
-                      {g.grade}
-                    </td>
-                    <td className="py-3 pr-4">
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${lc.bg} ${lc.border} border ${lc.text}`}
-                      >
-                        {LEVEL_LABEL[g.level]}
-                      </span>
-                    </td>
-                    <td className="py-3 pr-4 text-center font-mono text-white/70">
-                      {g.studentCount}
-                    </td>
-                    <td className="py-3 pr-4 text-center font-mono text-white/50">
-                      {g.assessedCount}
-                    </td>
-                    <td className="py-3 pr-4 text-center">
-                      {g.weightedMean > 0 ? (
+        {data.gradeSnapshots.length === 0 ? (
+          <p className="text-sm text-white/30 py-8 text-center">
+            No grade data yet — assessments will appear here once teachers
+            submit scores.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-white/[0.07]">
+                  {[
+                    "Grade",
+                    "Level",
+                    "Students",
+                    "Assessed",
+                    "Mean",
+                    "Distribution",
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      className={`pb-3 text-[10px] font-bold uppercase tracking-wider text-white/30 ${h === "Grade" || h === "Level" ? "text-left" : h === "Distribution" ? "min-w-[140px]" : "text-center"}`}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/[0.04]">
+                {data.gradeSnapshots.map((g) => {
+                  const dom = meanLabel(g.weightedMean);
+                  const s = SCORE_STYLE[dom];
+                  const lc = LEVEL_COLOR[g.level] ?? LEVEL_COLOR.lower_primary!;
+                  return (
+                    <tr
+                      key={g.grade}
+                      className="hover:bg-white/[0.02] transition-colors"
+                    >
+                      <td className="py-3 pr-4 font-semibold text-white">
+                        {g.grade}
+                      </td>
+                      <td className="py-3 pr-4">
                         <span
-                          className={`text-xs font-bold px-2.5 py-1 rounded-lg ${s.bg} ${s.border} border ${s.text}`}
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${lc.bg} ${lc.border} border ${lc.text}`}
                         >
-                          {g.weightedMean.toFixed(1)} · {dom}
+                          {LEVEL_LABEL[g.level]}
                         </span>
-                      ) : (
-                        <span className="text-xs text-white/20">—</span>
-                      )}
-                    </td>
-                    <td className="py-3">
-                      <ScoreBar
-                        ee={g.eeCount}
-                        me={g.meCount}
-                        ae={g.aeCount}
-                        be={g.beCount}
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                      <td className="py-3 pr-4 text-center font-mono text-white/70">
+                        {g.studentCount}
+                      </td>
+                      <td className="py-3 pr-4 text-center font-mono text-white/50">
+                        {g.assessedCount}
+                      </td>
+                      <td className="py-3 pr-4 text-center">
+                        {g.weightedMean > 0 ? (
+                          <span
+                            className={`text-xs font-bold px-2.5 py-1 rounded-lg ${s.bg} ${s.border} border ${s.text}`}
+                          >
+                            {g.weightedMean.toFixed(1)} · {dom}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-white/20">—</span>
+                        )}
+                      </td>
+                      <td className="py-3">
+                        <ScoreBar
+                          ee={g.eeCount}
+                          me={g.meCount}
+                          ae={g.aeCount}
+                          be={g.beCount}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Subject leaderboard */}
@@ -348,53 +346,71 @@ function OverviewTab({ data }: { data: AnalyticsOverview }) {
         <h3 className="text-base font-bold text-white mb-4">
           Subject Leaderboard
         </h3>
-        <div className="space-y-3">
-          {data.subjectLeaderboard.slice(0, 12).map((s, i) => {
-            const dom = meanLabel(s.weightedMean);
-            const style = SCORE_STYLE[dom as keyof typeof SCORE_STYLE];
-            const pct = ((s.weightedMean - 1) / 3) * 100; // 1–4 → 0–100%
-            return (
-              <div key={s.subjectName} className="flex items-center gap-4">
-                <span className="text-[10px] font-black tabular-nums text-white/20 w-5 text-right flex-shrink-0">
-                  {i + 1}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-semibold text-white truncate">
-                      {s.subjectName}
-                    </span>
-                    <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                      <span className="text-[10px] text-white/30">
-                        {s.total} records
+        {data.subjectLeaderboard.length === 0 ? (
+          <p className="text-sm text-white/30 py-8 text-center">
+            No subject data yet.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {data.subjectLeaderboard.slice(0, 12).map((s, i) => {
+              const dom = meanLabel(s.weightedMean);
+              const style = SCORE_STYLE[dom];
+              const pct = ((s.weightedMean - 1) / 3) * 100;
+              return (
+                <div key={s.subjectName} className="flex items-center gap-4">
+                  <span className="text-[10px] font-black tabular-nums text-white/20 w-5 text-right flex-shrink-0">
+                    {i + 1}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-semibold text-white truncate">
+                        {s.subjectName}
                       </span>
-                      <span
-                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${style.bg} ${style.text}`}
-                      >
-                        {s.weightedMean.toFixed(1)}
-                      </span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-[10px] text-white/30">
+                          {s.total} records
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${style.bg} ${style.text}`}
+                        >
+                          {s.weightedMean.toFixed(1)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${style.bar} transition-all duration-500`}
+                        style={{ width: `${pct}%` }}
+                      />
                     </div>
                   </div>
-                  <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${style.bar} transition-all duration-500`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// ── Tab: By Grade ─────────────────────────────────────────────────────────────
+// ── By Grade tab ──────────────────────────────────────────────────────────────
 
 function GradesTab({ snapshots }: { snapshots: GradeSnapshot[] }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const levels = [...new Set(snapshots.map((g) => g.level))];
+
+  if (snapshots.length === 0) {
+    return (
+      <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] py-16 text-center">
+        <p className="text-3xl mb-2">📊</p>
+        <p className="text-sm text-white/35">No grade data yet</p>
+        <p className="text-xs text-white/20 mt-1">
+          Data appears once teachers submit assessments
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -404,19 +420,18 @@ function GradesTab({ snapshots }: { snapshots: GradeSnapshot[] }) {
         return (
           <div key={level}>
             <div className="flex items-center gap-3 mb-4">
-              <div className={`h-px flex-1 ${lc.bg} border-t ${lc.border}`} />
+              <div className={`h-px flex-1 border-t ${lc.border}`} />
               <span
                 className={`text-xs font-bold uppercase tracking-widest ${lc.text}`}
               >
                 {LEVEL_LABEL[level]}
               </span>
-              <div className={`h-px flex-1 ${lc.bg} border-t ${lc.border}`} />
+              <div className={`h-px flex-1 border-t ${lc.border}`} />
             </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {grades.map((g) => {
                 const dom = meanLabel(g.weightedMean);
-                const s = SCORE_STYLE[dom as keyof typeof SCORE_STYLE];
+                const s = SCORE_STYLE[dom];
                 const isOpen = expanded === g.grade;
                 const total = g.eeCount + g.meCount + g.aeCount + g.beCount;
                 return (
@@ -460,7 +475,6 @@ function GradesTab({ snapshots }: { snapshots: GradeSnapshot[] }) {
                         be={g.beCount}
                       />
                     </button>
-
                     {isOpen && (
                       <div className="px-5 pb-5 border-t border-white/[0.06] pt-4">
                         <div className="grid grid-cols-2 gap-3">
@@ -511,7 +525,7 @@ function GradesTab({ snapshots }: { snapshots: GradeSnapshot[] }) {
   );
 }
 
-// ── Tab: By Subject ───────────────────────────────────────────────────────────
+// ── By Subject tab ────────────────────────────────────────────────────────────
 
 function SubjectsTab({
   leaderboard,
@@ -543,27 +557,20 @@ function SubjectsTab({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-white/[0.07]">
-              <th className="text-left p-4 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                #
-              </th>
-              <th className="text-left p-4 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                Subject
-              </th>
-              <th className="text-center p-4 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                Records
-              </th>
-              <th className="text-center p-4 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                Mean
-              </th>
-              <th className="p-4 text-[10px] font-bold uppercase tracking-wider text-white/30 min-w-[200px]">
-                Performance
-              </th>
+              {["#", "Subject", "Records", "Mean", "Performance"].map((h) => (
+                <th
+                  key={h}
+                  className={`p-4 text-[10px] font-bold uppercase tracking-wider text-white/30 ${h === "Performance" ? "min-w-[200px]" : h === "Records" || h === "Mean" ? "text-center" : "text-left"}`}
+                >
+                  {h}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-white/[0.04]">
             {filtered.map((s, i) => {
               const dom = meanLabel(s.weightedMean);
-              const style = SCORE_STYLE[dom as keyof typeof SCORE_STYLE];
+              const style = SCORE_STYLE[dom];
               const pct = ((s.weightedMean - 1) / 3) * 100;
               const detail = snapshots.filter(
                 (x) => x.subjectName === s.subjectName,
@@ -572,7 +579,6 @@ function SubjectsTab({
               const aggMe = detail.reduce((a, x) => a + x.meCount, 0);
               const aggAe = detail.reduce((a, x) => a + x.aeCount, 0);
               const aggBe = detail.reduce((a, x) => a + x.beCount, 0);
-
               return (
                 <tr
                   key={s.subjectName}
@@ -616,7 +622,7 @@ function SubjectsTab({
         {filtered.length === 0 && (
           <div className="py-16 text-center">
             <p className="text-sm text-white/30">
-              No subjects match "{filter}"
+              No subjects match &quot;{filter}&quot;
             </p>
           </div>
         )}
@@ -625,7 +631,7 @@ function SubjectsTab({
   );
 }
 
-// ── Tab: Top Performers ───────────────────────────────────────────────────────
+// ── Top Performers tab ────────────────────────────────────────────────────────
 
 function StudentsTab({
   top,
@@ -658,7 +664,9 @@ function StudentsTab({
             ) : (
               <Users className="h-3.5 w-3.5" />
             )}
-            {v === "top" ? "Top Performers" : "Needs Support"}
+            {v === "top"
+              ? `Top Performers (${top.length})`
+              : `Needs Support (${support.length})`}
           </button>
         ))}
       </div>
@@ -676,31 +684,21 @@ function StudentsTab({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-white/[0.07]">
-                <th className="text-left p-4 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                  #
-                </th>
-                <th className="text-left p-4 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                  Student
-                </th>
-                <th className="text-center p-4 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                  Grade
-                </th>
-                <th className="text-center p-4 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                  Mean
-                </th>
-                <th className="text-center p-4 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                  Dominant
-                </th>
-                <th className="p-4 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                  Profile
-                </th>
+                {["#", "Student", "Grade", "Mean", "Dominant", "Profile"].map(
+                  (h) => (
+                    <th
+                      key={h}
+                      className={`p-4 text-[10px] font-bold uppercase tracking-wider text-white/30 ${h === "Student" || h === "#" ? "text-left" : "text-center"}`}
+                    >
+                      {h}
+                    </th>
+                  ),
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.04]">
               {list.map((s, i) => {
-                const dom =
-                  s.dominantScore ??
-                  (meanLabel(s.weightedMean) as "EE" | "ME" | "AE" | "BE");
+                const dom = s.dominantScore ?? meanLabel(s.weightedMean);
                 const style = SCORE_STYLE[dom];
                 const initials = s.fullName
                   .split(" ")

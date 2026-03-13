@@ -4,11 +4,7 @@ import { sendWelcomeEmail } from "@/lib/mail";
 import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { AdmissionActionResult, admissionSchema } from "../schemas/admission";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+import { supabaseAdmin } from "../supabase/admin";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -235,7 +231,7 @@ export async function admitStudentAction(
 
     revalidatePath("/students");
     revalidatePath("/parents");
-    revalidatePath("/dashboard");
+    revalidatePath("/admin/dashboard");
 
     return { success: true, message: "Student admitted successfully." };
   } catch (err: any) {

@@ -4,15 +4,10 @@
 // Admin publish/manage announcements and school events.
 // Parents read via parent-data.ts (existing queries — no changes needed).
 
-import { createClient } from "@supabase/supabase-js";
-import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/actions/auth";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+import { supabaseAdmin } from "../supabase/admin";
 
 async function requireAdmin() {
   const session = await getSession();

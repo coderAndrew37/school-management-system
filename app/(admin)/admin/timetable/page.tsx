@@ -11,8 +11,8 @@ import {
 } from "@/lib/data/allocation";
 
 import type { TimetableGrid } from "@/lib/types/allocation";
-import { GenerateTimetableButton } from "../../_components/allocation/GenerateTimetableButton";
-import { TimetableView } from "../../_components/allocation/TimeTableView";
+import { GenerateTimetableButton } from "../../../_components/allocation/GenerateTimetableButton";
+import { TimetableView } from "../../../_components/allocation/TimeTableView";
 
 export const metadata = {
   title: "Timetable | Kibali Academy",
@@ -61,19 +61,19 @@ export default async function TimetablePage() {
           <nav className="flex items-center gap-2 flex-wrap">
             <GenerateTimetableButton academicYear={2026} />
             <NavLink
-              href="/dashboard"
+              href="/admin/dashboard"
               icon={<LayoutDashboard className="h-4 w-4" />}
             >
               Dashboard
             </NavLink>
             <NavLink
-              href="/allocation"
+              href="/admin/allocation"
               icon={<BookMarked className="h-4 w-4" />}
             >
               Allocations
             </NavLink>
             <NavLink
-              href="/admission"
+              href="/admin/admission"
               icon={<UserRoundPlus className="h-4 w-4" />}
               primary
             >

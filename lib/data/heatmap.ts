@@ -2,12 +2,7 @@
 // Fetches grade × subject CBC score averages for the class performance heatmap.
 // Uses supabaseAdmin (service role) since this is admin-only data.
 
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+import { supabaseAdmin } from "../supabase/admin";
 
 const SCORE_NUMERIC: Record<string, number> = { EE: 4, ME: 3, AE: 2, BE: 1 };
 const NUMERIC_TO_GRADE = (avg: number): "EE" | "ME" | "AE" | "BE" => {

@@ -1,4 +1,4 @@
-import type { UserRole, Profile } from "@/lib/types/auth";
+import type { UserRole } from "@/lib/types/auth";
 
 /**
  * Returns every role the user holds.

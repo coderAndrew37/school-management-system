@@ -1,23 +1,19 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createClient } from "@supabase/supabase-js";
+import type { Profile } from "@/lib/types/auth";
 import {
-  loginSchema,
   forgotPasswordSchema,
+  loginSchema,
   resetPasswordSchema,
   ROLE_ROUTES,
 } from "@/lib/types/auth";
-import type { Profile, UserRole } from "@/lib/types/auth";
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { resolveAllRoles, resolvePrimaryRole } from "./auth-utils";
+import { supabaseAdmin } from "../supabase/admin";
 
 // Admin client — needed to update parents table after password set
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
 
 export interface AuthActionResult {
   success: boolean;
@@ -96,7 +92,7 @@ export async function loginAction(
     }
   }
 
-  revalidatePath("/", "layout");
+  revalidatePath("/admin", "layout");
 
   return {
     success: true,
@@ -110,7 +106,7 @@ export async function loginAction(
 export async function logoutAction(): Promise<void> {
   const supabase = await createSupabaseServerClient();
   await supabase.auth.signOut();
-  revalidatePath("/", "layout");
+  revalidatePath("/admin", "layout");
   redirect("/login");
 }
 
@@ -218,7 +214,7 @@ export async function resetPasswordAction(
   const primaryRole = resolvePrimaryRole(profile);
   const destination = ROLE_ROUTES[primaryRole] ?? "/parent/portal";
 
-  revalidatePath("/", "layout");
+  revalidatePath("/admin", "layout");
 
   // Return the destination — the client (reset-password page) handles the
   // toast then navigates. Parent is ALREADY logged in — no second login needed.

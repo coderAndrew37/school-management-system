@@ -1,3 +1,4 @@
+// lib/data/analytics.ts
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { GRADE_LEVEL_MAP } from "@/lib/types/assessment";
 import { ALL_GRADES } from "@/lib/types/allocation";
@@ -23,7 +24,7 @@ export interface GradeSnapshot {
   grade: string;
   level: string;
   studentCount: number;
-  assessedCount: number; // students with at least one assessment
+  assessedCount: number;
   eeCount: number;
   meCount: number;
   aeCount: number;
@@ -65,6 +66,10 @@ export interface AnalyticsOverview {
   totalStudents: number;
   totalTeachers: number;
   totalAssessments: number;
+  // ── Added so the page can reflect the active term/year in the UI ──────────
+  term: number;
+  academicYear: number;
+  // ─────────────────────────────────────────────────────────────────────────
   gradeSnapshots: GradeSnapshot[];
   subjectSnapshots: SubjectSnapshot[];
   topPerformers: StudentPerformanceSummary[];
@@ -78,7 +83,7 @@ export interface AnalyticsOverview {
   gradeEnrollment: { grade: string; count: number; level: string }[];
 }
 
-// ── Internal bucket type — separates numeric score counts from the student Set
+// ── Internal bucket type ──────────────────────────────────────────────────────
 
 type CbcScoreKey = "EE" | "ME" | "AE" | "BE";
 
@@ -98,7 +103,7 @@ export async function fetchAnalyticsOverview(
 ): Promise<AnalyticsOverview> {
   const supabase = await createSupabaseServerClient();
 
-  // 1. Counts
+  // 1. Students + teacher count
   const [studentsRes, teachersRes] = await Promise.all([
     supabase
       .from("students")
@@ -115,7 +120,7 @@ export async function fetchAnalyticsOverview(
   }[];
   const totalTeachers = teachersRes.count ?? 0;
 
-  // 2. All assessments for this term/year
+  // 2. All non-null assessments for this term/year
   const { data: assessData } = await supabase
     .from("assessments")
     .select("id, student_id, subject_name, strand_id, score")
@@ -131,7 +136,7 @@ export async function fetchAnalyticsOverview(
     score: string;
   }[];
 
-  // 3. Aggregate by student
+  // 3. Build lookup maps
   const studentMap: Record<
     string,
     { id: string; fullName: string; readableId: string | null; grade: string }
@@ -145,7 +150,7 @@ export async function fetchAnalyticsOverview(
     };
   }
 
-  // Per-student score counts
+  // Per-student
   const studentScores: Record<string, Record<CbcScoreKey, number>> = {};
   for (const a of assessments) {
     if (!studentScores[a.student_id])
@@ -154,7 +159,7 @@ export async function fetchAnalyticsOverview(
     sc[a.score as CbcScoreKey] = (sc[a.score as CbcScoreKey] ?? 0) + 1;
   }
 
-  // Per-grade score counts
+  // Per-grade
   const gradeScores: Record<string, GradeScoreBucket> = {};
   for (const a of assessments) {
     const grade = studentMap[a.student_id]?.grade;
@@ -166,9 +171,9 @@ export async function fetchAnalyticsOverview(
     bucket.students.add(a.student_id);
   }
 
-  // Per-subject score counts
+  // Per-subject × per-grade
   const subjectGradeScores: Record<string, Record<CbcScoreKey, number>> = {};
-  const subjectGradeCount: Record<string, string> = {}; // key → grade
+  const subjectGradeCount: Record<string, string> = {};
   for (const a of assessments) {
     const grade = studentMap[a.student_id]?.grade;
     if (!grade) continue;
@@ -181,7 +186,7 @@ export async function fetchAnalyticsOverview(
     sc[a.score as CbcScoreKey] = (sc[a.score as CbcScoreKey] ?? 0) + 1;
   }
 
-  // 4. Build grade enrollment
+  // 4. Grade enrollment
   const enrollmentMap: Record<string, number> = {};
   for (const s of students) {
     enrollmentMap[s.current_grade] = (enrollmentMap[s.current_grade] ?? 0) + 1;
@@ -192,7 +197,12 @@ export async function fetchAnalyticsOverview(
     level: GRADE_LEVEL_MAP[g] ?? "lower_primary",
   })).filter((g) => g.count > 0);
 
-  // 5. Build grade snapshots
+  // 5. Grade snapshots
+  function wm(ee: number, me: number, ae: number, be: number) {
+    const t = ee + me + ae + be;
+    return t > 0 ? +((ee * 4 + me * 3 + ae * 2 + be * 1) / t).toFixed(2) : 0;
+  }
+
   const gradeSnapshots: GradeSnapshot[] = ALL_GRADES.filter(
     (g) => enrollmentMap[g],
   ).map((g) => {
@@ -201,9 +211,6 @@ export async function fetchAnalyticsOverview(
       me = sc?.ME ?? 0,
       ae = sc?.AE ?? 0,
       be = sc?.BE ?? 0;
-    const total = ee + me + ae + be;
-    const wm =
-      total > 0 ? +((ee * 4 + me * 3 + ae * 2 + be * 1) / total).toFixed(2) : 0;
     return {
       grade: g,
       level: GRADE_LEVEL_MAP[g] ?? "lower_primary",
@@ -213,12 +220,12 @@ export async function fetchAnalyticsOverview(
       meCount: me,
       aeCount: ae,
       beCount: be,
-      totalScores: total,
-      weightedMean: wm,
+      totalScores: ee + me + ae + be,
+      weightedMean: wm(ee, me, ae, be),
     };
   });
 
-  // 6. Build subject snapshots
+  // 6. Subject snapshots
   const subjectSnapshots: SubjectSnapshot[] = Object.entries(subjectGradeScores)
     .map(([key, sc]) => {
       const [subjectName, grade] = key.split("__") as [string, string];
@@ -227,10 +234,6 @@ export async function fetchAnalyticsOverview(
         ae = sc.AE ?? 0,
         be = sc.BE ?? 0;
       const total = ee + me + ae + be;
-      const wm =
-        total > 0
-          ? +((ee * 4 + me * 3 + ae * 2 + be * 1) / total).toFixed(2)
-          : 0;
       return {
         subjectName,
         grade,
@@ -239,7 +242,7 @@ export async function fetchAnalyticsOverview(
         aeCount: ae,
         beCount: be,
         total,
-        weightedMean: wm,
+        weightedMean: wm(ee, me, ae, be),
         eePercent: total > 0 ? Math.round((ee / total) * 100) : 0,
         mePercent: total > 0 ? Math.round((me / total) * 100) : 0,
         aePercent: total > 0 ? Math.round((ae / total) * 100) : 0,
@@ -248,7 +251,7 @@ export async function fetchAnalyticsOverview(
     })
     .sort((a, b) => b.weightedMean - a.weightedMean);
 
-  // 7. Build student performance summaries
+  // 7. Student performance summaries
   const studentSummaries: StudentPerformanceSummary[] = students
     .filter((s) => studentScores[s.id])
     .map((s) => {
@@ -258,10 +261,6 @@ export async function fetchAnalyticsOverview(
         ae = sc.AE ?? 0,
         be = sc.BE ?? 0;
       const total = ee + me + ae + be;
-      const wm =
-        total > 0
-          ? +((ee * 4 + me * 3 + ae * 2 + be * 1) / total).toFixed(2)
-          : 0;
       const dominant =
         total > 0
           ? (["EE", "ME", "AE", "BE"] as const).reduce((best, cur) =>
@@ -278,13 +277,13 @@ export async function fetchAnalyticsOverview(
         aeCount: ae,
         beCount: be,
         totalAssessed: total,
-        weightedMean: wm,
+        weightedMean: wm(ee, me, ae, be),
         dominantScore: dominant,
       };
     })
     .sort((a, b) => b.weightedMean - a.weightedMean);
 
-  // 8. Subject leaderboard (across all grades, aggregate)
+  // 8. Subject leaderboard (aggregate across grades)
   const subjectAgg: Record<string, { total: number; weightedSum: number }> = {};
   for (const ss of subjectSnapshots) {
     if (!subjectAgg[ss.subjectName])
@@ -300,7 +299,7 @@ export async function fetchAnalyticsOverview(
     }))
     .sort((a, b) => b.weightedMean - a.weightedMean);
 
-  // 9. Overall score distribution
+  // 9. School-wide score distribution
   const distAgg: Record<CbcScoreKey, number> = { EE: 0, ME: 0, AE: 0, BE: 0 };
   for (const a of assessments) {
     distAgg[a.score as CbcScoreKey] =
@@ -317,17 +316,19 @@ export async function fetchAnalyticsOverview(
     totalStudents: students.length,
     totalTeachers,
     totalAssessments: assessments.length,
+    term,
+    academicYear,
     gradeSnapshots,
     subjectSnapshots,
-    topPerformers: studentSummaries.slice(0, 10),
-    needsSupport: [...studentSummaries].reverse().slice(0, 10),
+    topPerformers: studentSummaries.slice(0, 15),
+    needsSupport: [...studentSummaries].reverse().slice(0, 15),
     scoreDistribution,
     subjectLeaderboard,
     gradeEnrollment,
   };
 }
 
-// ── Fetch per-grade, per-subject detail (for drill-down) ─────────────────────
+// ── Per-grade drill-down (used for future grade detail pages) ────────────────
 
 export interface GradeAnalyticsDetail {
   grade: string;
@@ -374,6 +375,11 @@ export async function fetchGradeAnalytics(
     }[]
   ).filter((a) => studentIds.has(a.student_id));
 
+  function wm(ee: number, me: number, ae: number, be: number) {
+    const t = ee + me + ae + be;
+    return t > 0 ? +((ee * 4 + me * 3 + ae * 2 + be * 1) / t).toFixed(2) : 0;
+  }
+
   // Subject breakdown
   const subjectScores: Record<string, Record<CbcScoreKey, number>> = {};
   for (const a of assessments) {
@@ -389,10 +395,6 @@ export async function fetchGradeAnalytics(
         ae = sc.AE ?? 0,
         be = sc.BE ?? 0;
       const total = ee + me + ae + be;
-      const wm =
-        total > 0
-          ? +((ee * 4 + me * 3 + ae * 2 + be * 1) / total).toFixed(2)
-          : 0;
       return {
         subjectName,
         grade,
@@ -401,7 +403,7 @@ export async function fetchGradeAnalytics(
         aeCount: ae,
         beCount: be,
         total,
-        weightedMean: wm,
+        weightedMean: wm(ee, me, ae, be),
         eePercent: total > 0 ? Math.round((ee / total) * 100) : 0,
         mePercent: total > 0 ? Math.round((me / total) * 100) : 0,
         aePercent: total > 0 ? Math.round((ae / total) * 100) : 0,
@@ -426,10 +428,6 @@ export async function fetchGradeAnalytics(
         ae = sc.AE ?? 0,
         be = sc.BE ?? 0;
       const total = ee + me + ae + be;
-      const wm =
-        total > 0
-          ? +((ee * 4 + me * 3 + ae * 2 + be * 1) / total).toFixed(2)
-          : 0;
       const dominant =
         total > 0
           ? (["EE", "ME", "AE", "BE"] as const).reduce((best, cur) =>
@@ -446,13 +444,13 @@ export async function fetchGradeAnalytics(
         aeCount: ae,
         beCount: be,
         totalAssessed: total,
-        weightedMean: wm,
+        weightedMean: wm(ee, me, ae, be),
         dominantScore: dominant,
       };
     })
     .sort((a, b) => b.weightedMean - a.weightedMean);
 
-  // Overall distribution
+  // Distribution
   const distAgg: Record<CbcScoreKey, number> = { EE: 0, ME: 0, AE: 0, BE: 0 };
   for (const a of assessments)
     distAgg[a.score as CbcScoreKey] =

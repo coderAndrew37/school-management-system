@@ -18,23 +18,23 @@ export interface AuthUser {
 
 // Route access map — which roles can access which route prefixes
 export const ROLE_ROUTES: Record<UserRole, string> = {
-  admin: "/dashboard",
+  admin: "/admin/dashboard",
   teacher: "/teacher",
   parent: "/parent",
 };
 
 export const PROTECTED_PREFIXES: Record<string, UserRole[]> = {
-  "/dashboard": ["admin"],
-  "/students": ["admin", "teacher"],
-  "/allocation": ["admin"],
-  "/timetable": ["admin", "teacher"],
-  "/reports": ["admin"],
-  "/admission": ["admin"],
+  "/admin/dashboard": ["admin"],
+  "/admin/students": ["admin", "teacher"],
+  "/admin/allocation": ["admin"],
+  "/admin/timetable": ["admin", "teacher"],
+  "/admin/reports": ["admin"],
+  "/admin/admission": ["admin"],
   "/teacher": ["teacher", "admin"],
   "/teacher/assess": ["admin", "teacher"],
   "/parent": ["parent"],
-  "/parents": ["admin"],
-  "/teachers": ["admin"],
+  "/admin/parents": ["admin"],
+  "/admin/teachers": ["admin"],
 };
 
 // Zod schemas for auth forms

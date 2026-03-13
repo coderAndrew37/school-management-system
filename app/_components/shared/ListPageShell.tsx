@@ -1,4 +1,5 @@
-import { Link, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import Link from "next/link";
 import { ReactNode } from "react";
 
 interface ListPageShellProps {
@@ -29,7 +30,7 @@ export default function ListPageShell({
         {/* Header */}
         <header className="flex items-center gap-4">
           <Link
-            href="/"
+            href="/admin/dashboard"
             className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.05] border border-white/[0.08] hover:bg-white/[0.08] transition-colors duration-200 flex-shrink-0"
           >
             <ArrowLeft className="h-4 w-4 text-white/50" />

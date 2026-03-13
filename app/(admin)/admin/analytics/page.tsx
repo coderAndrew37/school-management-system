@@ -1,13 +1,12 @@
+// app/admin/analytics/page.tsx
 import { getSession } from "@/lib/actions/auth";
 import {
   BarChart3,
-  BookMarked,
   BookOpen,
   ClipboardList,
-  FileText,
   GraduationCap,
   LayoutDashboard,
-  Mail,
+  TrendingUp,
   UserRoundPlus,
   Users,
 } from "lucide-react";
@@ -23,17 +22,34 @@ export const metadata = {
     "CBC assessment analytics, grade performance, subject breakdowns and top performers",
 };
 
-export const revalidate = 300; // 5-minute ISR — analytics don't need to be real-time
+export const revalidate = 0; // always fresh — admin checking live data
 
-// ── Page ──────────────────────────────────────────────────────────────────────
+// ── Term heuristic ────────────────────────────────────────────────────────────
+function currentTerm() {
+  const m = new Date().getMonth() + 1;
+  return m <= 4 ? 1 : m <= 8 ? 2 : 3;
+}
 
-export default async function AnalyticsPage() {
+interface Props {
+  searchParams: Promise<{ term?: string; year?: string }>;
+}
+
+export default async function AnalyticsPage({ searchParams }: Props) {
+  // FIX 1: include superadmin
   const session = await getSession();
-  if (!session || session.profile.role !== "admin") {
+  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
     redirect("/login?redirectTo=/admin/analytics");
   }
 
-  const data = await fetchAnalyticsOverview(1, 2026);
+  // FIX 2: term/year from URL params, not hardcoded
+  const sp = await searchParams;
+  const term = Math.min(
+    3,
+    Math.max(1, parseInt(sp.term ?? String(currentTerm()), 10)),
+  );
+  const year = parseInt(sp.year ?? "2026", 10);
+
+  const data = await fetchAnalyticsOverview(term, year);
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] font-[family-name:var(--font-body)]">
@@ -45,7 +61,7 @@ export default async function AnalyticsPage() {
       </div>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
-        {/* ── Page header ───────────────────────────────────────────────────── */}
+        {/* ── Header ────────────────────────────────────────────────────────── */}
         <header className="flex flex-wrap items-start justify-between gap-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-amber-400/70">
@@ -57,27 +73,26 @@ export default async function AnalyticsPage() {
               </div>
               CBC Analytics
             </h1>
+            {/* FIX 5: dynamic term/year in subtitle */}
             <p className="mt-1 text-xs text-white/35 ml-12">
               Assessment performance · Grade breakdowns · Subject analysis ·
-              Term 1 · 2026
+              Term {term} · {year}
             </p>
           </div>
 
+          {/* FIX 3: nav links point to real routes */}
           <nav className="flex flex-wrap items-center gap-2">
             <NavLink
-              href="/dashboard"
+              href="/admin"
               icon={<LayoutDashboard className="h-4 w-4" />}
             >
               Dashboard
             </NavLink>
             <NavLink
-              href="/admin/governance"
-              icon={<BookMarked className="h-4 w-4" />}
+              href="/admin/announcements"
+              icon={<TrendingUp className="h-4 w-4" />}
             >
-              Governance
-            </NavLink>
-            <NavLink href="/admin/comms" icon={<Mail className="h-4 w-4" />}>
-              Communications
+              Comms
             </NavLink>
             <NavLink
               href="/admin/students"
@@ -85,11 +100,14 @@ export default async function AnalyticsPage() {
             >
               Students
             </NavLink>
-            <NavLink href="/reports" icon={<FileText className="h-4 w-4" />}>
-              Reports
+            <NavLink
+              href="/admin/heatmap"
+              icon={<BarChart3 className="h-4 w-4" />}
+            >
+              Heatmap
             </NavLink>
             <NavLink
-              href="/admission"
+              href="/admin/bulk-admit"
               icon={<UserRoundPlus className="h-4 w-4" />}
               primary
             >
@@ -97,6 +115,43 @@ export default async function AnalyticsPage() {
             </NavLink>
           </nav>
         </header>
+
+        {/* ── Term / Year selector ──────────────────────────────────────────── */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1">
+            {([1, 2, 3] as const).map((t) => (
+              <Link
+                key={t}
+                href={`/admin/analytics?term=${t}&year=${year}`}
+                className={[
+                  "rounded-lg px-4 py-1.5 text-xs font-bold transition-all",
+                  term === t
+                    ? "bg-amber-400/15 border border-amber-400/30 text-amber-400"
+                    : "text-white/35 hover:text-white/70",
+                ].join(" ")}
+              >
+                Term {t}
+              </Link>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1">
+            {[2025, 2026, 2027].map((y) => (
+              <Link
+                key={y}
+                href={`/admin/analytics?term=${term}&year=${y}`}
+                className={[
+                  "rounded-lg px-4 py-1.5 text-xs font-bold transition-all",
+                  year === y
+                    ? "bg-violet-400/15 border border-violet-400/30 text-violet-400"
+                    : "text-white/35 hover:text-white/70",
+                ].join(" ")}
+              >
+                {y}
+              </Link>
+            ))}
+          </div>
+        </div>
 
         {/* ── Stats strip ───────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -126,25 +181,26 @@ export default async function AnalyticsPage() {
           />
           <StatCard
             icon={<BookOpen className="h-4 w-4" />}
-            label="Subjects Tracked"
+            label="Subjects"
             value={data.subjectLeaderboard.length}
             color="orange"
           />
           <StatCard
-            icon={<GraduationCap className="h-4 w-4" />}
+            icon={<TrendingUp className="h-4 w-4" />}
             label="EE Rate"
             value={`${data.scoreDistribution.find((d) => d.score === "EE")?.percent ?? 0}%`}
             color="emerald"
           />
         </div>
 
-        {/* ── Analytics hub (tabbed) ─────────────────────────────────────────── */}
+        {/* ── Hub (tabbed) ──────────────────────────────────────────────────── */}
         <AnalyticsHub data={data} />
 
+        {/* FIX 5: dynamic footer */}
         <footer className="pt-4 border-t border-white/[0.05]">
           <p className="text-center text-xs text-white/20">
-            Kibali Academy · CBC School Management System · Academic Year 2026 ·
-            Term 1
+            Kibali Academy · CBC School Management System · Academic Year {year}{" "}
+            · Term {term}
           </p>
         </footer>
       </main>

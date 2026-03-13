@@ -28,7 +28,7 @@ export function AdminSidebar({ links, isOpen, onClose }: AdminSidebarProps) {
   }, {});
 
   function isActive(href: string): boolean {
-    if (href === "/dashboard") return pathname === "/dashboard";
+    if (href === "/admin/dashboard") return pathname === "/admin/dashboard";
     return pathname.startsWith(href);
   }
 
@@ -84,7 +84,7 @@ export function AdminSidebar({ links, isOpen, onClose }: AdminSidebarProps) {
         {/* ── Logo ────────────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-5 h-14 border-b border-white/[0.06] flex-shrink-0">
           <Link
-            href="/dashboard"
+            href="/admin/dashboard"
             className="flex items-center gap-2.5"
             onClick={onClose}
           >

@@ -128,7 +128,7 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
       }
 
       toast.success("Welcome back!", { duration: 2000 });
-      router.push(redirectTo ?? result.redirectTo ?? "/dashboard");
+      router.push(redirectTo ?? result.redirectTo ?? "/admin/dashboard");
       router.refresh();
     });
   };

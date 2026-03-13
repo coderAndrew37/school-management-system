@@ -1,23 +1,23 @@
 "use client";
 
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useTransition, useState } from "react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import {
-  Eye,
-  EyeOff,
-  KeyRound,
-  Loader2,
-  CheckCircle2,
-  XCircle,
-} from "lucide-react";
+import { resetPasswordAction } from "@/lib/actions/auth";
 import {
   resetPasswordSchema,
   type ResetPasswordFormValues,
 } from "@/lib/types/auth";
-import { resetPasswordAction } from "@/lib/actions/auth";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  XCircle,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 import { AuthLayout } from "./AuthLayout";
 
 const INPUT_CLS =

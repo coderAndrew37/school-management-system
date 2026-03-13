@@ -1,37 +1,36 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
-import {
-  Send,
-  Clock,
-  Paperclip,
-  X,
-  ChevronDown,
-  Users,
-  User,
-  GraduationCap,
-  UsersRound,
-  CheckCircle2,
-  AlertCircle,
-  Loader2,
-  Search,
-} from "lucide-react";
 import type {
+  AttachmentFile,
   AudienceSelection,
   AudienceType,
-  AttachmentFile,
   CommunicationsClientProps,
   ComposeFormState,
+  MessageTemplate,
   SendEmailRequest,
   SendEmailResponse,
   TemplateId,
-  MessageTemplate,
 } from "@/lib/types/communications";
 import {
-  MESSAGE_TEMPLATES,
-  getTemplatesForAudience,
   AUDIENCE_LABELS,
+  getTemplatesForAudience,
 } from "@/lib/utils/communication-templates";
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  Clock,
+  GraduationCap,
+  Loader2,
+  Paperclip,
+  Search,
+  Send,
+  User,
+  Users,
+  UsersRound,
+  X,
+} from "lucide-react";
+import { useCallback, useRef, useState } from "react";
 import { SentHistory } from "./SentHistory";
 
 // ── Constants ─────────────────────────────────────────────────────────────────

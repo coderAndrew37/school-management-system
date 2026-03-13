@@ -61,7 +61,10 @@ export function TopNav({ profile, email, onMenuClick }: TopNavProps) {
               <Menu className="h-4 w-4" />
             </button>
           ) : (
-            <Link href="/" className="flex items-center gap-2.5 flex-shrink-0">
+            <Link
+              href="/admin/dashboard"
+              className="flex items-center gap-2.5 flex-shrink-0"
+            >
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-400/10 border border-amber-400/25">
                 <span className="text-xs font-bold text-amber-400">KA</span>
               </div>

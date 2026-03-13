@@ -3,15 +3,10 @@
 // lib/actions/bulk-invite.ts
 // Bulk parent invite management — resend, filter, batch operations
 
-import { createClient } from "@supabase/supabase-js";
-import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/actions/auth";
 import { sendWelcomeEmail } from "@/lib/mail";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+import { revalidatePath } from "next/cache";
+import { supabaseAdmin } from "../supabase/admin";
 
 export interface ParentInviteRow {
   id: string;

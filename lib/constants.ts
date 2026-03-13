@@ -1,4 +1,4 @@
-// lib/constants.ts — updated with Fees + Communications nav links
+// lib/constants.ts — updated to include Analytics + Settings nav links
 
 import {
   LayoutDashboard,
@@ -12,8 +12,8 @@ import {
   Wallet,
   Megaphone,
   CalendarDays,
-  Settings,
   Bell,
+  Settings,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -28,7 +28,7 @@ export const ADMIN_LINKS: NavLink[] = [
   // ── Overview ──────────────────────────────────────────────────────────────
   {
     label: "Dashboard",
-    href: "/",
+    href: "/admin/dashboard",
     icon: LayoutDashboard,
     group: "Overview",
   },
@@ -37,31 +37,31 @@ export const ADMIN_LINKS: NavLink[] = [
   { label: "Students", href: "/students", icon: Users, group: "People" },
   {
     label: "Admit Student",
-    href: "/admission",
+    href: "/admin/admission",
     icon: PlusCircle,
     group: "People",
   },
   {
     label: "Bulk Admission",
-    href: "/bulk-admit",
+    href: "/admin/bulk-admit",
     icon: Upload,
     group: "People",
   },
   {
     label: "Teachers",
-    href: "/teachers",
+    href: "/admin/teachers",
     icon: BookUser,
     group: "People",
   },
   {
     label: "Class Teachers",
-    href: "/class-teachers",
+    href: "/admin/class-teachers",
     icon: GraduationCap,
     group: "People",
   },
   {
     label: "Parent Invites",
-    href: "/invites",
+    href: "/admin/invites",
     icon: MailCheck,
     group: "People",
   },
@@ -69,15 +69,21 @@ export const ADMIN_LINKS: NavLink[] = [
   // ── Finance ───────────────────────────────────────────────────────────────
   {
     label: "Fee Management",
-    href: "/fees",
+    href: "/admin/fees",
     icon: Wallet,
     group: "Finance",
   },
 
   // ── Academics ─────────────────────────────────────────────────────────────
   {
-    label: "Performance",
-    href: "/heatmap",
+    label: "Analytics",
+    href: "/admin/analytics",
+    icon: BarChart3,
+    group: "Academics",
+  },
+  {
+    label: "Heatmap",
+    href: "/admin/heatmap",
     icon: BarChart3,
     group: "Academics",
   },
@@ -85,20 +91,28 @@ export const ADMIN_LINKS: NavLink[] = [
   // ── Communications ────────────────────────────────────────────────────────
   {
     label: "Announcements",
-    href: "/announcements",
+    href: "/admin/announcements",
     icon: Megaphone,
     group: "Comms",
   },
   {
     label: "Events",
-    href: "/events",
+    href: "/admin/events",
     icon: CalendarDays,
     group: "Comms",
   },
   {
     label: "Notifications",
-    href: "/notifications",
+    href: "/admin/notifications",
     icon: Bell,
     group: "Comms",
+  },
+
+  // ── System ────────────────────────────────────────────────────────────────
+  {
+    label: "Settings",
+    href: "/admin/settings",
+    icon: Settings,
+    group: "System",
   },
 ];

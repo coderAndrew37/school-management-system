@@ -41,8 +41,8 @@ export async function middleware(request: NextRequest) {
 
   const publicRoutes = [
     "/login",
-    "/auth/forgot-password", // FIX: was "/forgot-password" — wrong prefix
-    "/auth/reset-password", // FIX: was "/reset-password"  — wrong prefix
+    "/auth/forgot-password",
+    "/auth/reset-password",
     "/auth/callback",
     "/auth/confirm",
   ];
@@ -52,6 +52,21 @@ export async function middleware(request: NextRequest) {
 
   if (isApiRoute) return response;
 
+  // ── Root "/" → redirect to dashboard based on role ────────────────────────
+  // On the management system subdomain, "/" is not a landing page.
+  // Unauthenticated users hitting "/" go to login; authenticated go to their
+  // role dashboard.
+  if (pathname === "/") {
+    if (!user) {
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
+    const profile = await fetchProfile(supabase, user.id);
+    const primaryRole = resolvePrimaryRole(profile);
+    return NextResponse.redirect(
+      new URL(ROLE_ROUTES[primaryRole], request.url),
+    );
+  }
+
   // ── Unauthenticated → redirect to login ───────────────────────────────────
   if (!user && !isPublicRoute) {
     const redirectUrl = request.nextUrl.clone();
@@ -60,7 +75,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // ── Authenticated user hits a public page → send to their dashboard ───────
+  // ── Authenticated user hits a public/auth page → send to their dashboard ──
   //
   // EXCEPTIONS — keep authenticated users on these pages:
   //   /auth/confirm         — must stay to call setSession() with the token

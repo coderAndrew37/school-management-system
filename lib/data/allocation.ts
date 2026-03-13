@@ -2,7 +2,6 @@ import { createServerClient } from "@/lib/supabase/client";
 import {
   Subject,
   TeacherSubjectAllocation,
-  TimetableSlot,
   TimetableGrid,
 } from "@/lib/types/allocation";
 

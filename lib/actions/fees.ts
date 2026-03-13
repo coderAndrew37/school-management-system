@@ -340,7 +340,7 @@ export async function bulkGenerateFeeRecordsAction(
       error: error.message,
     };
 
-  revalidatePath("/fees");
+  revalidatePath("/admin/fees");
   return { success: true, created: toCreate.length, skipped: existingIds.size };
 }
 

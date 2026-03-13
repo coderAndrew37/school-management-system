@@ -81,7 +81,7 @@ export default async function DashboardPage() {
 
             {/* Existing Student Link */}
             <Link
-              href="/admission"
+              href="/admin/admission"
               className="flex items-center gap-2 rounded-xl bg-amber-400 hover:bg-amber-300 active:scale-95 transition-all duration-200 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#0c0f1a] shadow-lg shadow-amber-400/20"
             >
               <UserRoundPlus className="h-4 w-4" />
@@ -97,7 +97,7 @@ export default async function DashboardPage() {
             value={stats.totalStudents}
             icon="🎒"
             accent="amber"
-            href="/students"
+            href="/admin/students"
           />
           <StatCard
             label="Teaching Staff"
@@ -216,7 +216,7 @@ export default async function DashboardPage() {
                 subtitle="New student admissions — last 6 months"
               />
               <Link
-                href="/students"
+                href="/admin/students"
                 className="flex items-center gap-1 text-[10px] text-amber-400/60 hover:text-amber-400 transition-colors flex-shrink-0 ml-3"
               >
                 <Users className="h-3 w-3" />
@@ -244,7 +244,7 @@ export default async function DashboardPage() {
               accentColor="text-amber-400"
             />
             <Link
-              href="/students"
+              href="/admin/students"
               className="flex items-center gap-1.5 text-xs font-semibold text-amber-400/60 hover:text-amber-400 transition-colors group"
             >
               View all
@@ -257,7 +257,7 @@ export default async function DashboardPage() {
           {hasMore && (
             <div className="mt-4">
               <Link
-                href="/students"
+                href="/admin/students"
                 className="flex items-center justify-center gap-2 w-full rounded-2xl border border-white/[0.07] border-dashed bg-white/[0.02] hover:bg-amber-400/[0.04] hover:border-amber-400/20 transition-all duration-300 py-4 text-sm font-medium text-white/30 hover:text-amber-400/70"
               >
                 View all {stats.totalStudents} students — search, filter &amp;

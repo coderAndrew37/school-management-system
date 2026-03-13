@@ -9,8 +9,8 @@ import { createServerClient } from "@/lib/supabase/client";
 import { fetchSubjects, fetchAllocations } from "@/lib/data/allocation";
 
 import type { Teacher } from "@/lib/types/dashboard";
-import { GenerateTimetableButton } from "../../_components/allocation/GenerateTimetableButton";
-import { AllocationPanel } from "../../_components/allocation/AllocationPanel";
+import { GenerateTimetableButton } from "../../../_components/allocation/GenerateTimetableButton";
+import { AllocationPanel } from "../../../_components/allocation/AllocationPanel";
 
 export const metadata = {
   title: "Subject Allocation | Kibera Academy",

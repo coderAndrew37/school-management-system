@@ -165,7 +165,10 @@ export function BulkInviteClient({ parents }: Props) {
       {/* Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
-          <Link href="/admin" className="text-slate-400 hover:text-slate-600">
+          <Link
+            href="/admin/dashboard"
+            className="text-slate-400 hover:text-slate-600"
+          >
             <ChevronLeft className="h-5 w-5" />
           </Link>
           <Mail className="h-5 w-5 text-violet-500 shrink-0" />

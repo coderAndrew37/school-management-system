@@ -90,7 +90,7 @@ export async function updateStudentAction(
   }
 
   revalidatePath("/admin/students");
-  revalidatePath("/dashboard");
+  revalidatePath("/admin/dashboard");
   return { success: true, message: `${fullName} updated successfully` };
 }
 
@@ -122,7 +122,7 @@ export async function changeStudentGradeAction(
   if (error) return { success: false, message: error.message };
 
   revalidatePath("/admin/students");
-  revalidatePath("/dashboard");
+  revalidatePath("/admin/dashboard");
   return { success: true, message: "Grade updated" };
 }
 
@@ -154,7 +154,7 @@ export async function deleteStudentAction(
   }
 
   revalidatePath("/admin/students");
-  revalidatePath("/dashboard");
+  revalidatePath("/admin/dashboard");
   return { success: true, message: "Student deleted" };
 }
 
