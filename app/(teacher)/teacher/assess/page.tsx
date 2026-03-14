@@ -1,5 +1,4 @@
 import { BatchAssessmentGrid } from "@/app/_components/assessment/BatchAssessmentGrid";
-import { TopNav } from "@/app/_components/nav/TopNav";
 import { getSession } from "@/lib/actions/auth";
 import {
   fetchClassAssessments,
@@ -60,12 +59,7 @@ export default async function AssessPage({ searchParams }: PageProps) {
 
   const teacherId = session.profile.teacher_id;
   if (!teacherId) {
-    return (
-      <NoTeacherLinked
-        profile={session.profile}
-        email={session.user.email ?? ""}
-      />
-    );
+    return <NoTeacherLinked />;
   }
 
   const { alloc: allocId, term: termParam } = await searchParams;
@@ -90,111 +84,103 @@ export default async function AssessPage({ searchParams }: PageProps) {
     : null;
 
   return (
-    <div className="min-h-screen bg-[#F8F7F2] font-[family-name:var(--font-body)]">
-      <TopNav profile={session.profile} email={session.user.email ?? ""} />
+    <main className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <header>
+        <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-3 font-medium">
+          <Link
+            href="/teacher"
+            className="hover:text-emerald-700 transition-colors"
+          >
+            Teacher Portal
+          </Link>
+          <ChevronRight className="h-3 w-3" />
+          <span className="text-slate-600">Batch Assessment</span>
+          {selectedAlloc && (
+            <>
+              <ChevronRight className="h-3 w-3" />
+              <span className="text-slate-800 font-semibold">
+                {selectedAlloc.subjectName} · {selectedAlloc.grade}
+              </span>
+            </>
+          )}
+        </div>
 
-      <main className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        {/* ── Header ─────────────────────────────────────────────────────────── */}
-        <header>
-          {/* Breadcrumb */}
-          <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-3 font-medium">
-            <Link
-              href="/teacher"
-              className="hover:text-emerald-700 transition-colors"
-            >
-              Teacher Portal
-            </Link>
-            <ChevronRight className="h-3 w-3" />
-            <span className="text-slate-600">Batch Assessment</span>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 mb-1">
+              CBC Assessment Entry
+            </p>
+            <h1 className="text-2xl font-black text-slate-800 tracking-tight">
+              {selectedAlloc
+                ? `${selectedAlloc.subjectName} — ${selectedAlloc.grade}`
+                : "Batch Assessment"}
+            </h1>
             {selectedAlloc && (
-              <>
-                <ChevronRight className="h-3 w-3" />
-                <span className="text-slate-800 font-semibold">
-                  {selectedAlloc.subjectName} · {selectedAlloc.grade}
-                </span>
-              </>
+              <p className="text-sm text-slate-500 mt-1">
+                Term {term} · {academicYear} · {classData?.students.length ?? 0}{" "}
+                learners
+              </p>
             )}
           </div>
 
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 mb-1">
-                CBC Assessment Entry
-              </p>
-              <h1 className="text-2xl font-black text-slate-800 tracking-tight">
-                {selectedAlloc
-                  ? `${selectedAlloc.subjectName} — ${selectedAlloc.grade}`
-                  : "Batch Assessment"}
-              </h1>
-              {selectedAlloc && (
-                <p className="text-sm text-slate-500 mt-1">
-                  Term {term} · {academicYear} ·{" "}
-                  {classData?.students.length ?? 0} learners
-                </p>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              {selectedAlloc && (
-                <Link
-                  href="/teacher/assess"
-                  className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-800 transition-all shadow-sm"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" /> All Subjects
-                </Link>
-              )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {selectedAlloc && (
               <Link
-                href="/teacher"
+                href="/teacher/assess"
                 className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-800 transition-all shadow-sm"
               >
-                Dashboard
+                <ArrowLeft className="h-3.5 w-3.5" /> All Subjects
               </Link>
-            </div>
+            )}
+            <Link
+              href="/teacher"
+              className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-800 transition-all shadow-sm"
+            >
+              Dashboard
+            </Link>
           </div>
-        </header>
+        </div>
+      </header>
 
-        {selectedAlloc && classData ? (
-          /* ── Assessment grid ──────────────────────────────────────────────── */
-          <div className="space-y-5">
-            {/* Term tabs */}
-            <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 w-fit shadow-sm">
-              {([1, 2, 3] as const).map((t) => (
-                <Link
-                  key={t}
-                  href={`/teacher/assess?alloc=${allocId}&term=${t}`}
-                  className={[
-                    "rounded-lg px-5 py-2 text-xs font-bold transition-all",
-                    term === t
-                      ? "bg-emerald-600 text-white shadow-sm"
-                      : "text-slate-500 hover:text-slate-800 hover:bg-slate-50",
-                  ].join(" ")}
-                >
-                  Term {t}
-                </Link>
-              ))}
-            </div>
-
-            <BatchAssessmentGrid
-              students={classData.students}
-              subjectName={selectedAlloc.subjectName}
-              grade={selectedAlloc.grade}
-              term={term}
-              academicYear={academicYear}
-              initialGrid={classData.gridState}
-            />
+      {selectedAlloc && classData ? (
+        <div className="space-y-5">
+          <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 w-fit shadow-sm">
+            {([1, 2, 3] as const).map((t) => (
+              <Link
+                key={t}
+                href={`/teacher/assess?alloc=${allocId}&term=${t}`}
+                className={[
+                  "rounded-lg px-5 py-2 text-xs font-bold transition-all",
+                  term === t
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "text-slate-500 hover:text-slate-800 hover:bg-slate-50",
+                ].join(" ")}
+              >
+                Term {t}
+              </Link>
+            ))}
           </div>
-        ) : (
-          <AllocPicker allocations={allocations} currentTerm={term} />
-        )}
 
-        <footer className="border-t border-slate-200 pt-5 text-center">
-          <p className="text-xs text-slate-400 font-medium">
-            Kibali Academy · CBC Assessment System · Term {term} ·{" "}
-            {academicYear}
-          </p>
-        </footer>
-      </main>
-    </div>
+          <BatchAssessmentGrid
+            students={classData.students}
+            subjectName={selectedAlloc.subjectName}
+            grade={selectedAlloc.grade}
+            term={term}
+            academicYear={academicYear}
+            initialGrid={classData.gridState}
+          />
+        </div>
+      ) : (
+        <AllocPicker allocations={allocations} currentTerm={term} />
+      )}
+
+      <footer className="border-t border-slate-200 pt-5 text-center">
+        <p className="text-xs text-slate-400 font-medium">
+          Kibali Academy · CBC Assessment System · Term {term} · {academicYear}
+        </p>
+      </footer>
+    </main>
   );
 }
 
@@ -219,7 +205,6 @@ function AllocPicker({
     );
   }
 
-  // Context banner
   const byLevel: Record<string, TeacherAllocationSummary[]> = {};
   for (const a of allocations) {
     if (!byLevel[a.subjectLevel]) byLevel[a.subjectLevel] = [];
@@ -234,7 +219,6 @@ function AllocPicker({
 
   return (
     <div className="space-y-7">
-      {/* Info strip */}
       <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
         <p className="text-sm text-slate-600 leading-relaxed">
           Select a{" "}
@@ -242,8 +226,7 @@ function AllocPicker({
           open the assessment spreadsheet for that class. Enter CBC strand
           scores{" "}
           <span className="font-bold text-slate-800">(EE / ME / AE / BE)</span>{" "}
-          for all learners at once — results are immediately visible to parents
-          in the portal.
+          for all learners at once — results are immediately visible to parents.
         </p>
       </div>
 
@@ -259,7 +242,6 @@ function AllocPicker({
                 {style.label}
               </h2>
             </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {byLevel[level]!.map((alloc) => (
                 <Link
@@ -286,7 +268,6 @@ function AllocPicker({
                       {alloc.subjectCode}
                     </span>
                   </div>
-
                   <div className="flex items-center justify-between">
                     <span className="flex items-center gap-1 text-[11px] font-semibold text-slate-500">
                       <Users className="h-3 w-3" />
@@ -298,7 +279,6 @@ function AllocPicker({
                       {alloc.weeklyLessons}/wk
                     </span>
                   </div>
-
                   <div
                     className={`flex items-center gap-1.5 text-[10px] font-semibold ${style.accent}`}
                   >
@@ -318,30 +298,21 @@ function AllocPicker({
 
 // ── Error state ───────────────────────────────────────────────────────────────
 
-function NoTeacherLinked({
-  profile,
-  email,
-}: {
-  profile: Parameters<typeof TopNav>[0]["profile"];
-  email: string;
-}) {
+function NoTeacherLinked() {
   return (
-    <div className="min-h-screen bg-[#F8F7F2]">
-      <TopNav profile={profile} email={email} />
-      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
-        <p className="text-4xl mb-4">⚠️</p>
-        <p className="text-slate-800 font-bold text-lg">Account not linked</p>
-        <p className="text-slate-500 text-sm mt-2 max-w-sm leading-relaxed">
-          Your account hasn't been linked to a teacher record. Contact the
-          school administrator.
-        </p>
-        <Link
-          href="/teacher"
-          className="mt-6 text-xs text-emerald-700 hover:text-emerald-800 font-semibold underline"
-        >
-          ← Back to dashboard
-        </Link>
-      </div>
+    <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
+      <p className="text-4xl mb-4">⚠️</p>
+      <p className="text-slate-800 font-bold text-lg">Account not linked</p>
+      <p className="text-slate-500 text-sm mt-2 max-w-sm leading-relaxed">
+        Your account hasn't been linked to a teacher record. Contact the school
+        administrator.
+      </p>
+      <Link
+        href="/teacher"
+        className="mt-6 text-xs text-emerald-700 hover:text-emerald-800 font-semibold underline"
+      >
+        ← Back to dashboard
+      </Link>
     </div>
   );
 }

@@ -14,6 +14,7 @@ import {
   CalendarDays,
   Bell,
   Settings,
+  ClipboardList,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -45,6 +46,13 @@ export const ADMIN_LINKS: NavLink[] = [
     label: "Bulk Admission",
     href: "/admin/bulk-admit",
     icon: Upload,
+    group: "People",
+  },
+
+  {
+    label: "Applications",
+    href: "/admin/applications",
+    icon: ClipboardList,
     group: "People",
   },
   {
