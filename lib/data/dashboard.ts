@@ -1,4 +1,4 @@
-import { createServerClient } from "@/lib/supabase/client";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   Student,
   Teacher,
@@ -33,18 +33,18 @@ function mapStudentRow(row: any): Student {
 // Select fragment — joins through student_parents → parents
 const STUDENT_SELECT = `
   id, readable_id, upi_number, full_name,
-  date_of_birth, gender, current_grade, created_at,
+  date_of_birth, gender, current_grade, photo_url, created_at,
   student_parents (
     is_primary_contact,
     relationship_type,
-    parents ( full_name, phone_number )
+    parents ( id, full_name, phone_number )
   )
 ` as const;
 
 // ── fetchStudents ─────────────────────────────────────────────────────────────
 
 export async function fetchStudents(limit?: number): Promise<Student[]> {
-  const supabase = createServerClient();
+  const supabase = await createSupabaseServerClient();
   let query = supabase
     .from("students")
     .select(STUDENT_SELECT)
@@ -73,7 +73,7 @@ export async function fetchAllStudents({
   sortBy?: string;
   sortDir?: "asc" | "desc";
 } = {}): Promise<Student[]> {
-  const supabase = createServerClient();
+  const supabase = await createSupabaseServerClient();
   let query = supabase
     .from("students")
     .select(STUDENT_SELECT)
@@ -95,7 +95,7 @@ export async function fetchAllStudents({
 // ── fetchTeachers ─────────────────────────────────────────────────────────────
 
 export async function fetchTeachers(): Promise<Teacher[]> {
-  const supabase = createServerClient();
+  const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("teachers")
     .select("id, full_name, tsc_number, email, phone_number, created_at")
@@ -110,7 +110,7 @@ export async function fetchTeachers(): Promise<Teacher[]> {
 // ── fetchParents ──────────────────────────────────────────────────────────────
 
 export async function fetchParents(): Promise<Parent[]> {
-  const supabase = createServerClient();
+  const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("parents")
     .select(
@@ -136,7 +136,7 @@ export async function fetchParents(): Promise<Parent[]> {
 // ── fetchDashboardStats ───────────────────────────────────────────────────────
 
 export async function fetchDashboardStats(): Promise<DashboardStats> {
-  const supabase = createServerClient();
+  const supabase = await createSupabaseServerClient();
   const [studentsCount, teachersCount, parentsCount] = await Promise.all([
     supabase.from("students").select("id", { count: "exact", head: true }),
     supabase.from("teachers").select("id", { count: "exact", head: true }),
@@ -205,7 +205,7 @@ export async function fetchDashboardChartData(
   term = 1,
   academicYear = 2026,
 ): Promise<DashboardChartData> {
-  const supabase = createServerClient();
+  const supabase = await createSupabaseServerClient();
 
   const [studentsRes, assessRes] = await Promise.all([
     supabase

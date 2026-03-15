@@ -25,10 +25,11 @@ export interface Student {
   date_of_birth: string;
   gender: "Male" | "Female" | null;
   current_grade: string;
-  parent_id: string | null;
+  photo_url: string | null;
+  parent_id: string | null; // always null — kept for legacy compat
   created_at: string;
-  // joined from parents
-  parents: Pick<Parent, "full_name" | "phone_number"> | null;
+  // joined from student_parents → parents
+  parents: Pick<Parent, "id" | "full_name" | "phone_number"> | null;
 }
 
 export interface DashboardStats {

@@ -6,6 +6,21 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/actions/auth";
 import { ALL_GRADES } from "@/lib/types/allocation";
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const ADMIN_ROLES = ["admin", "superadmin"] as const;
+
+async function requireAdmin() {
+  const session = await getSession();
+  if (
+    !session ||
+    !(ADMIN_ROLES as readonly string[]).includes(session.profile.role)
+  ) {
+    return null;
+  }
+  return session;
+}
+
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
 const updateStudentSchema = z.object({
@@ -47,10 +62,8 @@ interface ActionResult {
 export async function updateStudentAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  const session = await getSession();
-  if (!session || session.profile.role !== "admin") {
+  if (!(await requireAdmin()))
     return { success: false, message: "Unauthorised" };
-  }
 
   const parsed = updateStudentSchema.safeParse({
     studentId: formData.get("studentId"),
@@ -60,12 +73,11 @@ export async function updateStudentAction(
     upiNumber: formData.get("upiNumber") || undefined,
   });
 
-  if (!parsed.success) {
+  if (!parsed.success)
     return {
       success: false,
       message: parsed.error.issues[0]?.message ?? "Validation error",
     };
-  }
 
   const { studentId, fullName, gender, currentGrade, upiNumber } = parsed.data;
   const supabase = await createSupabaseServerClient();
@@ -77,7 +89,6 @@ export async function updateStudentAction(
       gender: gender ?? null,
       current_grade: currentGrade,
       upi_number: upiNumber ?? null,
-      // Note: no parent_id — parent links live in student_parents join table
     })
     .eq("id", studentId);
 
@@ -99,19 +110,15 @@ export async function updateStudentAction(
 export async function changeStudentGradeAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  const session = await getSession();
-  if (!session || session.profile.role !== "admin") {
+  if (!(await requireAdmin()))
     return { success: false, message: "Unauthorised" };
-  }
 
   const parsed = changeGradeSchema.safeParse({
     studentId: formData.get("studentId"),
     newGrade: formData.get("newGrade"),
   });
 
-  if (!parsed.success) {
-    return { success: false, message: "Invalid data" };
-  }
+  if (!parsed.success) return { success: false, message: "Invalid data" };
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
@@ -127,20 +134,18 @@ export async function changeStudentGradeAction(
 }
 
 // ── Delete student ────────────────────────────────────────────────────────────
-// student_parents rows are removed automatically via ON DELETE CASCADE.
+// student_parents rows cascade automatically. Assessment, attendance, diary
+// and notifications rows also cascade via ON DELETE CASCADE on student_id FKs.
 
 export async function deleteStudentAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  const session = await getSession();
-  if (!session || session.profile.role !== "admin") {
+  if (!(await requireAdmin()))
     return { success: false, message: "Unauthorised" };
-  }
 
   const studentId = formData.get("studentId");
-  if (typeof studentId !== "string" || !studentId) {
+  if (typeof studentId !== "string" || !studentId)
     return { success: false, message: "Invalid student ID" };
-  }
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
@@ -159,15 +164,12 @@ export async function deleteStudentAction(
 }
 
 // ── Link an additional parent to an existing student ─────────────────────────
-// Useful from the student edit page to add a second guardian.
 
 export async function linkParentToStudentAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  const session = await getSession();
-  if (!session || session.profile.role !== "admin") {
+  if (!(await requireAdmin()))
     return { success: false, message: "Unauthorised" };
-  }
 
   const parsed = linkParentSchema.safeParse({
     studentId: formData.get("studentId"),
@@ -176,18 +178,17 @@ export async function linkParentToStudentAction(
     isPrimaryContact: formData.get("isPrimaryContact") === "true",
   });
 
-  if (!parsed.success) {
+  if (!parsed.success)
     return {
       success: false,
       message: parsed.error.issues[0]?.message ?? "Validation error",
     };
-  }
 
   const { studentId, parentId, relationshipType, isPrimaryContact } =
     parsed.data;
   const supabase = await createSupabaseServerClient();
 
-  // If this link is being set as primary, demote all existing primary links first
+  // Demote existing primary contact before promoting the new one
   if (isPrimaryContact) {
     await supabase
       .from("student_parents")
@@ -222,23 +223,19 @@ export async function linkParentToStudentAction(
 export async function unlinkParentFromStudentAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  const session = await getSession();
-  if (!session || session.profile.role !== "admin") {
+  if (!(await requireAdmin()))
     return { success: false, message: "Unauthorised" };
-  }
 
   const parsed = unlinkParentSchema.safeParse({
     studentId: formData.get("studentId"),
     parentId: formData.get("parentId"),
   });
 
-  if (!parsed.success) {
-    return { success: false, message: "Invalid data" };
-  }
+  if (!parsed.success) return { success: false, message: "Invalid data" };
 
   const supabase = await createSupabaseServerClient();
 
-  // Guard: don't leave a student with zero parents
+  // Guard: never leave a student with zero parents
   const { count } = await supabase
     .from("student_parents")
     .select("*", { count: "exact", head: true })
@@ -247,8 +244,7 @@ export async function unlinkParentFromStudentAction(
   if ((count ?? 0) <= 1) {
     return {
       success: false,
-      message:
-        "Cannot remove the only parent. Add another guardian first, then remove this one.",
+      message: "Cannot remove the only parent. Add another guardian first.",
     };
   }
 
@@ -265,4 +261,17 @@ export async function unlinkParentFromStudentAction(
 
   revalidatePath("/admin/students");
   return { success: true, message: "Parent unlinked" };
+}
+
+// ── Photo upload ──────────────────────────────────────────────────────────────
+// Thin async wrapper so this "use server" file can export it.
+// Implementation lives in admit.ts.
+
+export async function uploadStudentPhotoAction(
+  studentId: string,
+  formData: FormData,
+): Promise<{ success: boolean; message: string; photo_url?: string }> {
+  const { uploadStudentPhotoAction: _upload } =
+    await import("@/lib/actions/admit");
+  return _upload(studentId, formData);
 }
