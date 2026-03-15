@@ -1,11 +1,19 @@
 "use client";
 
+// app/_components/AdmissionForm.tsx
+// Admin-side admission form.
+// Flow A: search + select existing parent → link new student to their account.
+// Flow B: fill in new parent details → create auth user + send invite.
+
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { useTransition, useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { admissionSchema, AdmissionFormValues } from "@/lib/schemas/admission";
+import {
+  admissionSchema,
+  type AdmissionFormValues,
+} from "@/lib/schemas/admission";
 import {
   UserRoundPlus,
   CalendarDays,
@@ -81,6 +89,18 @@ function Label({
   );
 }
 
+function Divider({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-4 py-1">
+      <div className="h-px flex-1 bg-white/[0.06]" />
+      <span className="text-[10px] font-bold uppercase tracking-widest text-white/20">
+        {label}
+      </span>
+      <div className="h-px flex-1 bg-white/[0.06]" />
+    </div>
+  );
+}
+
 // ── Parent search combobox ────────────────────────────────────────────────────
 
 function ParentSearchBox({
@@ -128,42 +148,70 @@ function ParentSearchBox({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  // ── Selected state — show parent card ──────────────────────────────────────
   if (selected) {
     return (
-      <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/[0.06] px-4 py-3 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
-            <p className="text-sm font-semibold text-white truncate">
-              {selected.full_name}
+      <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/[0.06] px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+              <p className="text-sm font-semibold text-white truncate">
+                {selected.full_name}
+              </p>
+            </div>
+            <p className="text-xs text-white/40">{selected.email}</p>
+            {selected.phone_number && (
+              <p className="text-xs text-white/30">{selected.phone_number}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            aria-label="Deselect parent"
+            onClick={() => onSelect(null)}
+            disabled={disabled}
+            className="text-white/30 hover:text-white flex-shrink-0 mt-0.5 transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Existing children under this parent */}
+        {selected.children.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-emerald-400/15">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-400/50 mb-1.5">
+              Already enrolled ({selected.children.length})
+            </p>
+            <div className="space-y-1">
+              {selected.children.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex items-center gap-2 text-xs text-white/50"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/40 flex-shrink-0" />
+                  <span>{c.full_name}</span>
+                  <span className="text-white/25">·</span>
+                  <span className="text-white/35">{c.current_grade}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-amber-400/50 mt-2">
+              The new student will be added to this parent's account alongside
+              the above.
             </p>
           </div>
-          <p className="text-xs text-white/40 truncate">{selected.email}</p>
-          {selected.phone_number && (
-            <p className="text-xs text-white/30">{selected.phone_number}</p>
-          )}
-          {selected.children.length > 0 && (
-            <p className="text-[10px] text-amber-400/70 mt-1">
-              Existing children:{" "}
-              {selected.children
-                .map((c) => `${c.full_name} (${c.current_grade})`)
-                .join(", ")}
-            </p>
-          )}
-        </div>
-        <button
-          type="button"
-          aria-label="Deselect parent"
-          onClick={() => onSelect(null)}
-          disabled={disabled}
-          className="text-white/30 hover:text-white flex-shrink-0 mt-0.5 transition-colors"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        )}
+
+        {selected.children.length === 0 && (
+          <p className="text-[10px] text-white/30 mt-2">
+            This parent has no other enrolled students yet.
+          </p>
+        )}
       </div>
     );
   }
 
+  // ── Search input ───────────────────────────────────────────────────────────
   return (
     <div ref={container} className="relative">
       <div className="relative">
@@ -199,13 +247,15 @@ function ParentSearchBox({
             >
               <p className="text-sm font-medium text-white">{p.full_name}</p>
               <p className="text-xs text-white/40">{p.email}</p>
-              {p.children.length > 0 && (
+              {p.children.length > 0 ? (
                 <p className="text-[10px] text-amber-400/60 mt-0.5">
-                  {p.children.length} child
+                  {p.children.length} enrolled child
                   {p.children.length !== 1 ? "ren" : ""}:{" "}
-                  {p.children
-                    .map((c) => `${c.full_name} (${c.current_grade})`)
-                    .join(", ")}
+                  {p.children.map((c) => c.full_name).join(", ")}
+                </p>
+              ) : (
+                <p className="text-[10px] text-white/25 mt-0.5">
+                  No enrolled children yet
                 </p>
               )}
             </button>
@@ -218,7 +268,7 @@ function ParentSearchBox({
         results.length === 0 &&
         query.trim().length >= 2 && (
           <div className="absolute z-20 mt-1 w-full rounded-xl border border-white/10 bg-[#111827] px-4 py-3 text-sm text-white/30 shadow-2xl">
-            No existing parents found — fill in the form below to create one.
+            No existing parents found — fill in the fields below to create one.
           </div>
         )}
     </div>
@@ -239,7 +289,6 @@ export default function AdmissionForm() {
     reset,
     formState: { errors },
   } = useForm<AdmissionFormValues>({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(admissionSchema) as any,
     defaultValues: { relationshipType: "guardian" },
   });
@@ -248,7 +297,7 @@ export default function AdmissionForm() {
     startTransition(async () => {
       const fd = new FormData();
 
-      // Student fields
+      // Student
       fd.append("studentName", values.studentName);
       fd.append("dateOfBirth", values.dateOfBirth);
       fd.append("gender", values.gender);
@@ -256,24 +305,19 @@ export default function AdmissionForm() {
       fd.append("relationshipType", values.relationshipType ?? "guardian");
 
       if (selectedParent) {
-        // Flow A: existing parent.
-        // We send existingParentId — the action uses it and ignores the
-        // parent name/email/phone fields entirely. We send a valid stub
-        // phone so the schema doesn't throw a validation error.
+        // Flow A: existing parent — send only the UUID, action skips new-parent validation
         fd.append("existingParentId", selectedParent.id);
-        fd.append("parentName", selectedParent.full_name);
-        fd.append("parentEmail", selectedParent.email);
-        fd.append("parentPhone", "0700000000"); // stub — never used by action
+        // Don't send parent name/email/phone — action ignores them for Flow A
       } else {
         // Flow B: new parent
-        fd.append("parentName", values.parentName);
-        fd.append("parentEmail", values.parentEmail);
-        fd.append("parentPhone", values.parentPhone);
+        fd.append("parentName", values.parentName ?? "");
+        fd.append("parentEmail", values.parentEmail ?? "");
+        fd.append("parentPhone", values.parentPhone ?? "");
       }
 
       const result = await admitStudentAction(fd);
 
-      if (result?.success === false) {
+      if (!result.success) {
         toast.error("Admission Failed", {
           description: result.message,
           duration: 5000,
@@ -281,19 +325,16 @@ export default function AdmissionForm() {
         return;
       }
 
-      // Show toast first, then redirect after a short delay so the
-      // user actually sees the confirmation before the page changes.
       toast.success("Admission Successful 🎓", {
         description: selectedParent
-          ? `Student added to ${selectedParent.full_name}'s account.`
-          : "Parent account created and invite sent.",
+          ? `${values.studentName} added to ${selectedParent.full_name}'s account.`
+          : `${values.studentName} admitted — parent invite sent.`,
         duration: 3000,
       });
 
       reset();
       setSelectedParent(null);
 
-      // 1.2 s lets the toast render before navigation tears down the page
       await new Promise((r) => setTimeout(r, 1200));
       router.push("/admin/students");
     });
@@ -304,19 +345,21 @@ export default function AdmissionForm() {
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] flex items-center justify-center p-4 font-[family-name:var(--font-body)]">
+      {/* Ambient glows */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full bg-amber-500/5 blur-[120px]" />
         <div className="absolute bottom-0 right-0 w-80 h-80 rounded-full bg-blue-500/5 blur-[100px]" />
       </div>
 
       <div className="relative w-full max-w-lg">
+        {/* Header */}
         <div className="mb-6 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-400/10 border border-amber-400/20">
             <GraduationCap className="h-5 w-5 text-amber-400" />
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-amber-400/70">
-              Kibali Academy
+              Kibali Academy · Admin
             </p>
             <h1 className="text-xl font-bold tracking-tight text-white">
               New Student Admission
@@ -332,8 +375,8 @@ export default function AdmissionForm() {
             noValidate
             className="p-7 space-y-6"
           >
-            {/* ── STUDENT INFO ─────────────────────────────────────────── */}
-            <div className="space-y-6">
+            {/* ── STUDENT INFO ──────────────────────────────────────────── */}
+            <div className="space-y-5">
               <div>
                 <Label
                   htmlFor="studentName"
@@ -379,7 +422,6 @@ export default function AdmissionForm() {
                   </Label>
                   <select
                     id="gender"
-                    aria-label="Select gender"
                     className={`${inputBase} cursor-pointer`}
                     {...register("gender")}
                     disabled={isPending}
@@ -412,7 +454,6 @@ export default function AdmissionForm() {
                 </Label>
                 <select
                   id="currentGrade"
-                  aria-label="Select grade"
                   className={`${inputBase} cursor-pointer`}
                   {...register("currentGrade")}
                   disabled={isPending}
@@ -439,14 +480,8 @@ export default function AdmissionForm() {
               </div>
             </div>
 
-            {/* ── PARENT / GUARDIAN ──────────────────────────────────────── */}
-            <div className="flex items-center gap-4 py-2">
-              <div className="h-px flex-1 bg-white/[0.06]" />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-white/20">
-                Parent / Guardian
-              </span>
-              <div className="h-px flex-1 bg-white/[0.06]" />
-            </div>
+            {/* ── PARENT / GUARDIAN ─────────────────────────────────────── */}
+            <Divider label="Parent / Guardian" />
 
             <div>
               <Label
@@ -458,7 +493,6 @@ export default function AdmissionForm() {
               <div className="relative">
                 <select
                   id="relationshipType"
-                  aria-label="Select relationship type"
                   className={`${inputBase} cursor-pointer appearance-none pr-9`}
                   {...register("relationshipType")}
                   disabled={isPending}
@@ -477,6 +511,7 @@ export default function AdmissionForm() {
               </div>
             </div>
 
+            {/* Parent search */}
             <div>
               <Label
                 htmlFor="parentSearch"
@@ -489,14 +524,25 @@ export default function AdmissionForm() {
                 selected={selectedParent}
                 disabled={isPending}
               />
-              <p className="mt-1.5 text-[11px] text-white/25">
-                Select an existing parent to link this student to their account,
-                or fill in the fields below to create a new parent account.
-              </p>
+              {!selectedParent && (
+                <p className="mt-1.5 text-[11px] text-white/25">
+                  Select an existing parent to add this child to their account,
+                  or fill in the fields below to create a new parent.
+                </p>
+              )}
             </div>
 
+            {/* Flow B: new parent fields — hidden when existing parent selected */}
             {!selectedParent && (
-              <div className="space-y-6">
+              <div className="space-y-5">
+                <div className="rounded-xl border border-amber-400/10 bg-amber-400/[0.04] px-4 py-3">
+                  <p className="text-[11px] text-amber-400/60">
+                    No parent selected — fill in the fields below to create a
+                    new parent account. A secure setup link will be emailed to
+                    them.
+                  </p>
+                </div>
+
                 <div>
                   <Label
                     htmlFor="parentName"
@@ -570,14 +616,22 @@ export default function AdmissionForm() {
               {isPending ? (
                 <span className="flex items-center justify-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Admitting Student…
+                  {selectedParent ? "Adding Student…" : "Admitting Student…"}
+                </span>
+              ) : selectedParent ? (
+                <span className="flex items-center justify-center gap-2">
+                  <UserRoundPlus className="h-4 w-4" />
+                  Add Student to {selectedParent.full_name}
+                  {selectedParent.children.length > 0 && (
+                    <span className="opacity-60 font-normal text-xs">
+                      ({selectedParent.children.length + 1} children total)
+                    </span>
+                  )}
                 </span>
               ) : (
                 <span className="flex items-center justify-center gap-2">
                   <UserRoundPlus className="h-4 w-4" />
-                  {selectedParent
-                    ? `Add Student to ${selectedParent.full_name}`
-                    : "Admit Student & Create Parent Account"}
+                  Admit Student & Create Parent Account
                 </span>
               )}
               <span className="absolute inset-0 -skew-x-12 translate-x-[-200%] bg-white/20 transition-transform duration-500 group-hover:translate-x-[200%]" />

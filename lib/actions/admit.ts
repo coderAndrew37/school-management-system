@@ -1,10 +1,15 @@
 "use server";
 
+// lib/actions/admit.ts
+
 import { sendWelcomeEmail } from "@/lib/mail";
-import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
-import { AdmissionActionResult, admissionSchema } from "../schemas/admission";
 import { supabaseAdmin } from "../supabase/admin";
+import {
+  admissionSchema,
+  type AdmissionActionResult,
+} from "../schemas/admission";
+import { z } from "zod";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -72,14 +77,10 @@ export async function admitStudentAction(
     gender: formData.get("gender"),
     currentGrade: formData.get("currentGrade"),
     relationshipType: formData.get("relationshipType") ?? "guardian",
-    existingParentId,
-    parentName: existingParentId
-      ? (formData.get("parentName") ?? "placeholder")
-      : formData.get("parentName"),
-    parentEmail: existingParentId
-      ? (formData.get("parentEmail") ?? "placeholder@placeholder.com")
-      : formData.get("parentEmail"),
-    parentPhone: existingParentId ? "0700000000" : formData.get("parentPhone"),
+    existingParentId: existingParentId,
+    parentName: formData.get("parentName") || null,
+    parentEmail: formData.get("parentEmail") || null,
+    parentPhone: formData.get("parentPhone") || null,
   };
 
   const parsed = admissionSchema.safeParse(raw);
@@ -90,25 +91,41 @@ export async function admitStudentAction(
     };
   }
 
-  const {
-    studentName,
-    dateOfBirth,
-    gender,
-    currentGrade,
-    parentPhone,
-    parentEmail,
-    parentName,
-    relationshipType,
-  } = parsed.data;
+  const d = parsed.data;
+
+  // ── Manual conditional validation ────────────────────────────────────────────
+  // When creating a new parent, name/email/phone are all required.
+  if (!existingParentId) {
+    if (!d.parentName?.trim())
+      return { success: false, message: "Parent full name is required." };
+    if (!d.parentEmail?.trim())
+      return { success: false, message: "Parent email is required." };
+    if (!d.parentPhone?.trim())
+      return { success: false, message: "Parent phone number is required." };
+
+    // Kenyan phone validation
+    const phoneOk = /^(\+?254|0)[17]\d{8}$/.test(
+      d.parentPhone.replace(/\s/g, ""),
+    );
+    if (!phoneOk)
+      return {
+        success: false,
+        message: "Enter a valid Kenyan phone number (e.g. 0712345678).",
+      };
+
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.parentEmail);
+    if (!emailOk)
+      return { success: false, message: "Enter a valid email address." };
+  }
 
   try {
     let parentId: string;
 
-    // ── FLOW A: Link to existing parent ──────────────────────────────────────
+    // ── FLOW A: Link to existing parent ───────────────────────────────────────
     if (existingParentId) {
       const { data: existing, error } = await supabaseAdmin
         .from("parents")
-        .select("id")
+        .select("id, full_name, email")
         .eq("id", existingParentId)
         .maybeSingle();
 
@@ -119,6 +136,13 @@ export async function admitStudentAction(
         };
       }
 
+      // Check this student isn't already linked to the same parent
+      const { data: existingLink } = await supabaseAdmin
+        .from("student_parents")
+        .select("id")
+        .eq("parent_id", existingParentId)
+        .limit(1);
+
       parentId = existing.id;
     } else {
       // ── FLOW B: Create new parent ─────────────────────────────────────────
@@ -126,27 +150,26 @@ export async function admitStudentAction(
       const { data: existingByEmail } = await supabaseAdmin
         .from("parents")
         .select("id")
-        .eq("email", parentEmail)
+        .eq("email", d.parentEmail!)
         .maybeSingle();
 
       if (existingByEmail) {
         return {
           success: false,
-          message: `A parent with the email "${parentEmail}" already exists. Search and select them above instead.`,
+          message: `A parent with "${d.parentEmail}" already exists. Search and select them above instead.`,
         };
       }
 
       const { data: newAuthUser, error: authError } =
         await supabaseAdmin.auth.admin.createUser({
-          email: parentEmail,
-          phone: parentPhone,
+          email: d.parentEmail!,
+          phone: d.parentPhone!,
           email_confirm: true,
-          user_metadata: { full_name: parentName, role: "parent" },
+          user_metadata: { full_name: d.parentName, role: "parent" },
         });
 
-      if (authError) {
+      if (authError)
         throw new Error(`Auth creation failed: ${authError.message}`);
-      }
 
       parentId = newAuthUser.user.id;
 
@@ -154,9 +177,9 @@ export async function admitStudentAction(
         .from("parents")
         .insert({
           id: parentId,
-          full_name: parentName,
-          email: parentEmail,
-          phone_number: parentPhone,
+          full_name: d.parentName!,
+          email: d.parentEmail!,
+          phone_number: d.parentPhone!,
           invite_accepted: false,
         });
 
@@ -170,29 +193,26 @@ export async function admitStudentAction(
       const { data: linkData, error: linkError } =
         await supabaseAdmin.auth.admin.generateLink({
           type: "recovery",
-          email: parentEmail,
+          email: d.parentEmail!,
           options: {
             redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
           },
         });
 
-      if (linkError) {
+      if (linkError)
         throw new Error(`Setup link generation failed: ${linkError.message}`);
-      }
-
-      const setupLink = linkData.properties.action_link;
 
       try {
         await sendWelcomeEmail({
-          parentEmail,
-          parentName,
-          studentName,
-          grade: currentGrade, // ← added
-          setupLink,
+          parentEmail: d.parentEmail!,
+          parentName: d.parentName!,
+          studentName: d.studentName,
+          grade: d.currentGrade,
+          setupLink: linkData.properties.action_link,
         });
       } catch (mailErr) {
         console.error("Mail delivery failed:", mailErr);
-        // Non-fatal — student is still admitted, admin can resend invite
+        // Non-fatal
       }
     }
 
@@ -200,10 +220,10 @@ export async function admitStudentAction(
     const { data: newStudent, error: studentError } = await supabaseAdmin
       .from("students")
       .insert({
-        full_name: studentName,
-        date_of_birth: dateOfBirth,
-        gender,
-        current_grade: currentGrade,
+        full_name: d.studentName,
+        date_of_birth: d.dateOfBirth,
+        gender: d.gender,
+        current_grade: d.currentGrade,
       })
       .select("id")
       .single();
@@ -220,7 +240,7 @@ export async function admitStudentAction(
       .insert({
         student_id: newStudent.id,
         parent_id: parentId,
-        relationship_type: relationshipType,
+        relationship_type: d.relationshipType ?? "guardian",
         is_primary_contact: true,
       });
 
@@ -229,11 +249,14 @@ export async function admitStudentAction(
       throw new Error(`Student-parent link failed: ${linkErr.message}`);
     }
 
-    revalidatePath("/students");
-    revalidatePath("/parents");
+    revalidatePath("/admin/students");
     revalidatePath("/admin/dashboard");
 
-    return { success: true, message: "Student admitted successfully." };
+    return {
+      success: true,
+      message: "Student admitted successfully.",
+      studentId: newStudent.id,
+    };
   } catch (err: any) {
     console.error("Admission Error:", err.message);
     return {
@@ -271,15 +294,14 @@ export async function resendInviteAction(parentId: string) {
 
     if (linkError) throw linkError;
 
-    const setupLink = linkData.properties.action_link;
     const firstChild = (parent.student_parents as any[])?.[0]?.students;
 
     await sendWelcomeEmail({
       parentEmail: parent.email,
       parentName: parent.full_name,
       studentName: firstChild?.full_name ?? "your child",
-      grade: firstChild?.current_grade ?? "—", // ← added
-      setupLink,
+      grade: firstChild?.current_grade ?? "—",
+      setupLink: linkData.properties.action_link,
     });
 
     return { success: true, message: "A new secure invite has been sent." };

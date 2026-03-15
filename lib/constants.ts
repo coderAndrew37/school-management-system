@@ -98,8 +98,8 @@ export const ADMIN_LINKS: NavLink[] = [
 
   // ── Communications ────────────────────────────────────────────────────────
   {
-    label: "Announcements",
-    href: "/admin/announcements",
+    label: "Commnications",
+    href: "/admin/communications",
     icon: Megaphone,
     group: "Comms",
   },

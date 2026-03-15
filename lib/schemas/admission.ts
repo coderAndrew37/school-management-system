@@ -1,6 +1,8 @@
 import { z } from "zod";
 
-export const admissionSchema = z.object({
+// ── Shared student fields ─────────────────────────────────────────────────────
+
+const studentFields = {
   studentName: z
     .string()
     .min(2, "Full name must be at least 2 characters")
@@ -29,57 +31,52 @@ export const admissionSchema = z.object({
       return date >= minAge && date <= maxAge;
     }, "Date of birth must represent a student aged 2–25 years"),
 
-  gender: z.enum(["Male", "Female"], {
-    message: "Please select a gender",
-  }),
+  gender: z.enum(["Male", "Female"], { message: "Please select a gender" }),
 
   currentGrade: z
     .string()
     .min(1, "Grade is required")
     .max(20, "Grade must be under 20 characters"),
 
-  // ── Parent fields — required only when creating a new parent ──────────────
-  // When an existing parent is selected these are still sent (from the selected
-  // parent object) so we keep them required in the schema; the action decides
-  // whether to actually use them.
-  parentPhone: z
-    .string()
-    .min(10, "Phone number must be at least 10 digits")
-    .max(15, "Phone number must be under 15 digits")
-    .regex(
-      /^(\+?254|0)[17]\d{8}$/,
-      "Enter a valid Kenyan phone number (e.g. 0712345678)",
-    ),
-
-  parentEmail: z
-    .string()
-    .min(1, "Email is required")
-    .email("Enter a valid email address"),
-
-  parentName: z
-    .string()
-    .min(2, "Full name must be at least 2 characters")
-    .max(100, "Full name must be under 100 characters")
-    .regex(
-      /^[a-zA-Z\s'-]+$/,
-      "Name can only contain letters, spaces, hyphens, and apostrophes",
-    ),
-
-  // ── New fields ─────────────────────────────────────────────────────────────
   relationshipType: z
     .enum(["mother", "father", "guardian", "other"])
     .default("guardian"),
+};
 
+// ── Flat schema — discriminate manually in the action ─────────────────────────
+// Zod's discriminatedUnion requires ZodLiteral discriminators. Using it with
+// z.string().uuid() vs z.null() causes silent fallthrough. We use a single flat
+// schema and validate parent fields conditionally in the server action instead.
+
+export const admissionSchema = z.object({
+  ...studentFields,
+
+  // When set to a UUID: link to existing parent (skip parent field validation).
+  // When null/undefined: create a new parent using the fields below.
   existingParentId: z.string().uuid().nullable().optional(),
+
+  // Parent fields — required only when existingParentId is null
+  parentName: z.string().max(100).optional().nullable(),
+  parentEmail: z.string().email().optional().nullable().or(z.literal("")),
+  parentPhone: z.string().max(20).optional().nullable(),
 });
 
-export type AdmissionFormValues = z.infer<typeof admissionSchema>;
+export type AdmissionFormValues = {
+  studentName: string;
+  dateOfBirth: string;
+  gender: "Male" | "Female";
+  currentGrade: string;
+  relationshipType: "mother" | "father" | "guardian" | "other";
+  existingParentId?: string | null;
+  parentName: string;
+  parentEmail: string;
+  parentPhone: string;
+};
 
 export interface AdmissionActionResult {
   success: boolean;
   message: string;
   studentId?: string;
-  readableId?: string;
 }
 
 export interface Parent {
@@ -90,7 +87,6 @@ export interface Parent {
   created_at: string;
 }
 
-// Updated: parent_id removed — relationship now lives in student_parents table
 export interface Student {
   id: string;
   readable_id: string | null;

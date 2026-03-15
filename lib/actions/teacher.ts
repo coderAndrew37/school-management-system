@@ -2,10 +2,11 @@
 
 // lib/actions/teacher.ts
 
-import { notifyAbsence } from "@/lib/notifications/parent-notify";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { notifyAbsence } from "@/lib/notifications/parent-notify";
 import { supabaseAdmin } from "../supabase/admin";
 
 export interface ActionResult {
@@ -376,7 +377,8 @@ export async function sendParentNotificationAction(
   } = await supabase.auth.getUser();
   if (!user) return { success: false, message: "Not authenticated." };
 
-  const { error } = await supabase.from("notifications").insert({
+  // Use service role — writes notifications on behalf of the system, bypasses RLS
+  const { error } = await supabaseAdmin.from("notifications").insert({
     student_id: studentId,
     title,
     body: message,

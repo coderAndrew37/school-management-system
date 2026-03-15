@@ -180,38 +180,15 @@ export default function MessagesClient({
       : messages.filter((m) => m.type === filterType);
 
   return (
-    <div className="min-h-screen bg-[#F8F7F2]">
-      {/* ── Header ── */}
-      <div className="bg-white border-b border-slate-200 px-6 py-4">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-slate-800 tracking-tight">
-              Communication Book
-            </h1>
-            <p className="text-sm text-slate-500 mt-0.5">
-              {teacherName} · Messages to parents
-            </p>
-          </div>
-          <a
-            href="/teacher"
-            className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1.5"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"
-              />
-            </svg>
-            Dashboard
-          </a>
-        </div>
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      {/* Page heading */}
+      <div className="mb-6">
+        <h1 className="text-xl font-semibold text-slate-800 tracking-tight">
+          Communication Book
+        </h1>
+        <p className="text-sm text-slate-500 mt-0.5">
+          {teacherName} · Messages to parents
+        </p>
       </div>
 
       {/* Toast */}
@@ -225,7 +202,7 @@ export default function MessagesClient({
         </div>
       )}
 
-      <div className="max-w-5xl mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-[400px_1fr] gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[400px_1fr] gap-6">
         {/* ── LEFT: Compose ── */}
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -270,7 +247,7 @@ export default function MessagesClient({
                   Student
                 </label>
                 <select
-                  aria-label="select student for messaging"
+                  aria-label="select student"
                   value={studentId}
                   onChange={(e) => setStudentId(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
