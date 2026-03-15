@@ -1,15 +1,24 @@
+// app/admin/parents/page.tsx
+import { redirect } from "next/navigation";
+import { getSession } from "@/lib/actions/auth";
+import { fetchAllParents } from "@/lib/data/parents";
 import { HeartHandshake } from "lucide-react";
-import { fetchParents } from "@/lib/data/dashboard";
-import { ParentsTableClient } from "@/app/_components/parents/ParentsTableClient";
 import ListPageShell from "@/app/_components/shared/ListPageShell";
+import { ParentsTableClient } from "@/app/_components/parents/ParentsTableClient";
 
 export const metadata = {
-  title: "Parents | Kibera Academy",
+  title: "Parents | Kibali Academy Admin",
   description: "Parent and guardian register",
 };
+export const revalidate = 0;
 
 export default async function ParentsPage() {
-  const parents = await fetchParents();
+  const session = await getSession();
+  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+    redirect("/login?redirectTo=/admin/parents");
+  }
+
+  const parents = await fetchAllParents();
 
   return (
     <ListPageShell
