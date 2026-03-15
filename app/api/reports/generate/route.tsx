@@ -1,53 +1,25 @@
 // app/api/reports/generate/route.ts
-// Bulk report card PDF generator
 // POST /api/reports/generate
-// Body: { grade: string, term: number, academic_year: number, mode: "bulk" | "single" }
+// Body: { grade: string, term: number, academic_year: number }
 //
-// Replaces the Python subprocess approach.
-// Uses the same @react-pdf/renderer + ReportCardDocument already used by /api/report-pdf
+// Returns a single PDF containing one A4 page per student — all students
+// in the specified grade, in alphabetical order. Admins and class teachers only.
 
-import { fetchStudentsForReports } from "@/lib/data/reports";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { Document, renderToBuffer } from "@react-pdf/renderer";
 import { NextRequest, NextResponse } from "next/server";
+import { renderToBuffer, Document } from "@react-pdf/renderer";
 import React from "react";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { ReportCardPage } from "@/lib/pdf/ReportCardDocument";
+import { getLogoPublicUrl } from "@/lib/utils/settings";
 
-// ── Auth guard helper ─────────────────────────────────────────────────────────
+// ── Score helper ──────────────────────────────────────────────────────────────
 
-async function requireAdminOrClassTeacher(): Promise<
-  | { ok: true; userId: string; role: string }
-  | { ok: false; error: string; status: number }
-> {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Unauthorized", status: 401 };
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (!profile) return { ok: false, error: "Profile not found", status: 403 };
-
-  const allowed = ["admin", "superadmin", "teacher"];
-  if (!allowed.includes(profile.role)) {
-    return { ok: false, error: "Forbidden", status: 403 };
-  }
-
-  return { ok: true, userId: user.id, role: profile.role };
-}
-
-// ── Score helpers ─────────────────────────────────────────────────────────────
-
-const SCORE_NUMERIC: Record<string, number> = { EE: 4, ME: 3, AE: 2, BE: 1 };
+const SCORE_N: Record<string, number> = { EE: 4, ME: 3, AE: 2, BE: 1 };
 
 function computeOverall(scores: string[]): string {
   if (scores.length === 0) return "ME";
-  const avg =
-    scores.reduce((sum, s) => sum + (SCORE_NUMERIC[s] ?? 2), 0) / scores.length;
+  const avg = scores.reduce((s, x) => s + (SCORE_N[x] ?? 2), 0) / scores.length;
   if (avg >= 3.5) return "EE";
   if (avg >= 2.5) return "ME";
   if (avg >= 1.5) return "AE";
@@ -59,70 +31,142 @@ function computeOverall(scores: string[]): string {
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     // Auth
-    const auth = await requireAdminOrClassTeacher();
-    if (!auth.ok) {
-      return NextResponse.json({ error: auth.error }, { status: auth.status });
-    }
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user)
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    // Parse body
-    const body = (await req.json()) as {
-      grade?: string;
-      term: number;
-      academic_year: number;
-      mode?: "bulk" | "single";
-    };
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    if (!profile || !["admin", "superadmin", "teacher"].includes(profile.role))
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    const { grade, term, academic_year, mode = "bulk" } = body;
+    const body = await req.json();
+    const grade = body.grade as string;
+    const term = Number(body.term);
+    const academicYear = Number(body.academic_year ?? 2026);
 
-    if (!term || !academic_year) {
+    if (!grade || ![1, 2, 3].includes(term))
       return NextResponse.json(
-        { error: "term and academic_year are required" },
+        { error: "Invalid grade or term" },
         { status: 400 },
       );
+
+    // Class teachers can only generate for their assigned grade
+    if (profile.role === "teacher") {
+      const { data: assignment } = await supabaseAdmin
+        .from("class_teacher_assignments")
+        .select("grade")
+        .eq("teacher_id", user.id)
+        .eq("academic_year", academicYear)
+        .maybeSingle();
+      if (!assignment || assignment.grade !== grade)
+        return NextResponse.json(
+          { error: "Not your assigned grade" },
+          { status: 403 },
+        );
     }
 
-    if (![1, 2, 3].includes(term)) {
-      return NextResponse.json(
-        { error: "term must be 1, 2, or 3" },
-        { status: 400 },
-      );
-    }
+    // Parallel: students + assessments + attendance + report cards + settings
+    const [studentsRes, assessRes, attRes, rcRes, settingsRes] =
+      await Promise.all([
+        supabaseAdmin
+          .from("students")
+          .select(
+            "id, full_name, readable_id, upi_number, gender, date_of_birth, current_grade, photo_url",
+          )
+          .eq("current_grade", grade)
+          .eq("status", "active")
+          .order("full_name"),
 
-    // Fetch data
-    const students = await fetchStudentsForReports(
-      grade ?? null,
-      term,
-      academic_year,
-    );
+        supabaseAdmin
+          .from("assessments")
+          .select("student_id, subject_name, strand_id, score, teacher_remarks")
+          .eq("term", term)
+          .eq("academic_year", academicYear)
+          .not("score", "is", null),
 
-    if (students.length === 0) {
+        supabaseAdmin
+          .from("attendance")
+          .select("student_id, status")
+          .eq("academic_year", academicYear)
+          .eq("term", term),
+
+        supabaseAdmin
+          .from("report_cards")
+          .select(
+            "student_id, class_teacher_remarks, conduct_grade, effort_grade, generated_by",
+          )
+          .eq("term", term)
+          .eq("academic_year", academicYear),
+
+        supabaseAdmin
+          .from("school_settings")
+          .select("school_name, school_email, school_phone, logo_url")
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+    const students = (studentsRes.data ?? []) as any[];
+    if (students.length === 0)
       return NextResponse.json(
-        { error: "No students found for the given filters." },
+        { error: "No active students in this grade" },
         { status: 404 },
       );
+
+    const assessments = (assessRes.data ?? []) as any[];
+    const attRows = (attRes.data ?? []) as any[];
+    const reportCards = (rcRes.data ?? []) as any[];
+    const settings = settingsRes.data;
+
+    // Resolve class teacher name (first generated_by for this grade)
+    let classTeacherName = "Class Teacher";
+    const firstRc = reportCards[0];
+    if (firstRc?.generated_by) {
+      const { data: t } = await supabaseAdmin
+        .from("teachers")
+        .select("full_name")
+        .eq("id", firstRc.generated_by)
+        .maybeSingle();
+      if (t) classTeacherName = t.full_name;
     }
 
-    // Build one PDF per student then merge into a single multi-page document.
-    // @react-pdf/renderer renders a <Document> with multiple <Page> elements.
-    // We compose all student pages inside one Document for a single download.
+    const schoolProps = {
+      name: settings?.school_name ?? "Kibali Academy",
+      email: settings?.school_email ?? "",
+      phone: settings?.school_phone ?? "",
+      logoUrl: settings?.logo_url
+        ? (getLogoPublicUrl(settings.logo_url) ?? undefined)
+        : undefined,
+    };
 
-    const allPages = students.flatMap((student) => {
-      // Group scores by subject
+    // Build per-student pages
+    const pages = students.map((student: any) => {
+      // Attendance
+      const sa = attRows.filter((r: any) => r.student_id === student.id);
+      const present = sa.filter((r: any) => r.status === "Present").length;
+      const absent = sa.filter((r: any) => r.status === "Absent").length;
+      const late = sa.filter((r: any) => r.status === "Late").length;
+
+      // Subject map (deduplicate by strand_id, latest wins)
       const subjectMap = new Map<
         string,
         { strand_id: string; score: string; teacher_remarks: string | null }[]
       >();
-      for (const a of student.assessments) {
-        if (!a.score) continue;
+      for (const a of assessments.filter(
+        (a: any) => a.student_id === student.id,
+      )) {
         const list = subjectMap.get(a.subject_name) ?? [];
-        list.push({
-          strand_id: a.strand_id,
-          score: a.score,
-          teacher_remarks: a.teacher_remarks,
-        });
+        const idx = list.findIndex((x) => x.strand_id === a.strand_id);
+        if (idx >= 0) list[idx] = a;
+        else list.push(a);
         subjectMap.set(a.subject_name, list);
       }
-
       const subjects = Array.from(subjectMap.entries()).map(
         ([name, strands]) => ({
           name,
@@ -131,82 +175,60 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }),
       );
 
-      // Construct props matching ReportCardDocument interface
-      const props = {
+      const rc = reportCards.find((r: any) => r.student_id === student.id);
+
+      return React.createElement(ReportCardPage, {
+        key: student.id,
         student: {
           fullName: student.full_name,
           readableId: student.readable_id ?? undefined,
+          upiNumber: student.upi_number ?? undefined,
           gender: student.gender ?? undefined,
           dateOfBirth: student.date_of_birth,
           grade: student.current_grade,
+          photoUrl: student.photo_url
+            ? (getLogoPublicUrl(student.photo_url) ?? undefined)
+            : undefined,
         },
         report: {
           term,
-          academicYear: academic_year,
-          classTeacherName: "Class Teacher",
-          classTeacherRemarks: student.class_teacher_remarks ?? undefined,
-          conductGrade: student.conduct_grade ?? undefined,
-          effortGrade: student.effort_grade ?? undefined,
+          academicYear,
+          classTeacherName,
+          classTeacherRemarks: rc?.class_teacher_remarks ?? undefined,
+          conductGrade: rc?.conduct_grade ?? undefined,
+          effortGrade: rc?.effort_grade ?? undefined,
         },
         subjects,
-        attendance: {
-          present: student.attendance_present,
-          absent: student.attendance_absent,
-          late: student.attendance_late,
-          total: student.attendance_total,
-        },
-      };
-
-      // Extract the Page(s) from each student's Document
-      // ReportCardDocument returns a <Document> with a single <Page> — we
-      // re-render it as a standalone document per student in bulk mode.
-      return props;
+        attendance: { present, absent, late, total: sa.length },
+        school: schoolProps,
+      });
     });
 
-    // For bulk: render all students into one document with multiple pages.
-    // We do this by building a combined Document manually.
-    const combinedBuffer = await renderToBuffer(
-      React.createElement(
-        Document,
-        {
-          title: `Kibali Academy Reports — Term ${term} ${academic_year}`,
-          author: "Kibali Academy",
-        },
-        ...allPages.map((props) => {
-          // We need the inner Page from ReportCardDocument.
-          // Since ReportCardDocument returns a full Document, we use a
-          // thin wrapper that calls the same builder but only grabs the Page.
-          // In practice we import the Page-builder directly:
-          return React.createElement(ReportCardPageOnly, props);
-        }),
-      ),
+    const doc = React.createElement(
+      Document,
+      {
+        title: `${grade} — Term ${term} ${academicYear} Report Cards`,
+        author: schoolProps.name,
+      },
+      ...pages,
     );
 
-    const gradeSlug =
-      grade && grade !== "all" ? grade.replace(/[\s/]/g, "_") : "All_Grades";
+    const buffer = Buffer.from(await renderToBuffer(doc as any));
+    const filename = `${grade.replace(/\s+/g, "_")}_Term${term}_${academicYear}_Reports.pdf`;
 
-    const filename = `Kibali_Reports_Term${term}_${academic_year}_${gradeSlug}.pdf`;
-
-    return new NextResponse(new Uint8Array(combinedBuffer), {
+    return new NextResponse(buffer, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Length": String(combinedBuffer.length),
-        "X-Student-Count": String(students.length),
+        "Cache-Control": "private, no-store",
       },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("[/api/reports/generate]", message);
+    console.error("[reports/generate]", err);
     return NextResponse.json(
-      { error: `Report generation failed: ${message}` },
+      { error: "Bulk PDF generation failed" },
       { status: 500 },
     );
   }
 }
-
-// ── Re-export the inner page so the bulk route can compose pages ──────────────
-// lib/pdf/ReportCardDocument.tsx must also export ReportCardPageOnly (see note in that file).
-// This avoids duplicating the Page layout.
-import { ReportCardPageOnly } from "@/lib/pdf/ReportCardDocument";

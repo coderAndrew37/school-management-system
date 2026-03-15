@@ -97,3 +97,77 @@ export function DownloadReportButton({
     </div>
   );
 }
+
+// ── Bulk download — all students in a grade ───────────────────────────────────
+
+interface BulkProps {
+  grade: string;
+  term: number;
+  year?: number;
+  studentCount: number;
+}
+
+export function BulkDownloadButton({
+  grade,
+  term,
+  year = 2026,
+  studentCount,
+}: BulkProps) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleClick() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/reports/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grade, term, academic_year: year }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setError(json.error ?? `Failed (${res.status})`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${grade.replace(/\s+/g, "_")}_Term${term}_${year}_Reports.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError("Download failed — please try again");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div>
+      <button
+        onClick={handleClick}
+        disabled={loading}
+        aria-label={`Download all ${studentCount} report cards for ${grade} Term ${term}`}
+        className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold transition-colors disabled:opacity-50"
+      >
+        {loading ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" /> Generating{" "}
+            {studentCount} PDFs…
+          </>
+        ) : (
+          <>
+            <Download className="h-4 w-4" /> Print All Reports ({studentCount})
+          </>
+        )}
+      </button>
+      {error && (
+        <p className="text-xs text-rose-500 mt-1.5 font-semibold">{error}</p>
+      )}
+    </div>
+  );
+}

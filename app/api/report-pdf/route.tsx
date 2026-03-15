@@ -1,19 +1,31 @@
-"use server";
-
 // app/api/report-pdf/route.ts
-// Phase 4: Report card PDF generator
 // GET /api/report-pdf?studentId=xxx&term=1&year=2026
+//
+// Returns a PDF as application/pdf stream.
+// Auth: parent of the student | class teacher for the grade | admin/superadmin
+// Parents only receive published reports; teachers/admins can preview drafts.
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { renderToBuffer } from "@react-pdf/renderer";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ReportCardDocument } from "@/lib/pdf/ReportCardDocument";
+import { getLogoPublicUrl } from "@/lib/utils/settings";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+// ── Score helper ──────────────────────────────────────────────────────────────
+
+const SCORE_N: Record<string, number> = { EE: 4, ME: 3, AE: 2, BE: 1 };
+
+function computeOverall(scores: string[]): string {
+  if (scores.length === 0) return "ME";
+  const avg = scores.reduce((s, x) => s + (SCORE_N[x] ?? 2), 0) / scores.length;
+  if (avg >= 3.5) return "EE";
+  if (avg >= 2.5) return "ME";
+  if (avg >= 1.5) return "AE";
+  return "BE";
+}
+
+// ── Route ─────────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
@@ -21,39 +33,34 @@ export async function GET(req: NextRequest) {
   const termStr = searchParams.get("term");
   const yearStr = searchParams.get("year") ?? "2026";
 
-  if (!studentId || !termStr) {
+  if (!studentId || !termStr)
     return NextResponse.json(
       { error: "Missing studentId or term" },
       { status: 400 },
     );
-  }
 
   const term = parseInt(termStr, 10);
   const academicYear = parseInt(yearStr, 10);
 
-  if (![1, 2, 3].includes(term)) {
+  if (![1, 2, 3].includes(term))
     return NextResponse.json(
-      { error: "term must be 1, 2, or 3" },
+      { error: "term must be 1, 2 or 3" },
       { status: 400 },
     );
-  }
 
-  // ── Auth check ─────────────────────────────────────────────────────────────
+  // ── Auth ──────────────────────────────────────────────────────────────────
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) {
+  if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
 
-  // Allow if: parent of this student OR teacher assigned to this grade
   const { data: profile } = await supabaseAdmin
     .from("profiles")
     .select("role")
     .eq("id", user.id)
     .single();
-
   if (!profile)
     return NextResponse.json({ error: "Profile not found" }, { status: 403 });
 
@@ -67,7 +74,6 @@ export async function GET(req: NextRequest) {
     if (!link)
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   } else if (profile.role === "teacher") {
-    // Teacher must be class teacher for this grade
     const { data: student } = await supabaseAdmin
       .from("students")
       .select("current_grade")
@@ -75,7 +81,6 @@ export async function GET(req: NextRequest) {
       .single();
     if (!student)
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
-
     const { data: assignment } = await supabaseAdmin
       .from("class_teacher_assignments")
       .select("id")
@@ -89,62 +94,69 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // ── Fetch all data ─────────────────────────────────────────────────────────
-  const [studentRes, reportRes, assessRes, attRes] = await Promise.all([
-    supabaseAdmin
-      .from("students")
-      .select(
-        "id, full_name, readable_id, upi_number, gender, date_of_birth, current_grade",
-      )
-      .eq("id", studentId)
-      .single(),
+  // ── Fetch data (parallel) ─────────────────────────────────────────────────
+  const [studentRes, reportRes, assessRes, attRes, settingsRes] =
+    await Promise.all([
+      supabaseAdmin
+        .from("students")
+        .select(
+          "id, full_name, readable_id, upi_number, gender, date_of_birth, current_grade, photo_url",
+        )
+        .eq("id", studentId)
+        .single(),
 
-    supabaseAdmin
-      .from("report_cards")
-      .select(
-        "class_teacher_remarks, conduct_grade, effort_grade, status, published_at, generated_by",
-      )
-      .eq("student_id", studentId)
-      .eq("term", term)
-      .eq("academic_year", academicYear)
-      .maybeSingle(),
+      supabaseAdmin
+        .from("report_cards")
+        .select(
+          "class_teacher_remarks, conduct_grade, effort_grade, status, generated_by",
+        )
+        .eq("student_id", studentId)
+        .eq("term", term)
+        .eq("academic_year", academicYear)
+        .maybeSingle(),
 
-    supabaseAdmin
-      .from("assessments")
-      .select("subject_name, strand_id, score, teacher_remarks")
-      .eq("student_id", studentId)
-      .eq("term", term)
-      .eq("academic_year", academicYear)
-      .not("score", "is", null)
-      .order("subject_name"),
+      supabaseAdmin
+        .from("assessments")
+        .select("subject_name, strand_id, score, teacher_remarks")
+        .eq("student_id", studentId)
+        .eq("term", term)
+        .eq("academic_year", academicYear)
+        .not("score", "is", null)
+        .order("subject_name"),
 
-    supabaseAdmin
-      .from("attendance")
-      .select("status")
-      .eq("student_id", studentId),
-  ]);
+      supabaseAdmin
+        .from("attendance")
+        .select("status")
+        .eq("student_id", studentId)
+        .eq("academic_year", academicYear)
+        .eq("term", term),
 
-  if (studentRes.error || !studentRes.data) {
+      supabaseAdmin
+        .from("school_settings")
+        .select("school_name, school_email, school_phone, logo_url")
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+  if (studentRes.error || !studentRes.data)
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
-  }
 
-  // Only allow PDF for published reports (parents) — teachers can preview drafts
-  if (profile.role === "parent" && reportRes.data?.status !== "published") {
+  // Parents only see published reports
+  if (profile.role === "parent" && reportRes.data?.status !== "published")
     return NextResponse.json(
       { error: "Report not yet published" },
       { status: 403 },
     );
-  }
 
-  // Fetch class teacher name
+  // Class teacher name
   let classTeacherName = "Class Teacher";
   if (reportRes.data?.generated_by) {
-    const { data: teacher } = await supabaseAdmin
+    const { data: t } = await supabaseAdmin
       .from("teachers")
       .select("full_name")
       .eq("id", reportRes.data.generated_by)
       .maybeSingle();
-    if (teacher) classTeacherName = teacher.full_name;
+    if (t) classTeacherName = t.full_name;
   }
 
   // Aggregate attendance
@@ -152,20 +164,18 @@ export async function GET(req: NextRequest) {
   const present = attRows.filter((r) => r.status === "Present").length;
   const absent = attRows.filter((r) => r.status === "Absent").length;
   const late = attRows.filter((r) => r.status === "Late").length;
-  const total = attRows.length;
 
-  // Group scores by subject
+  // Group assessments by subject
   const subjectMap = new Map<
     string,
     { strand_id: string; score: string; teacher_remarks: string | null }[]
   >();
   for (const row of (assessRes.data ?? []) as any[]) {
     const list = subjectMap.get(row.subject_name) ?? [];
-    list.push({
-      strand_id: row.strand_id,
-      score: row.score,
-      teacher_remarks: row.teacher_remarks,
-    });
+    // Latest score wins (deduplicate by strand_id)
+    const idx = list.findIndex((x) => x.strand_id === row.strand_id);
+    if (idx >= 0) list[idx] = row;
+    else list.push(row);
     subjectMap.set(row.subject_name, list);
   }
 
@@ -175,7 +185,9 @@ export async function GET(req: NextRequest) {
     overallScore: computeOverall(strands.map((s) => s.score)),
   }));
 
-  // ── Build PDF ──────────────────────────────────────────────────────────────
+  const settings = settingsRes.data;
+
+  // ── Build PDF ─────────────────────────────────────────────────────────────
   const docProps = {
     student: {
       fullName: studentRes.data.full_name,
@@ -184,6 +196,9 @@ export async function GET(req: NextRequest) {
       gender: studentRes.data.gender ?? undefined,
       dateOfBirth: studentRes.data.date_of_birth,
       grade: studentRes.data.current_grade,
+      photoUrl: studentRes.data.photo_url
+        ? (getLogoPublicUrl(studentRes.data.photo_url) ?? undefined)
+        : undefined,
     },
     report: {
       term,
@@ -194,42 +209,36 @@ export async function GET(req: NextRequest) {
       effortGrade: reportRes.data?.effort_grade ?? undefined,
     },
     subjects,
-    attendance: { present, absent, late, total },
+    attendance: { present, absent, late, total: attRows.length },
+    school: {
+      name: settings?.school_name ?? "Kibali Academy",
+      email: settings?.school_email ?? "",
+      phone: settings?.school_phone ?? "",
+      logoUrl: settings?.logo_url
+        ? (getLogoPublicUrl(settings.logo_url) ?? undefined)
+        : undefined,
+    },
   };
 
   try {
-    const buffer = await renderToBuffer(ReportCardDocument(docProps));
+    const buffer = Buffer.from(
+      await renderToBuffer(ReportCardDocument(docProps)),
+    );
+    const filename = `${studentRes.data.full_name.replace(/\s+/g, "_")}_Term${term}_${academicYear}.pdf`;
 
-    const safeFilename = `${studentRes.data.full_name.replace(/\s+/g, "_")}_Term${term}_${academicYear}.pdf`;
-
-    // FIX: Cast Buffer to any or wrap in a new Response to ensure compatibility with Next.js/Web API
-    return new NextResponse(buffer as any, {
+    return new NextResponse(buffer, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename="${safeFilename}"`,
+        "Content-Disposition": `inline; filename="${filename}"`,
         "Cache-Control": "private, no-store",
       },
     });
   } catch (err) {
-    console.error("[report-pdf] renderToBuffer failed:", err);
+    console.error("[report-pdf]", err);
     return NextResponse.json(
       { error: "PDF generation failed" },
       { status: 500 },
     );
   }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-const SCORE_NUMERIC: Record<string, number> = { EE: 4, ME: 3, AE: 2, BE: 1 };
-
-function computeOverall(scores: string[]): string {
-  if (scores.length === 0) return "ME";
-  const avg =
-    scores.reduce((sum, s) => sum + (SCORE_NUMERIC[s] ?? 2), 0) / scores.length;
-  if (avg >= 3.5) return "EE";
-  if (avg >= 2.5) return "ME";
-  if (avg >= 1.5) return "AE";
-  return "BE";
 }
