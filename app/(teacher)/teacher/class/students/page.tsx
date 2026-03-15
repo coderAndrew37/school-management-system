@@ -1,30 +1,51 @@
 // app/teacher/class/students/page.tsx
+
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createClient } from "@supabase/supabase-js";
-import { fetchMyClassTeacherAssignment } from "@/lib/actions/class-teacher";
+import { fetchMyClassTeacherAssignments } from "@/lib/actions/class-teacher";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ClassStudentsClient } from "./ClassStudentsClient";
-import { StudentWithStats } from "./types";
+import type { StudentWithStats } from "./types";
+import { ClassGradeSelector } from "@/app/(teacher)/_components/ClassGradeSelector";
 
 export const metadata = { title: "My Class | Kibali Teacher" };
 export const revalidate = 0;
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+interface Props {
+  searchParams: Promise<{ grade?: string }>;
+}
 
-export default async function ClassStudentsPage() {
+export default async function ClassStudentsPage({ searchParams }: Props) {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const assignment = await fetchMyClassTeacherAssignment();
-  if (!assignment?.isClassTeacher || !assignment.grade) redirect("/teacher");
+  const assignment = await fetchMyClassTeacherAssignments();
+  if (!assignment?.isClassTeacher || assignment.grades.length === 0)
+    redirect("/teacher");
 
-  const grade = assignment.grade; // now narrowed to string
+  const { grades } = assignment;
+
+  // Grade resolution
+  const sp = await searchParams;
+  const gradeParam = sp.grade;
+  const activeGrade =
+    gradeParam && grades.includes(gradeParam)
+      ? gradeParam
+      : grades.length === 1
+        ? grades[0]!
+        : null;
+
+  if (!activeGrade) {
+    return (
+      <ClassGradeSelector
+        grades={grades}
+        currentPath="/teacher/class/students"
+      />
+    );
+  }
 
   // ── Students ──────────────────────────────────────────────────────────────
   const { data: rawStudents } = await supabaseAdmin
@@ -39,40 +60,39 @@ export default async function ClassStudentsPage() {
       )
     `,
     )
-    .eq("current_grade", grade)
+    .eq("current_grade", activeGrade)
+    .eq("status", "active")
     .order("full_name");
 
   const students = (rawStudents ?? []) as any[];
   const studentIds = students.map((s) => s.id as string);
 
-  // ── Attendance ────────────────────────────────────────────────────────────
-  const { data: attendanceRows } =
+  // ── Attendance + assessments (parallel) ──────────────────────────────────
+  const [attendanceRows, assessmentRows] = await Promise.all([
     studentIds.length > 0
-      ? await supabaseAdmin
+      ? supabaseAdmin
           .from("attendance")
           .select("student_id, status")
           .in("student_id", studentIds)
-      : { data: [] };
+          .then((r) => r.data ?? [])
+      : Promise.resolve([]),
 
-  // ── Assessment counts ─────────────────────────────────────────────────────
-  const { data: assessmentRows } =
     studentIds.length > 0
-      ? await supabaseAdmin
+      ? supabaseAdmin
           .from("assessments")
           .select("student_id")
           .in("student_id", studentIds)
           .not("score", "is", null)
-      : { data: [] };
+          .then((r) => r.data ?? [])
+      : Promise.resolve([]),
+  ]);
 
   // ── Aggregate ─────────────────────────────────────────────────────────────
   const attMap = new Map<
     string,
     { present: number; absent: number; late: number }
   >();
-  for (const r of (attendanceRows ?? []) as {
-    student_id: string;
-    status: string;
-  }[]) {
+  for (const r of attendanceRows as { student_id: string; status: string }[]) {
     const cur = attMap.get(r.student_id) ?? { present: 0, absent: 0, late: 0 };
     if (r.status === "Present") cur.present++;
     else if (r.status === "Absent") cur.absent++;
@@ -81,9 +101,8 @@ export default async function ClassStudentsPage() {
   }
 
   const assessMap = new Map<string, number>();
-  for (const r of (assessmentRows ?? []) as { student_id: string }[]) {
+  for (const r of assessmentRows as { student_id: string }[])
     assessMap.set(r.student_id, (assessMap.get(r.student_id) ?? 0) + 1);
-  }
 
   const enriched: StudentWithStats[] = students.map((s) => {
     const att = attMap.get(s.id) ?? { present: 0, absent: 0, late: 0 };
@@ -121,7 +140,8 @@ export default async function ClassStudentsPage() {
   return (
     <ClassStudentsClient
       students={enriched}
-      grade={grade}
+      grade={activeGrade}
+      grades={grades}
       academicYear={assignment.academicYear ?? 2026}
     />
   );

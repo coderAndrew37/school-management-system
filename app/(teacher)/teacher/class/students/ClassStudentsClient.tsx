@@ -1,5 +1,11 @@
 "use client";
 
+// app/teacher/class/students/ClassStudentsClient.tsx
+// Changes from original:
+//   - grades: string[] prop added
+//   - Grade switcher in header when grades.length > 1
+//   - Reports link href uses ?grade= param
+
 import {
   AlertTriangle,
   ChevronDown,
@@ -11,11 +17,12 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { StudentWithStats } from "./types";
+import type { StudentWithStats } from "./types";
 
 interface Props {
   students: StudentWithStats[];
   grade: string;
+  grades: string[]; // all grades this teacher manages
   academicYear: number;
 }
 
@@ -62,7 +69,12 @@ function AttRatePill({ rate }: { rate: number }) {
 
 type SortKey = "name" | "attendance" | "assessments";
 
-export function ClassStudentsClient({ students, grade, academicYear }: Props) {
+export function ClassStudentsClient({
+  students,
+  grade,
+  grades,
+  academicYear,
+}: Props) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "at_risk" | "male" | "female">(
     "all",
@@ -71,7 +83,7 @@ export function ClassStudentsClient({ students, grade, academicYear }: Props) {
   const [sortAsc, setSortAsc] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  // Derived stats
+  // Class-wide stats
   const totalPresent = students.reduce((s, st) => s + st.present, 0);
   const totalDays = students.reduce((s, st) => s + st.total_days, 0);
   const classRate =
@@ -81,7 +93,6 @@ export function ClassStudentsClient({ students, grade, academicYear }: Props) {
   ).length;
   const notAssessed = students.filter((s) => s.assessment_count === 0).length;
 
-  // Filter
   const filtered = students.filter((s) => {
     if (search && !s.full_name.toLowerCase().includes(search.toLowerCase()))
       return false;
@@ -92,7 +103,6 @@ export function ClassStudentsClient({ students, grade, academicYear }: Props) {
     return true;
   });
 
-  // Sort
   const sorted = [...filtered].sort((a, b) => {
     let v = 0;
     if (sortKey === "name") v = a.full_name.localeCompare(b.full_name);
@@ -121,6 +131,9 @@ export function ClassStudentsClient({ students, grade, academicYear }: Props) {
     );
   }
 
+  // Reports link always carries the active grade so multi-class teachers land on the right class
+  const reportsHref = `/teacher/class/reports?grade=${encodeURIComponent(grade)}`;
+
   return (
     <div className="min-h-screen bg-[#f5f6fa]">
       {/* Header */}
@@ -141,9 +154,29 @@ export function ClassStudentsClient({ students, grade, academicYear }: Props) {
               {students.length} students · {academicYear}
             </p>
           </div>
+
+          {/* Grade switcher — only for multi-class teachers */}
+          {grades.length > 1 && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              {grades.map((g) => (
+                <a
+                  key={g}
+                  href={`/teacher/class/students?grade=${encodeURIComponent(g)}`}
+                  className={`text-xs font-bold px-2.5 py-1 rounded-xl border transition-all ${
+                    g === grade
+                      ? "bg-sky-600 text-white border-sky-600"
+                      : "bg-white text-slate-500 border-slate-200 hover:border-sky-300 hover:bg-sky-50"
+                  }`}
+                >
+                  {g.replace("Grade ", "G")}
+                </a>
+              ))}
+            </div>
+          )}
+
           <Link
-            href="/teacher/class/reports"
-            className="text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 px-3 py-1.5 rounded-xl transition-colors"
+            href={reportsHref}
+            className="text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 px-3 py-1.5 rounded-xl transition-colors shrink-0"
           >
             Reports →
           </Link>
@@ -178,7 +211,11 @@ export function ClassStudentsClient({ students, grade, academicYear }: Props) {
             </p>
           </div>
           <div
-            className={`rounded-2xl border p-3.5 shadow-sm text-center ${atRisk > 0 ? "bg-rose-50 border-rose-200" : "bg-white border-slate-200"}`}
+            className={`rounded-2xl border p-3.5 shadow-sm text-center ${
+              atRisk > 0
+                ? "bg-rose-50 border-rose-200"
+                : "bg-white border-slate-200"
+            }`}
           >
             <p
               className={`text-2xl font-black ${atRisk > 0 ? "text-rose-600" : "text-slate-800"}`}
@@ -190,7 +227,11 @@ export function ClassStudentsClient({ students, grade, academicYear }: Props) {
             </p>
           </div>
           <div
-            className={`rounded-2xl border p-3.5 shadow-sm text-center ${notAssessed > 0 ? "bg-amber-50 border-amber-200" : "bg-white border-slate-200"}`}
+            className={`rounded-2xl border p-3.5 shadow-sm text-center ${
+              notAssessed > 0
+                ? "bg-amber-50 border-amber-200"
+                : "bg-white border-slate-200"
+            }`}
           >
             <p
               className={`text-2xl font-black ${notAssessed > 0 ? "text-amber-600" : "text-slate-800"}`}
@@ -291,17 +332,14 @@ export function ClassStudentsClient({ students, grade, academicYear }: Props) {
                     isAtRisk ? "border-rose-200" : "border-slate-200"
                   }`}
                 >
-                  {/* Row */}
                   <button
                     onClick={() => setExpanded(isOpen ? null : s.id)}
                     className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-slate-50 transition-colors text-left"
                   >
-                    {/* Position number */}
                     <span className="text-[10px] font-black text-slate-300 w-5 text-center shrink-0">
                       {idx + 1}
                     </span>
 
-                    {/* Avatar */}
                     <div
                       className={`h-9 w-9 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${
                         s.gender === "Male"
@@ -314,7 +352,6 @@ export function ClassStudentsClient({ students, grade, academicYear }: Props) {
                       {getInitials(s.full_name)}
                     </div>
 
-                    {/* Name + ID */}
                     <div className="flex-1 min-w-0 text-left">
                       <p className="text-sm font-bold text-slate-800 truncate">
                         {s.full_name}
@@ -329,7 +366,6 @@ export function ClassStudentsClient({ students, grade, academicYear }: Props) {
                       </p>
                     </div>
 
-                    {/* Attendance */}
                     <div className="text-center shrink-0">
                       <AttRatePill rate={s.attendance_rate} />
                       {s.total_days > 0 && (
@@ -339,7 +375,6 @@ export function ClassStudentsClient({ students, grade, academicYear }: Props) {
                       )}
                     </div>
 
-                    {/* Assessment count */}
                     <div className="text-center shrink-0 w-16">
                       <p
                         className={`text-sm font-black ${s.assessment_count === 0 ? "text-amber-500" : "text-slate-700"}`}
@@ -349,7 +384,6 @@ export function ClassStudentsClient({ students, grade, academicYear }: Props) {
                       <p className="text-[9px] text-slate-400">scores</p>
                     </div>
 
-                    {/* At risk flag */}
                     {isAtRisk && (
                       <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" />
                     )}
@@ -359,7 +393,6 @@ export function ClassStudentsClient({ students, grade, academicYear }: Props) {
                     />
                   </button>
 
-                  {/* Expanded detail */}
                   {isOpen && (
                     <div className="border-t border-slate-100 px-4 pb-4 pt-3 space-y-3">
                       <div className="grid grid-cols-2 gap-3">
@@ -432,7 +465,6 @@ export function ClassStudentsClient({ students, grade, academicYear }: Props) {
                         </div>
                       </div>
 
-                      {/* UPI */}
                       {s.upi_number && (
                         <p className="text-[10px] text-slate-400">
                           UPI:{" "}

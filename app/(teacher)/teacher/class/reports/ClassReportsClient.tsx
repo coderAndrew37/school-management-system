@@ -23,8 +23,10 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { StudentReport, CbcScore, SubjectScore } from "./types";
 import {
-  BulkDownloadButton,
+  PrintReportButton,
   DownloadReportButton,
+  BulkPrintButton,
+  BulkDownloadButton,
 } from "@/app/_components/shared/DownloadReportButton";
 
 interface Props {
@@ -250,12 +252,20 @@ export function ClassReportsClient({
             </div>
           )}
 
-          <BulkDownloadButton
-            grade={grade}
-            term={currentTerm}
-            year={academicYear}
-            studentCount={students.length}
-          />
+          <div className="flex items-center gap-2 shrink-0">
+            <BulkPrintButton
+              grade={grade}
+              term={currentTerm}
+              year={academicYear}
+              studentCount={students.length}
+            />
+            <BulkDownloadButton
+              grade={grade}
+              term={currentTerm}
+              year={academicYear}
+              studentCount={students.length}
+            />
+          </div>
 
           <Link
             href="/teacher/class/students"
@@ -651,6 +661,13 @@ export function ClassReportsClient({
                           <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-600">
                             <Check className="h-4 w-4" /> Live on parent portal
                           </span>
+                          <PrintReportButton
+                            studentId={s.id}
+                            studentName={s.full_name}
+                            term={currentTerm}
+                            year={academicYear}
+                            variant="link"
+                          />
                           <DownloadReportButton
                             studentId={s.id}
                             studentName={s.full_name}
