@@ -1,46 +1,62 @@
 // app/teacher/class/attendance/page.tsx
-// Class teacher bulk attendance roster — marks the whole class in one page.
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { fetchClassStudents } from "@/lib/data/assessment";
 import { redirect } from "next/navigation";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { fetchMyClassTeacherAssignments } from "@/lib/actions/class-teacher";
+import { fetchClassStudents } from "@/lib/data/assessment";
 import { ClassAttendanceClient } from "./ClassAttendanceClient";
+import { ClassGradeSelector } from "@/app/(teacher)/_components/ClassGradeSelector";
 
 export const metadata = { title: "Class Register | Kibali Teacher Portal" };
 export const revalidate = 0;
 
-export default async function ClassAttendancePage() {
+interface Props {
+  searchParams: Promise<{ grade?: string }>;
+}
+
+export default async function ClassAttendancePage({ searchParams }: Props) {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Verify teacher profile
   const { data: teacher } = await supabase
     .from("teachers")
     .select("id, full_name")
     .eq("id", user.id)
     .single();
-
   if (!teacher) redirect("/login");
 
-  // Check class teacher assignment
-  const { data: assignment } = await supabase
-    .from("class_teacher_assignments")
-    .select("id, grade, academic_year")
-    .eq("teacher_id", user.id)
-    .eq("academic_year", 2026)
-    .maybeSingle();
-
-  if (!assignment) {
-    // Not a class teacher — redirect to subject attendance page
+  // Get ALL assigned grades — handles shortage scenario
+  const assignment = await fetchMyClassTeacherAssignments();
+  if (!assignment?.isClassTeacher || assignment.grades.length === 0) {
     redirect("/teacher/attendance");
   }
 
-  const students = await fetchClassStudents(assignment.grade);
+  const { grades } = assignment;
 
-  // Fetch today's attendance so the roster pre-fills if already marked
+  // Resolve active grade from ?grade= param
+  const sp = await searchParams;
+  const gradeParam = sp.grade;
+  const activeGrade =
+    gradeParam && grades.includes(gradeParam)
+      ? gradeParam
+      : grades.length === 1
+        ? grades[0]!
+        : null; // multi-grade, no selection yet
+
+  // Show picker when teacher has multiple grades and none is selected
+  if (!activeGrade) {
+    return (
+      <ClassGradeSelector
+        grades={grades}
+        currentPath="/teacher/class/attendance"
+      />
+    );
+  }
+
+  const students = await fetchClassStudents(activeGrade);
   const today = new Date().toISOString().split("T")[0]!;
   const studentIds = students.map((s) => s.id);
 
@@ -53,7 +69,6 @@ export default async function ClassAttendancePage() {
           .eq("date", today)
       : { data: [] };
 
-  // Build pre-fill map: studentId → { status, remarks }
   const preFill: Record<string, { status: string; remarks: string }> = {};
   for (const r of (todayAttendance ?? []) as {
     student_id: string;
@@ -66,7 +81,8 @@ export default async function ClassAttendancePage() {
   return (
     <ClassAttendanceClient
       teacherName={teacher.full_name}
-      grade={assignment.grade}
+      grade={activeGrade}
+      grades={grades}
       students={students}
       todayDate={today}
       preFill={preFill}

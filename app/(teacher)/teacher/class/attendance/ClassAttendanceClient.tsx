@@ -1,5 +1,10 @@
 "use client";
 
+// app/teacher/class/attendance/ClassAttendanceClient.tsx
+// Changes from original:
+//   - grades: string[] prop added
+//   - Grade switcher strip shown in header when grades.length > 1
+
 import { bulkRecordAttendanceAction } from "@/lib/actions/teacher";
 import type { ClassStudent } from "@/lib/data/assessment";
 import {
@@ -29,6 +34,7 @@ interface StudentRow {
 interface Props {
   teacherName: string;
   grade: string;
+  grades: string[]; // all grades this teacher manages
   students: ClassStudent[];
   todayDate: string; // "YYYY-MM-DD"
   preFill: Record<string, { status: string; remarks: string }>;
@@ -97,6 +103,7 @@ function getInitials(name: string) {
 export function ClassAttendanceClient({
   teacherName,
   grade,
+  grades,
   students,
   todayDate,
   preFill,
@@ -113,7 +120,7 @@ export function ClassAttendanceClient({
     })),
   );
 
-  const [saved, setSaved] = useState(Object.keys(preFill).length > 0); // pre-mark as saved if already recorded
+  const [saved, setSaved] = useState(Object.keys(preFill).length > 0);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -143,7 +150,6 @@ export function ClassAttendanceClient({
     );
   }
 
-  // Mark all present at once
   function markAllPresent() {
     setSaved(false);
     setRows((prev) => prev.map((r) => ({ ...r, status: "Present" as Status })));
@@ -157,7 +163,6 @@ export function ClassAttendanceClient({
         date: todayDate,
         remarks: r.remarks || undefined,
       }));
-
       const res = await bulkRecordAttendanceAction(records);
       if (res.success) {
         setSaved(true);
@@ -171,7 +176,6 @@ export function ClassAttendanceClient({
     });
   }
 
-  // Stats
   const counts = rows.reduce<Record<Status, number>>(
     (acc, r) => {
       acc[r.status] = (acc[r.status] ?? 0) + 1;
@@ -183,14 +187,13 @@ export function ClassAttendanceClient({
     rows.length > 0
       ? Math.round(((counts.Present + counts.Late) / rows.length) * 100)
       : 0;
-
   const absentRows = rows.filter(
     (r) => r.status === "Absent" || r.status === "Late",
   );
 
   return (
     <div className="min-h-screen bg-[#f5f6fa]">
-      {/* ── Header ── */}
+      {/* Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
           <CalendarCheck className="h-5 w-5 text-sky-500 shrink-0" />
@@ -218,6 +221,28 @@ export function ClassAttendanceClient({
             </button>
           </div>
         </div>
+
+        {/* Grade switcher — only when teacher manages multiple classes */}
+        {grades.length > 1 && (
+          <div className="max-w-3xl mx-auto px-4 sm:px-6 pb-2 flex items-center gap-2 flex-wrap">
+            <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">
+              Switch class:
+            </span>
+            {grades.map((g) => (
+              <a
+                key={g}
+                href={`/teacher/class/attendance?grade=${encodeURIComponent(g)}`}
+                className={`text-xs font-bold px-2.5 py-1 rounded-xl border transition-all ${
+                  g === grade
+                    ? "bg-sky-600 text-white border-sky-600"
+                    : "bg-white text-slate-500 border-slate-200 hover:border-sky-300 hover:bg-sky-50"
+                }`}
+              >
+                {g}
+              </a>
+            ))}
+          </div>
+        )}
       </header>
 
       {/* Toast */}
@@ -232,7 +257,7 @@ export function ClassAttendanceClient({
       )}
 
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-5 space-y-4">
-        {/* ── Stats bar ── */}
+        {/* Stats bar */}
         <div className="grid grid-cols-5 gap-2">
           <div className="col-span-1 bg-white rounded-2xl border border-slate-200 p-3 text-center shadow-sm">
             <p className="text-xl font-black text-slate-800">
@@ -258,22 +283,20 @@ export function ClassAttendanceClient({
           })}
         </div>
 
-        {/* ── Quick actions ── */}
+        {/* Quick actions */}
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={markAllPresent}
             className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
           >
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            Mark All Present
+            <CheckCircle2 className="h-3.5 w-3.5" /> Mark All Present
           </button>
           <div className="flex items-center gap-1.5 text-xs text-slate-400 ml-auto">
-            <Users className="h-3.5 w-3.5" />
-            {rows.length} students
+            <Users className="h-3.5 w-3.5" /> {rows.length} students
           </div>
         </div>
 
-        {/* ── Student roster ── */}
+        {/* Student roster */}
         <div className="space-y-2">
           {rows.map((row, idx) => {
             const cfg = STATUS_CONFIG[row.status];
@@ -289,12 +312,9 @@ export function ClassAttendanceClient({
                 }`}
               >
                 <div className="flex items-center gap-3 px-4 py-3">
-                  {/* Number + avatar */}
-                  <div className="flex items-center gap-2 w-8 shrink-0">
-                    <span className="text-[10px] font-bold text-slate-300 w-4 text-right">
-                      {idx + 1}
-                    </span>
-                  </div>
+                  <span className="text-[10px] font-bold text-slate-300 w-5 text-right shrink-0">
+                    {idx + 1}
+                  </span>
                   <div
                     className={`h-9 w-9 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${
                       row.gender === "Female"
@@ -304,8 +324,6 @@ export function ClassAttendanceClient({
                   >
                     {getInitials(row.full_name)}
                   </div>
-
-                  {/* Name */}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-slate-800 truncate">
                       {row.full_name}
@@ -316,8 +334,6 @@ export function ClassAttendanceClient({
                       </p>
                     )}
                   </div>
-
-                  {/* Status buttons */}
                   <div className="flex items-center gap-1 shrink-0">
                     {STATUSES.map((s) => {
                       const c = STATUS_CONFIG[s];
@@ -337,12 +353,10 @@ export function ClassAttendanceClient({
                         </button>
                       );
                     })}
-
-                    {/* Remarks toggle */}
                     <button
                       onClick={() => toggleRemarks(row.studentId)}
-                      className="h-8 w-8 rounded-xl flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-colors"
                       title="Add note"
+                      className="h-8 w-8 rounded-xl flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-colors"
                     >
                       {row.remarksOpen ? (
                         <ChevronUp className="h-3.5 w-3.5" />
@@ -354,8 +368,6 @@ export function ClassAttendanceClient({
                     </button>
                   </div>
                 </div>
-
-                {/* Expandable remarks */}
                 {row.remarksOpen && (
                   <div className="px-4 pb-3 pt-0 border-t border-slate-100">
                     <input
@@ -374,7 +386,7 @@ export function ClassAttendanceClient({
           })}
         </div>
 
-        {/* ── Absent/Late summary ── */}
+        {/* Absent/Late summary */}
         {absentRows.length > 0 && (
           <div className="bg-white rounded-2xl border border-rose-200 p-4 shadow-sm space-y-2">
             <p className="text-xs font-black uppercase tracking-wider text-rose-500">
@@ -408,7 +420,7 @@ export function ClassAttendanceClient({
           </div>
         )}
 
-        {/* ── Save footer ── */}
+        {/* Save footer */}
         <div className="pb-6">
           <button
             onClick={handleSave}

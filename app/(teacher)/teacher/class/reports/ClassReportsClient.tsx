@@ -1,5 +1,12 @@
 "use client";
 
+// app/teacher/class/reports/ClassReportsClient.tsx
+// Changes from original:
+//   - grades: string[] prop added
+//   - Grade switcher in header when grades.length > 1
+//   - BulkDownloadButton added to header
+//   - inline supabaseAdmin removed (was in page.tsx — already clean here)
+
 import {
   publishReportCardAction,
   saveReportCardAction,
@@ -15,11 +22,15 @@ import {
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { StudentReport, CbcScore, SubjectScore } from "./types";
-import { DownloadReportButton } from "@/app/_components/shared/DownloadReportButton";
+import {
+  BulkDownloadButton,
+  DownloadReportButton,
+} from "@/app/_components/shared/DownloadReportButton";
 
 interface Props {
   students: StudentReport[];
   grade: string;
+  grades: string[]; // all grades this teacher manages
   academicYear: number;
   classTeacherId: string;
 }
@@ -62,7 +73,7 @@ const CONDUCT_OPTS = [
 ] as const;
 type ConductOpt = (typeof CONDUCT_OPTS)[number];
 
-function avgScore(scores: SubjectScore[]): number {
+function avgScore(scores: SubjectScore[]) {
   if (scores.length === 0) return 0;
   return (
     scores.reduce((s, x) => s + SCORE_STYLE[x.score].numeric, 0) / scores.length
@@ -102,10 +113,10 @@ function groupBySubject(scores: SubjectScore[]) {
 export function ClassReportsClient({
   students,
   grade,
+  grades,
   academicYear,
   classTeacherId,
 }: Props) {
-  // Derive current term from calendar month — mirrors server-side heuristic
   const currentMonth = new Date().getMonth() + 1;
   const currentTerm = currentMonth <= 4 ? 1 : currentMonth <= 8 ? 2 : 3;
 
@@ -167,14 +178,12 @@ export function ClassReportsClient({
     setPendingId(s.id);
     startTrans(async () => {
       const result = await publishReportCardAction(s.id, academicYear);
-      if (result.success) {
+      if (result.success)
         showToast(
           `${s.full_name.split(" ")[0]}'s report published to parents`,
           true,
         );
-      } else {
-        showToast(result.error ?? "Publish failed", false);
-      }
+      else showToast(result.error ?? "Publish failed", false);
       setPendingId(null);
     });
   }
@@ -191,7 +200,6 @@ export function ClassReportsClient({
 
   return (
     <div className="min-h-screen bg-[#f5f6fa]">
-      {/* Toast */}
       {toast && (
         <div
           className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-bold shadow-lg flex items-center gap-2 ${
@@ -213,7 +221,7 @@ export function ClassReportsClient({
             <ChevronDown className="h-5 w-5 rotate-90" />
           </Link>
           <FileText className="h-5 w-5 text-sky-500 shrink-0" />
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <p className="text-sm font-black text-slate-800">
               Report Cards · {grade}
             </p>
@@ -222,9 +230,36 @@ export function ClassReportsClient({
               {students.length - published - drafted} not started
             </p>
           </div>
+
+          {/* Grade switcher — only for multi-class teachers */}
+          {grades.length > 1 && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              {grades.map((g) => (
+                <a
+                  key={g}
+                  href={`/teacher/class/reports?grade=${encodeURIComponent(g)}`}
+                  className={`text-xs font-bold px-2.5 py-1 rounded-xl border transition-all ${
+                    g === grade
+                      ? "bg-sky-600 text-white border-sky-600"
+                      : "bg-white text-slate-500 border-slate-200 hover:border-sky-300 hover:bg-sky-50"
+                  }`}
+                >
+                  {g.replace("Grade ", "G")}
+                </a>
+              ))}
+            </div>
+          )}
+
+          <BulkDownloadButton
+            grade={grade}
+            term={currentTerm}
+            year={academicYear}
+            studentCount={students.length}
+          />
+
           <Link
             href="/teacher/class/students"
-            className="text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 px-3 py-1.5 rounded-xl transition-colors"
+            className="text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 px-3 py-1.5 rounded-xl transition-colors shrink-0"
           >
             My Class
           </Link>
@@ -232,7 +267,7 @@ export function ClassReportsClient({
       </header>
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-5 space-y-4">
-        {/* Stat cards */}
+        {/* Stats */}
         <div className="grid grid-cols-4 gap-3">
           {[
             { label: "Total", value: students.length, cls: "text-slate-800" },
@@ -338,7 +373,6 @@ export function ClassReportsClient({
                       : "border-slate-200"
                 }`}
               >
-                {/* Collapsed row */}
                 <button
                   onClick={() => openStudent(s)}
                   className="w-full flex items-center gap-3 px-4 py-4 hover:bg-slate-50 transition-colors text-left"
@@ -351,7 +385,6 @@ export function ClassReportsClient({
                       .join("")
                       .toUpperCase()}
                   </div>
-
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-slate-800">
                       {s.full_name}
@@ -365,8 +398,6 @@ export function ClassReportsClient({
                       )}
                     </p>
                   </div>
-
-                  {/* Overall CBC grade */}
                   <div className="text-center shrink-0">
                     {s.scores.length > 0 ? (
                       <>
@@ -385,8 +416,6 @@ export function ClassReportsClient({
                       </span>
                     )}
                   </div>
-
-                  {/* Attendance */}
                   <div className="text-center shrink-0 w-16">
                     <p
                       className={`text-sm font-black ${
@@ -401,8 +430,6 @@ export function ClassReportsClient({
                     </p>
                     <p className="text-[9px] text-slate-400">Attend</p>
                   </div>
-
-                  {/* Status badge */}
                   <div className="shrink-0">
                     {s.status === "published" ? (
                       <span className="text-[10px] font-black bg-emerald-50 text-emerald-600 border border-emerald-200 px-2.5 py-1 rounded-xl">
@@ -418,16 +445,13 @@ export function ClassReportsClient({
                       </span>
                     )}
                   </div>
-
                   <ChevronDown
                     className={`h-4 w-4 text-slate-300 shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`}
                   />
                 </button>
 
-                {/* Expanded editor */}
                 {isOpen && (
                   <div className="border-t border-slate-100 px-5 pb-5 pt-4 space-y-5">
-                    {/* Subject scores */}
                     {bySubject.size > 0 ? (
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-2.5">
@@ -463,7 +487,6 @@ export function ClassReportsClient({
                                           <span
                                             key={sc.strand_id}
                                             className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md border ${scSs.bg} ${scSs.text} ${scSs.border}`}
-                                            title={sc.strand_id}
                                           >
                                             {sc.score}
                                           </span>
@@ -497,7 +520,6 @@ export function ClassReportsClient({
                       </div>
                     )}
 
-                    {/* Attendance */}
                     <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-100">
                       <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-2">
                         Attendance
@@ -539,59 +561,46 @@ export function ClassReportsClient({
                       )}
                     </div>
 
-                    {/* Conduct + Effort */}
                     <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1.5">
-                          Conduct
-                        </label>
-                        <select
-                          aria-label="conduct selector"
-                          value={conduct[s.id] ?? ""}
-                          onChange={(e) => {
-                            setConduct((c) => ({
-                              ...c,
-                              [s.id]: e.target.value,
-                            }));
+                      {[
+                        {
+                          label: "Conduct",
+                          val: conduct[s.id] ?? "",
+                          set: (v: string) => {
+                            setConduct((c) => ({ ...c, [s.id]: v }));
                             setSaved((sv) => ({ ...sv, [s.id]: false }));
-                          }}
-                          className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-400"
-                        >
-                          <option value="">— Select —</option>
-                          {CONDUCT_OPTS.map((o) => (
-                            <option key={o} value={o}>
-                              {o}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1.5">
-                          Effort
-                        </label>
-                        <select
-                          aria-label="efforts selector"
-                          value={effort[s.id] ?? ""}
-                          onChange={(e) => {
-                            setEffort((ef) => ({
-                              ...ef,
-                              [s.id]: e.target.value,
-                            }));
+                          },
+                        },
+                        {
+                          label: "Effort",
+                          val: effort[s.id] ?? "",
+                          set: (v: string) => {
+                            setEffort((e) => ({ ...e, [s.id]: v }));
                             setSaved((sv) => ({ ...sv, [s.id]: false }));
-                          }}
-                          className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-400"
-                        >
-                          <option value="">— Select —</option>
-                          {CONDUCT_OPTS.map((o) => (
-                            <option key={o} value={o}>
-                              {o}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                          },
+                        },
+                      ].map(({ label, val, set }) => (
+                        <div key={label}>
+                          <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1.5">
+                            {label}
+                          </label>
+                          <select
+                            aria-label={`${label} selector`}
+                            value={val}
+                            onChange={(e) => set(e.target.value)}
+                            className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                          >
+                            <option value="">— Select —</option>
+                            {CONDUCT_OPTS.map((o) => (
+                              <option key={o} value={o}>
+                                {o}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
                     </div>
 
-                    {/* Class teacher remarks */}
                     <div>
                       <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1.5">
                         Class Teacher Remarks
@@ -608,7 +617,6 @@ export function ClassReportsClient({
                       />
                     </div>
 
-                    {/* Actions */}
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => handleSave(s)}
@@ -634,8 +642,7 @@ export function ClassReportsClient({
                           disabled={isLoading}
                           className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold transition-colors disabled:opacity-50"
                         >
-                          <Eye className="h-4 w-4" />
-                          Publish to Parents
+                          <Eye className="h-4 w-4" /> Publish to Parents
                         </button>
                       )}
 
