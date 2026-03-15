@@ -21,23 +21,29 @@ function mapStudentRow(row: any): Student {
 
   return {
     ...row,
-    // Expose the parent object at row.parents so every consumer that
-    // already reads student.parents keeps working without changes.
     parents: primary?.parents ?? null,
-    // parent_id is gone from the DB — set to null so TypeScript is happy
-    // if any consumer still references it.
     parent_id: null,
+    status: row.status ?? "active",
+    all_parents: links.map((l: any) => ({
+      parent_id: l.parents?.id ?? "",
+      full_name: l.parents?.full_name ?? "",
+      phone_number: l.parents?.phone_number ?? null,
+      email: l.parents?.email ?? "",
+      relationship_type: l.relationship_type,
+      is_primary_contact: l.is_primary_contact,
+      invite_accepted: l.parents?.invite_accepted ?? false,
+    })),
   };
 }
 
 // Select fragment — joins through student_parents → parents
 const STUDENT_SELECT = `
   id, readable_id, upi_number, full_name,
-  date_of_birth, gender, current_grade, photo_url, created_at,
+  date_of_birth, gender, current_grade, photo_url, status, created_at,
   student_parents (
     is_primary_contact,
     relationship_type,
-    parents ( id, full_name, phone_number )
+    parents ( id, full_name, phone_number, email, invite_accepted )
   )
 ` as const;
 
@@ -64,12 +70,14 @@ export async function fetchAllStudents({
   search = "",
   grade = "",
   gender = "",
+  status = "active",
   sortBy = "created_at",
   sortDir = "desc",
 }: {
   search?: string;
   grade?: string;
   gender?: string;
+  status?: string;
   sortBy?: string;
   sortDir?: "asc" | "desc";
 } = {}): Promise<Student[]> {
@@ -84,6 +92,7 @@ export async function fetchAllStudents({
     );
   if (grade) query = query.eq("current_grade", grade);
   if (gender) query = query.eq("gender", gender);
+  if (status && status !== "all") query = query.eq("status", status);
   const { data, error } = await query;
   if (error) {
     console.error("fetchAllStudents error:", error);

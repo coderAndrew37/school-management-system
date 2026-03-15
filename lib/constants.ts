@@ -35,7 +35,7 @@ export const ADMIN_LINKS: NavLink[] = [
   },
 
   // ── People ────────────────────────────────────────────────────────────────
-  { label: "Students", href: "/students", icon: Users, group: "People" },
+  { label: "Students", href: "/admin/students", icon: Users, group: "People" },
   {
     label: "Admit Student",
     href: "/admin/admission",

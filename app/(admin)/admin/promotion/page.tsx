@@ -1,5 +1,5 @@
-import { GraduationCap, ArrowRight, AlertTriangle } from "lucide-react";
 import { fetchGradesForPromotion } from "@/lib/actions/promotion";
+import { ArrowRight, GraduationCap } from "lucide-react";
 import { PromotionClient } from "./PromotionClient";
 
 export const metadata = {

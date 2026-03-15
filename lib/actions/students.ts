@@ -263,6 +263,58 @@ export async function unlinkParentFromStudentAction(
   return { success: true, message: "Parent unlinked" };
 }
 
+// ── Change student status ──────────────────────────────────────────────────────
+// Archives rather than deletes — preserves historical data.
+
+export async function changeStudentStatusAction(
+  studentId: string,
+  status: "active" | "transferred" | "graduated" | "withdrawn",
+): Promise<ActionResult> {
+  if (!(await requireAdmin()))
+    return { success: false, message: "Unauthorised" };
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase
+    .from("students")
+    .update({ status })
+    .eq("id", studentId);
+
+  if (error) return { success: false, message: error.message };
+
+  revalidatePath("/admin/students");
+  revalidatePath("/admin/dashboard");
+  return { success: true, message: `Student marked as ${status}.` };
+}
+
+// ── Set primary contact ────────────────────────────────────────────────────────
+
+export async function setPrimaryContactAction(
+  studentId: string,
+  parentId: string,
+): Promise<ActionResult> {
+  if (!(await requireAdmin()))
+    return { success: false, message: "Unauthorised" };
+
+  const supabase = await createSupabaseServerClient();
+
+  // Demote all, then promote the chosen one
+  await supabase
+    .from("student_parents")
+    .update({ is_primary_contact: false })
+    .eq("student_id", studentId);
+
+  const { error } = await supabase
+    .from("student_parents")
+    .update({ is_primary_contact: true })
+    .eq("student_id", studentId)
+    .eq("parent_id", parentId);
+
+  if (error) return { success: false, message: error.message };
+
+  revalidatePath("/admin/students");
+  return { success: true, message: "Primary contact updated." };
+}
+
 // ── Photo upload ──────────────────────────────────────────────────────────────
 // Thin async wrapper so this "use server" file can export it.
 // Implementation lives in admit.ts.
