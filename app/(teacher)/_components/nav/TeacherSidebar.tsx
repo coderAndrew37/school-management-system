@@ -1,10 +1,6 @@
 "use client";
 
 // app/_components/nav/TeacherSidebar.tsx
-// Light-mode sidebar for the teacher portal.
-// Desktop: always visible, fixed left, 220px wide.
-// Mobile: slide-in overlay triggered by TopNav hamburger.
-// Mirrors the AdminSidebar pattern but uses the teacher light design system.
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
@@ -19,6 +15,7 @@ import {
   Award,
   LayoutDashboard,
   Users,
+  FileText,
 } from "lucide-react";
 
 interface TeacherNavLink {
@@ -28,15 +25,13 @@ interface TeacherNavLink {
   group: string;
 }
 
-export const TEACHER_NAV: TeacherNavLink[] = [
-  // Overview
+const BASE_NAV: TeacherNavLink[] = [
   {
     href: "/teacher",
     label: "Dashboard",
     icon: LayoutDashboard,
     group: "Overview",
   },
-  // Teaching
   {
     href: "/teacher/assess",
     label: "Assessments",
@@ -67,7 +62,15 @@ export const TEACHER_NAV: TeacherNavLink[] = [
     icon: Award,
     group: "Teaching",
   },
-  // Class
+  {
+    href: "/teacher/messages",
+    label: "Messages",
+    icon: MessageSquare,
+    group: "Communication",
+  },
+];
+
+const CLASS_TEACHER_NAV: TeacherNavLink[] = [
   {
     href: "/teacher/class/students",
     label: "My Class",
@@ -77,34 +80,33 @@ export const TEACHER_NAV: TeacherNavLink[] = [
   {
     href: "/teacher/class/reports",
     label: "Reports",
-    icon: ClipboardList,
+    icon: FileText,
     group: "Class Teacher",
-  },
-  // Communication
-  {
-    href: "/teacher/messages",
-    label: "Messages",
-    icon: MessageSquare,
-    group: "Communication",
   },
 ];
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
+  isClassTeacher: boolean;
+  classGrades: string[];
 }
 
-export function TeacherSidebar({ isOpen, onClose }: Props) {
+export function TeacherSidebar({
+  isOpen,
+  onClose,
+  isClassTeacher,
+  classGrades,
+}: Props) {
   const pathname = usePathname();
 
-  const groups = TEACHER_NAV.reduce<Record<string, TeacherNavLink[]>>(
-    (acc, link) => {
-      if (!acc[link.group]) acc[link.group] = [];
-      acc[link.group]!.push(link);
-      return acc;
-    },
-    {},
-  );
+  const nav = isClassTeacher ? [...BASE_NAV, ...CLASS_TEACHER_NAV] : BASE_NAV;
+
+  const groups = nav.reduce<Record<string, TeacherNavLink[]>>((acc, link) => {
+    if (!acc[link.group]) acc[link.group] = [];
+    acc[link.group]!.push(link);
+    return acc;
+  }, {});
 
   function isActive(href: string): boolean {
     if (href === "/teacher") return pathname === "/teacher";
@@ -113,7 +115,6 @@ export function TeacherSidebar({ isOpen, onClose }: Props) {
 
   return (
     <>
-      {/* Mobile backdrop */}
       {isOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm lg:hidden"
@@ -122,26 +123,24 @@ export function TeacherSidebar({ isOpen, onClose }: Props) {
         />
       )}
 
-      {/*
-        Sidebar panel.
-        Same <style> pattern as AdminSidebar — avoids Tailwind purge of
-        translate classes used inside ternary expressions.
-      */}
-      <aside className="sidebar-teacher fixed top-0 left-0 z-50 flex flex-col h-full w-[220px] bg-white border-r border-slate-200">
+      <aside
+        className="sidebar-teacher fixed top-0 left-0 z-50 flex flex-col h-full w-[220px] bg-white border-r border-slate-200"
+        data-open={String(isOpen)}
+      >
         <style>{`
           .sidebar-teacher {
             transform: translateX(-100%);
             transition: transform 0.25s cubic-bezier(0.4,0,0.2,1);
           }
+          .sidebar-teacher[data-open="true"] {
+            transform: translateX(0);
+          }
           @media (min-width: 1024px) {
             .sidebar-teacher { transform: translateX(0) !important; }
           }
         `}</style>
-        <style>
-          {isOpen ? ".sidebar-teacher { transform: translateX(0); }" : ""}
-        </style>
 
-        {/* Logo / header */}
+        {/* Header */}
         <div className="flex items-center justify-between px-4 h-14 border-b border-slate-100 flex-shrink-0">
           <Link
             href="/teacher"
@@ -160,7 +159,6 @@ export function TeacherSidebar({ isOpen, onClose }: Props) {
               </p>
             </div>
           </Link>
-
           <button
             onClick={onClose}
             className="lg:hidden flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
@@ -169,6 +167,31 @@ export function TeacherSidebar({ isOpen, onClose }: Props) {
             <X className="h-4 w-4" />
           </button>
         </div>
+
+        {/* Class teacher badge — shows all assigned grades */}
+        {isClassTeacher && classGrades.length > 0 && (
+          <div className="mx-3 mt-3 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200">
+            <p className="text-[9px] font-black uppercase tracking-wider text-emerald-600/70">
+              Class Teacher
+            </p>
+            {classGrades.length === 1 ? (
+              <p className="text-xs font-bold text-emerald-700 mt-0.5">
+                {classGrades[0]}
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {classGrades.map((g) => (
+                  <span
+                    key={g}
+                    className="text-[9px] font-bold bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md px-1.5 py-0.5"
+                  >
+                    {g.replace("Grade ", "G").replace(" / JSS", "")}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-3 px-2.5 space-y-4">
@@ -213,7 +236,6 @@ export function TeacherSidebar({ isOpen, onClose }: Props) {
           ))}
         </nav>
 
-        {/* Footer */}
         <div className="flex-shrink-0 px-4 py-3 border-t border-slate-100">
           <p className="text-[9px] text-slate-300 font-mono text-center leading-relaxed">
             CBC School Management

@@ -14,12 +14,10 @@ export interface Assignment {
   academic_year: number;
 }
 
-/** Used by ClassTeacherAssignmentClient (admin UI) */
 export type AssignResult =
   | { success: true; assignment: Assignment; message: string }
   | { success: false; error: string; message: string };
 
-/** Used by removeClassTeacherAction */
 export type RemoveResult =
   | { success: true; message: string }
   | { success: false; error: string; message: string };
@@ -32,7 +30,7 @@ const assignSchema = z.object({
   academicYear: z.number().int().default(2026),
 });
 
-// ── Assign (upsert) a class teacher for a grade ───────────────────────────────
+// ── Assign a class teacher ─────────────────────────────────────────────────────
 
 export async function assignClassTeacherAction(
   data: z.infer<typeof assignSchema>,
@@ -41,40 +39,33 @@ export async function assignClassTeacherAction(
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  if (!user) {
+  if (!user)
     return {
       success: false,
       error: "AUTH_ERROR",
       message: "Not authenticated.",
     };
-  }
 
   const parsed = assignSchema.safeParse(data);
-  if (!parsed.success) {
+  if (!parsed.success)
     return {
       success: false,
       error: "VALIDATION_ERROR",
       message: parsed.error.issues[0]?.message ?? "Invalid input",
     };
-  }
 
-  // Permissions check
   const { data: profile } = await supabase
     .from("profiles")
     .select("role")
     .eq("id", user.id)
     .single();
-
-  if (!profile || !["admin", "superadmin"].includes(profile.role)) {
+  if (!profile || !["admin", "superadmin"].includes(profile.role))
     return {
       success: false,
       error: "FORBIDDEN",
       message: "Insufficient permissions.",
     };
-  }
 
-  // Perform Upsert
   const { data: result, error } = await supabaseAdmin
     .from("class_teacher_assignments")
     .upsert(
@@ -100,7 +91,6 @@ export async function assignClassTeacherAction(
 
   revalidatePath("/admin/class-teachers");
   revalidatePath("/teacher");
-
   return {
     success: true,
     assignment: result as Assignment,
@@ -117,34 +107,29 @@ export async function removeClassTeacherAction(
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  if (!user) {
+  if (!user)
     return {
       success: false,
       error: "AUTH_ERROR",
       message: "Not authenticated.",
     };
-  }
 
   const { data: profile } = await supabase
     .from("profiles")
     .select("role")
     .eq("id", user.id)
     .single();
-
-  if (!profile || !["admin", "superadmin"].includes(profile.role)) {
+  if (!profile || !["admin", "superadmin"].includes(profile.role))
     return {
       success: false,
       error: "FORBIDDEN",
       message: "Insufficient permissions.",
     };
-  }
 
   const { error } = await supabaseAdmin
     .from("class_teacher_assignments")
     .delete()
     .eq("id", assignmentId);
-
   if (error) {
     console.error("[removeClassTeacherAction]", error.message);
     return {
@@ -156,18 +141,16 @@ export async function removeClassTeacherAction(
 
   revalidatePath("/admin/class-teachers");
   revalidatePath("/teacher");
-
-  return {
-    success: true,
-    message: "Assignment removed successfully.",
-  };
+  return { success: true, message: "Assignment removed successfully." };
 }
 
-// ── Fetch: Get current teacher's assignment ──────────────────────────────────
+// ── Fetch all assignments for the current teacher ─────────────────────────────
+// Returns ALL grades this teacher is class teacher for.
+// A teacher with two assignments (shortage scenario) gets both.
 
-export async function fetchMyClassTeacherAssignment(): Promise<{
+export async function fetchMyClassTeacherAssignments(): Promise<{
   isClassTeacher: boolean;
-  grade: string | null;
+  grades: string[];
   academicYear: number | null;
 } | null> {
   const supabase = await createSupabaseServerClient();
@@ -181,18 +164,37 @@ export async function fetchMyClassTeacherAssignment(): Promise<{
     .select("grade, academic_year")
     .eq("teacher_id", user.id)
     .eq("academic_year", 2026)
-    .maybeSingle();
+    .order("grade"); // deterministic order
 
   if (error) {
-    console.error("[fetchMyClassTeacherAssignment]", error.message);
-    return { isClassTeacher: false, grade: null, academicYear: null };
+    console.error("[fetchMyClassTeacherAssignments]", error.message);
+    return { isClassTeacher: false, grades: [], academicYear: null };
   }
 
-  if (!data) return { isClassTeacher: false, grade: null, academicYear: null };
+  if (!data || data.length === 0)
+    return { isClassTeacher: false, grades: [], academicYear: null };
 
   return {
     isClassTeacher: true,
-    grade: data.grade,
-    academicYear: data.academic_year,
+    grades: data.map((r) => r.grade),
+    academicYear: data[0]!.academic_year,
+  };
+}
+
+// ── Legacy shim — single-grade callers (reports page, etc.) ──────────────────
+// Returns the FIRST assigned grade for backward compatibility.
+// New code should use fetchMyClassTeacherAssignments() instead.
+
+export async function fetchMyClassTeacherAssignment(): Promise<{
+  isClassTeacher: boolean;
+  grade: string | null;
+  academicYear: number | null;
+} | null> {
+  const result = await fetchMyClassTeacherAssignments();
+  if (!result) return null;
+  return {
+    isClassTeacher: result.isClassTeacher,
+    grade: result.grades[0] ?? null,
+    academicYear: result.academicYear,
   };
 }
