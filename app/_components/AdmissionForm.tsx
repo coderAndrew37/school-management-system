@@ -27,9 +27,12 @@ import {
   X,
   CheckCircle2,
   ChevronDown,
+  Camera,
+  ImageOff,
 } from "lucide-react";
 import {
   admitStudentAction,
+  uploadStudentPhotoAction,
   searchParentsAction,
   type ParentSearchResult,
 } from "@/lib/actions/admit";
@@ -281,6 +284,10 @@ export default function AdmissionForm() {
   const [isPending, startTransition] = useTransition();
   const [selectedParent, setSelectedParent] =
     useState<ParentSearchResult | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
   const {
@@ -292,6 +299,23 @@ export default function AdmissionForm() {
     resolver: zodResolver(admissionSchema) as any,
     defaultValues: { relationshipType: "guardian" },
   });
+
+  function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("Photo too large", { description: "Max 2 MB." });
+      return;
+    }
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  }
+
+  function handleRemovePhoto() {
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
 
   const onSubmit = (values: AdmissionFormValues) => {
     startTransition(async () => {
@@ -325,6 +349,22 @@ export default function AdmissionForm() {
         return;
       }
 
+      // Upload photo if provided — non-blocking, best effort
+      if (photoFile && result.studentId) {
+        setPhotoUploading(true);
+        const fd2 = new FormData();
+        fd2.set("photo", photoFile);
+        const photoResult = await uploadStudentPhotoAction(
+          result.studentId,
+          fd2,
+        );
+        setPhotoUploading(false);
+        if (!photoResult.success) {
+          // Non-fatal — student admitted, photo can be added later
+          console.warn("Photo upload failed:", photoResult.message);
+        }
+      }
+
       toast.success("Admission Successful 🎓", {
         description: selectedParent
           ? `${values.studentName} added to ${selectedParent.full_name}'s account.`
@@ -334,6 +374,8 @@ export default function AdmissionForm() {
 
       reset();
       setSelectedParent(null);
+      setPhotoFile(null);
+      setPhotoPreview(null);
 
       await new Promise((r) => setTimeout(r, 1200));
       router.push("/admin/students");
@@ -477,6 +519,107 @@ export default function AdmissionForm() {
                   ))}
                 </select>
                 <FieldError message={errors.currentGrade?.message} />
+              </div>
+            </div>
+
+            {/* ── PASSPORT PHOTO ───────────────────────────────────────── */}
+            <Divider label="Passport Photo (Optional)" />
+
+            <div>
+              <Label
+                htmlFor="studentPhoto"
+                icon={<Camera className="h-3.5 w-3.5" />}
+              >
+                Student Photo
+              </Label>
+
+              <div className="flex items-start gap-4">
+                {/* Preview / placeholder */}
+                <div
+                  onClick={() => !isPending && fileInputRef.current?.click()}
+                  className="relative w-20 h-24 rounded-xl border-2 border-dashed border-white/15 bg-white/[0.04] flex items-center justify-center flex-shrink-0 cursor-pointer hover:border-amber-400/40 hover:bg-white/[0.07] transition-all overflow-hidden group"
+                >
+                  {photoPreview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={photoPreview}
+                      alt="Student photo preview"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center gap-1.5 text-white/20 group-hover:text-white/40 transition-colors">
+                      <Camera className="h-6 w-6" />
+                      <span className="text-[9px] font-semibold uppercase tracking-wide">
+                        Upload
+                      </span>
+                    </div>
+                  )}
+                  {photoUploading && (
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                      <Loader2 className="h-5 w-5 text-amber-400 animate-spin" />
+                    </div>
+                  )}
+                </div>
+
+                {/* Instructions + actions */}
+                <div className="flex-1 min-w-0">
+                  <input
+                    aria-label="upload student profile photo"
+                    ref={fileInputRef}
+                    id="studentPhoto"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={handlePhotoChange}
+                    disabled={isPending}
+                  />
+                  {photoFile ? (
+                    <div className="space-y-2">
+                      <p className="text-xs text-white/60 truncate">
+                        {photoFile.name}
+                      </p>
+                      <p className="text-[10px] text-white/30">
+                        {(photoFile.size / 1024).toFixed(0)} KB
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isPending}
+                          className="text-[10px] font-semibold text-amber-400/70 hover:text-amber-400 transition-colors"
+                        >
+                          Replace
+                        </button>
+                        <span className="text-white/15">·</span>
+                        <button
+                          type="button"
+                          onClick={handleRemovePhoto}
+                          disabled={isPending}
+                          className="text-[10px] font-semibold text-rose-400/60 hover:text-rose-400 transition-colors flex items-center gap-1"
+                        >
+                          <ImageOff className="h-3 w-3" /> Remove
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isPending}
+                        className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-white/50 hover:text-white hover:bg-white/[0.08] transition-all mb-2"
+                      >
+                        <Camera className="h-3.5 w-3.5" /> Choose Photo
+                      </button>
+                      <p className="text-[10px] text-white/25 leading-relaxed">
+                        JPEG, PNG or WEBP · Max 2 MB
+                        <br />
+                        Passport-style, clear face. Optional — can be added
+                        later.
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

@@ -309,3 +309,58 @@ export async function resendInviteAction(parentId: string) {
     return { success: false, message: error.message };
   }
 }
+
+// ── Upload student passport photo ─────────────────────────────────────────────
+// Called separately after admission so the photo upload doesn't block the
+// admission flow if the network is slow. Also used for updating photos later.
+
+export async function uploadStudentPhotoAction(
+  studentId: string,
+  formData: FormData,
+): Promise<{ success: boolean; message: string; photo_url?: string }> {
+  const file = formData.get("photo") as File | null;
+  if (!file || file.size === 0)
+    return { success: false, message: "No file provided." };
+
+  if (file.size > 2 * 1024 * 1024)
+    return { success: false, message: "Photo must be under 2 MB." };
+
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
+    return { success: false, message: "Photo must be JPEG, PNG, or WEBP." };
+
+  const ext =
+    file.type === "image/png"
+      ? "png"
+      : file.type === "image/webp"
+        ? "webp"
+        : "jpg";
+  const path = `photos/${studentId}.${ext}`;
+  const buffer = Buffer.from(await file.arrayBuffer());
+
+  const { error: uploadError } = await supabaseAdmin.storage
+    .from("student-photos")
+    .upload(path, buffer, { contentType: file.type, upsert: true });
+
+  if (uploadError) {
+    console.error("Photo upload error:", uploadError.message);
+    return {
+      success: false,
+      message: "Photo upload failed. Check storage bucket.",
+    };
+  }
+
+  const { error: updateError } = await supabaseAdmin
+    .from("students")
+    .update({ photo_url: path })
+    .eq("id", studentId);
+
+  if (updateError) {
+    return {
+      success: false,
+      message: "Photo uploaded but could not save path to student record.",
+    };
+  }
+
+  revalidatePath("/admin/students");
+  return { success: true, message: "Photo saved.", photo_url: path };
+}
