@@ -1,3 +1,5 @@
+// app/teacher/assess/page.tsx
+
 import { BatchAssessmentGrid } from "@/app/_components/assessment/BatchAssessmentGrid";
 import { getSession } from "@/lib/actions/auth";
 import {
@@ -6,6 +8,7 @@ import {
   type TeacherAllocationSummary,
 } from "@/lib/data/assessment";
 import type { SubjectLevel } from "@/lib/types/allocation";
+import { getActiveTermYear } from "@/lib/utils/settings";
 import { ArrowLeft, BookOpen, ChevronRight, Clock, Users } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -53,18 +56,18 @@ export default async function AssessPage({ searchParams }: PageProps) {
   if (
     !session ||
     (session.profile.role !== "teacher" && session.profile.role !== "admin")
-  ) {
+  )
     redirect("/login");
-  }
 
   const teacherId = session.profile.teacher_id;
-  if (!teacherId) {
-    return <NoTeacherLinked />;
-  }
+  if (!teacherId) return <NoTeacherLinked />;
 
   const { alloc: allocId, term: termParam } = await searchParams;
-  const term = (parseInt(termParam ?? "1", 10) || 1) as 1 | 2 | 3;
-  const academicYear = 2026;
+
+  // Use school settings for default term/year — fallback to calendar heuristic
+  const { term: defaultTerm, academicYear } = await getActiveTermYear();
+  const term = (parseInt(termParam ?? String(defaultTerm), 10) ||
+    defaultTerm) as 1 | 2 | 3;
 
   const allocations = await fetchTeacherAssessmentAllocations(
     teacherId,
@@ -85,7 +88,7 @@ export default async function AssessPage({ searchParams }: PageProps) {
 
   return (
     <main className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      {/* Header */}
       <header>
         <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-3 font-medium">
           <Link
@@ -145,6 +148,7 @@ export default async function AssessPage({ searchParams }: PageProps) {
 
       {selectedAlloc && classData ? (
         <div className="space-y-5">
+          {/* Term tabs */}
           <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 w-fit shadow-sm">
             {([1, 2, 3] as const).map((t) => (
               <Link
@@ -169,6 +173,8 @@ export default async function AssessPage({ searchParams }: PageProps) {
             term={term}
             academicYear={academicYear}
             initialGrid={classData.gridState}
+            prevTermScores={classData.prevTermScores}
+            hasPrevTerm={classData.hasPrevTerm}
           />
         </div>
       ) : (
@@ -184,7 +190,7 @@ export default async function AssessPage({ searchParams }: PageProps) {
   );
 }
 
-// ── Subject picker grid ───────────────────────────────────────────────────────
+// ── Subject picker ────────────────────────────────────────────────────────────
 
 function AllocPicker({
   allocations,
@@ -223,8 +229,7 @@ function AllocPicker({
         <p className="text-sm text-slate-600 leading-relaxed">
           Select a{" "}
           <span className="font-bold text-slate-800">subject and grade</span> to
-          open the assessment spreadsheet for that class. Enter CBC strand
-          scores{" "}
+          open the assessment spreadsheet. Enter CBC strand scores{" "}
           <span className="font-bold text-slate-800">(EE / ME / AE / BE)</span>{" "}
           for all learners at once — results are immediately visible to parents.
         </p>
@@ -248,8 +253,7 @@ function AllocPicker({
                   key={alloc.id}
                   href={`/teacher/assess?alloc=${alloc.id}&term=${currentTerm}`}
                   className={[
-                    "group flex flex-col gap-3 rounded-2xl border p-5 transition-all duration-150",
-                    "active:scale-[0.99] shadow-sm",
+                    "group flex flex-col gap-3 rounded-2xl border p-5 transition-all duration-150 active:scale-[0.99] shadow-sm",
                     style.card,
                   ].join(" ")}
                 >
@@ -295,8 +299,6 @@ function AllocPicker({
     </div>
   );
 }
-
-// ── Error state ───────────────────────────────────────────────────────────────
 
 function NoTeacherLinked() {
   return (

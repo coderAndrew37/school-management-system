@@ -1,25 +1,25 @@
 "use client";
 
+import { useState, useCallback, useTransition, useRef, useEffect } from "react";
+import { toast } from "sonner";
+import {
+  Save,
+  Loader2,
+  ChevronDown,
+  Edit3,
+  X,
+  CheckCircle2,
+} from "lucide-react";
 import {
   batchUpsertAssessmentsAction,
   saveNarrativeAction,
 } from "@/lib/actions/assessment";
+import { getStrands, formatStrand, SCORE_COLORS } from "@/lib/types/assessment";
 import type {
-  AssessmentGridState,
   CbcScore,
+  AssessmentGridState,
   GridStudent,
 } from "@/lib/types/assessment";
-import { formatStrand, getStrands } from "@/lib/types/assessment";
-import {
-  CheckCircle2,
-  ChevronDown,
-  Edit3,
-  Loader2,
-  Save,
-  X,
-} from "lucide-react";
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import { toast } from "sonner";
 
 const SCORES: CbcScore[] = ["EE", "ME", "AE", "BE"];
 
@@ -64,6 +64,8 @@ interface Props {
   term: number;
   academicYear: number;
   initialGrid: AssessmentGridState;
+  prevTermScores: AssessmentGridState | null; // Term N-1 scores for copy-forward
+  hasPrevTerm: boolean; // true if prev term has any scores
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -85,6 +87,8 @@ export function BatchAssessmentGrid({
   term,
   academicYear,
   initialGrid,
+  prevTermScores,
+  hasPrevTerm,
 }: Props) {
   const strands = getStrands(grade, subjectName);
   const [grid, setGrid] = useState<AssessmentGridState>(initialGrid);
@@ -254,6 +258,26 @@ export function BatchAssessmentGrid({
     });
   };
 
+  // ── Copy from previous term ───────────────────────────────────────────────
+  const copyFromPrevTerm = useCallback(() => {
+    if (!prevTermScores) return;
+    setGrid((prev) => {
+      const next = { ...prev };
+      // Only copy into cells that are currently empty
+      for (const [key, cell] of Object.entries(prevTermScores)) {
+        if (!cell.score) continue;
+        // Rekey: prevTermScores uses same key format, same subjectName
+        if (!next[key]?.score) {
+          next[key] = { assessmentId: null, score: cell.score, dirty: true };
+        }
+      }
+      return next;
+    });
+    toast.info(`Copied Term ${term - 1} scores as a starting point`, {
+      duration: 3000,
+    });
+  }, [prevTermScores, term]);
+
   const narrativeCount = students.filter((s) => narratives[s.id]).length;
 
   return (
@@ -272,6 +296,21 @@ export function BatchAssessmentGrid({
               </span>
             ))}
           </div>
+
+          {/* Copy-forward banner */}
+          {hasPrevTerm && term > 1 && (
+            <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+              <span className="text-[11px] text-amber-700 font-semibold">
+                Term {term - 1} scores available
+              </span>
+              <button
+                onClick={copyFromPrevTerm}
+                className="flex items-center gap-1 rounded-lg bg-amber-100 hover:bg-amber-200 border border-amber-200 px-2.5 py-1 text-[10px] font-bold text-amber-800 transition-colors"
+              >
+                Copy as starting point →
+              </button>
+            </div>
+          )}
           {/* Unsaved indicator */}
           {dirtyCount > 0 && (
             <span className="text-[11px] text-amber-600 font-semibold">
@@ -489,7 +528,7 @@ export function BatchAssessmentGrid({
                               <Save className="h-3 w-3" /> Save
                             </button>
                             <button
-                              aria-label="cancel editing"
+                              aria-label="cancel edit"
                               onClick={cancelEdit}
                               className="px-2.5 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-700 text-[10px] transition-colors"
                             >

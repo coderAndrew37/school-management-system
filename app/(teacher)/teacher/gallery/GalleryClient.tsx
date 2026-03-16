@@ -1,10 +1,16 @@
 "use client";
 
 // app/teacher/gallery/GalleryClient.tsx
+// Changes from original:
+//   - academicYear prop added (no more hardcoded 2026)
+//   - bulkUploadGalleryAction used for multi-file upload (parallel, single auth)
+//   - uploadGalleryImageAction used for single-file uploads
+//   - handleUpload rewired to call bulk action directly with File[] array
 
 import { useState, useRef, useTransition, useCallback } from "react";
 import {
   uploadGalleryImageAction,
+  bulkUploadGalleryAction,
   deleteGalleryItemAction,
 } from "@/lib/actions/gallery";
 import type { GalleryItemFull } from "@/lib/actions/gallery";
@@ -21,6 +27,7 @@ interface Props {
   studentsByGrade: Record<string, ClassStudent[]>;
   studentNameMap: Record<string, string>;
   initialItems: (GalleryItemFull & { signedUrl: string })[];
+  academicYear: number; // from school_settings — no more hardcoded 2026
 }
 
 interface PendingFile {
@@ -32,7 +39,7 @@ interface PendingFile {
   errorMsg?: string;
 }
 
-// ── CBC Category options ──────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const CATEGORIES = [
   "Mathematics Activity",
@@ -93,9 +100,8 @@ function audienceBadge(
   item: GalleryItemFull,
   studentNameMap: Record<string, string>,
 ) {
-  if (item.audience === "student" && item.student_id) {
+  if (item.audience === "student" && item.student_id)
     return studentNameMap[item.student_id] ?? "Unknown student";
-  }
   if (item.audience === "class") return item.target_grade ?? "Class";
   return "All parents";
 }
@@ -108,28 +114,31 @@ export default function GalleryClient({
   studentsByGrade,
   studentNameMap,
   initialItems,
+  academicYear,
 }: Props) {
-  // ── Form state ──
+  // Form state
   const [audience, setAudience] = useState<Audience>("class");
   const [selectedGrade, setSelectedGrade] = useState<string>(grades[0] ?? "");
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
   const [category, setCategory] = useState<string>("");
   const [term, setTerm] = useState<string>("");
   const [caption, setCaption] = useState<string>("");
+  const [sharedTitle, setSharedTitle] = useState<string>("");
 
-  // ── File queue ──
+  // File queue
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Gallery display ──
+  // Gallery display
   const [items, setItems] = useState(initialItems);
-  const [lightbox, setLightbox] = useState<string | null>(null); // signedUrl
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const [filterAudience, setFilterAudience] = useState<string>("all");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isUploading, setIsUploading] = useState(false);
 
   const students = studentsByGrade[selectedGrade] ?? [];
 
@@ -138,7 +147,7 @@ export default function GalleryClient({
     setTimeout(() => setToast(null), 4000);
   }
 
-  // ── File handling ──────────────────────────────────────────────────────────
+  // ── File handling ─────────────────────────────────────────────────────────
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const arr = Array.from(files);
@@ -148,22 +157,21 @@ export default function GalleryClient({
     const invalid = arr.filter(
       (f) => !ALLOWED.includes(f.type) || f.size > MAX,
     );
-
-    if (invalid.length > 0) {
+    if (invalid.length > 0)
       showToast(
-        `${invalid.length} file(s) skipped (must be JPEG/PNG/WebP/GIF under 10 MB)`,
+        `${invalid.length} file(s) skipped — must be JPEG/PNG/WebP/GIF under 10 MB`,
         false,
       );
-    }
-
-    const newPending: PendingFile[] = valid.map((file) => ({
-      id: crypto.randomUUID(),
-      file,
-      preview: URL.createObjectURL(file),
-      title: file.name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " "),
-      status: "pending",
-    }));
-    setPendingFiles((prev) => [...prev, ...newPending]);
+    setPendingFiles((prev) => [
+      ...prev,
+      ...valid.map((file) => ({
+        id: crypto.randomUUID(),
+        file,
+        preview: URL.createObjectURL(file),
+        title: file.name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " "),
+        status: "pending" as const,
+      })),
+    ]);
   }, []);
 
   const handleDrop = useCallback(
@@ -183,16 +191,16 @@ export default function GalleryClient({
     });
   };
 
-  const updateTitle = (id: string, title: string) => {
+  const updateTitle = (id: string, title: string) =>
     setPendingFiles((prev) =>
       prev.map((f) => (f.id === id ? { ...f, title } : f)),
     );
-  };
 
   // ── Upload ────────────────────────────────────────────────────────────────
 
   async function handleUpload() {
-    if (pendingFiles.length === 0) {
+    const toUpload = pendingFiles.filter((f) => f.status === "pending");
+    if (toUpload.length === 0) {
       showToast("Please add at least one image.", false);
       return;
     }
@@ -205,57 +213,84 @@ export default function GalleryClient({
       return;
     }
 
-    // Upload each file one by one, updating status as we go
-    for (const pf of pendingFiles) {
-      if (pf.status !== "pending") continue;
+    setIsUploading(true);
+    setPendingFiles((prev) =>
+      prev.map((f) =>
+        f.status === "pending" ? { ...f, status: "uploading" } : f,
+      ),
+    );
 
-      setPendingFiles((prev) =>
-        prev.map((f) => (f.id === pf.id ? { ...f, status: "uploading" } : f)),
-      );
+    const meta = {
+      audience,
+      studentId: audience === "student" ? selectedStudentId : null,
+      targetGrade: audience === "class" ? selectedGrade : null,
+      title: sharedTitle || toUpload[0]?.title || "Gallery",
+      caption: caption || null,
+      category: category || null,
+      term: term ? parseInt(term, 10) : null,
+      academicYear, // from school_settings, not hardcoded
+    };
 
+    if (toUpload.length === 1) {
+      // Single file — use form action for compatibility
+      const pf = toUpload[0]!;
       const fd = new FormData();
-      fd.set("audience", audience);
-      fd.set("studentId", audience === "student" ? selectedStudentId : "");
-      fd.set("targetGrade", audience === "class" ? selectedGrade : "");
-      fd.set("title", pf.title || "Untitled");
-      fd.set("caption", caption);
-      fd.set("category", category);
-      fd.set("term", term);
-      fd.set("academicYear", "2026");
+      fd.set("audience", meta.audience);
+      fd.set("studentId", meta.studentId ?? "");
+      fd.set("targetGrade", meta.targetGrade ?? "");
+      fd.set("title", pf.title || meta.title);
+      fd.set("caption", meta.caption ?? "");
+      fd.set("category", meta.category ?? "");
+      fd.set("term", meta.term != null ? String(meta.term) : "");
+      fd.set("academicYear", String(meta.academicYear));
       fd.set("image", pf.file);
 
       const result = await uploadGalleryImageAction(fd);
+      setPendingFiles((prev) =>
+        prev.map((f) =>
+          f.id === pf.id
+            ? {
+                ...f,
+                status: result.success ? "done" : "error",
+                errorMsg: result.success ? undefined : result.message,
+              }
+            : f,
+        ),
+      );
+      showToast(
+        result.success ? "Image uploaded successfully." : result.message,
+        result.success,
+      );
+    } else {
+      // Multiple files — use bulk action (parallel upload, single auth check)
+      const result = await bulkUploadGalleryAction(
+        toUpload.map((pf) => pf.file),
+        { ...meta, title: sharedTitle || "" },
+      );
 
-      if (result.success) {
-        setPendingFiles((prev) =>
-          prev.map((f) => (f.id === pf.id ? { ...f, status: "done" } : f)),
-        );
-      } else {
-        setPendingFiles((prev) =>
-          prev.map((f) =>
-            f.id === pf.id
-              ? { ...f, status: "error", errorMsg: result.message }
-              : f,
-          ),
-        );
-      }
+      setPendingFiles((prev) =>
+        prev.map((f) =>
+          f.status === "uploading" ? { ...f, status: "done" } : f,
+        ),
+      );
+      showToast(
+        result.success
+          ? `${result.uploaded} image${result.uploaded !== 1 ? "s" : ""} uploaded successfully.`
+          : `${result.uploaded} uploaded, ${result.failed} failed.`,
+        result.success,
+      );
     }
 
-    // Count results
-    const done = pendingFiles.filter((f) => f.status === "pending").length; // those just attempted
-    showToast("Images uploaded. Refresh to see updated gallery.", true);
+    setIsUploading(false);
 
-    // Clear done files after a moment
+    // Clear done files and reload for fresh signed URLs
     setTimeout(() => {
-      setPendingFiles((prev) =>
-        prev.filter((f) => f.status !== "done" && f.status !== "pending"),
-      );
-      // Reload page to get fresh signed URLs
+      setPendingFiles((prev) => prev.filter((f) => f.status !== "done"));
       window.location.reload();
     }, 1500);
   }
 
-  // ── Delete ─────────────────────────────────────────────────────────────────
+  // ── Delete ────────────────────────────────────────────────────────────────
 
   function handleDelete(id: string) {
     startTransition(async () => {
@@ -270,18 +305,18 @@ export default function GalleryClient({
     });
   }
 
-  // ── Filtered gallery ───────────────────────────────────────────────────────
+  const filtered = items.filter(
+    (i) => filterAudience === "all" || i.audience === filterAudience,
+  );
+  const pendingCount = pendingFiles.filter(
+    (f) => f.status === "pending",
+  ).length;
 
-  const filtered = items.filter((i) => {
-    if (filterAudience !== "all" && i.audience !== filterAudience) return false;
-    return true;
-  });
-
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-[#F8F7F2]">
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="bg-white border-b border-slate-200 px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div>
@@ -289,7 +324,7 @@ export default function GalleryClient({
               Learning Gallery
             </h1>
             <p className="text-sm text-slate-500 mt-0.5">
-              {teacherName} · CBC Evidence & Activities
+              {teacherName} · CBC Evidence &amp; Activities · {academicYear}
             </p>
           </div>
           <a
@@ -317,7 +352,7 @@ export default function GalleryClient({
       {/* Toast */}
       {toast && (
         <div
-          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-medium shadow-lg transition-all ${toast.ok ? "bg-emerald-600 text-white" : "bg-red-500 text-white"}`}
+          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-medium shadow-lg ${toast.ok ? "bg-emerald-600 text-white" : "bg-red-500 text-white"}`}
         >
           {toast.msg}
         </div>
@@ -418,7 +453,7 @@ export default function GalleryClient({
             </div>
           </div>
 
-          {/* Context selectors (grade / student) */}
+          {/* Context selectors */}
           <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
             {(audience === "class" || audience === "student") && (
               <div>
@@ -463,7 +498,22 @@ export default function GalleryClient({
               </div>
             )}
 
-            {/* Category */}
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">
+                Shared Title{" "}
+                <span className="font-normal text-slate-400">
+                  (optional — overrides per-file names)
+                </span>
+              </label>
+              <input
+                type="text"
+                value={sharedTitle}
+                onChange={(e) => setSharedTitle(e.target.value)}
+                placeholder="e.g. Science Fair 2026"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400 placeholder-slate-300"
+              />
+            </div>
+
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">
                 Category
@@ -483,7 +533,6 @@ export default function GalleryClient({
               </select>
             </div>
 
-            {/* Term */}
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">
                 Term
@@ -501,7 +550,6 @@ export default function GalleryClient({
               </div>
             </div>
 
-            {/* Caption */}
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">
                 Caption{" "}
@@ -636,25 +684,43 @@ export default function GalleryClient({
               <div className="px-4 py-3 bg-slate-50 border-t border-slate-100">
                 <button
                   onClick={handleUpload}
-                  disabled={
-                    isPending ||
-                    pendingFiles.every((f) => f.status !== "pending")
-                  }
-                  className="w-full py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                  disabled={isUploading || pendingCount === 0}
+                  className="w-full py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                 >
-                  Upload{" "}
-                  {pendingFiles.filter((f) => f.status === "pending").length}{" "}
-                  image
-                  {pendingFiles.filter((f) => f.status === "pending").length !==
-                  1
-                    ? "s"
-                    : ""}
+                  {isUploading ? (
+                    <>
+                      <svg
+                        className="w-4 h-4 animate-spin"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        />
+                      </svg>{" "}
+                      Uploading {pendingCount} image
+                      {pendingCount !== 1 ? "s" : ""}…
+                    </>
+                  ) : (
+                    <>
+                      Upload {pendingCount} image{pendingCount !== 1 ? "s" : ""}
+                    </>
+                  )}
                 </button>
               </div>
             </div>
           )}
 
-          {/* Info box */}
           <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
             <p className="text-xs text-amber-700 leading-relaxed">
               <strong>CBC Evidence:</strong> Images go live on the parent portal
@@ -666,7 +732,6 @@ export default function GalleryClient({
 
         {/* ── RIGHT: Gallery grid ── */}
         <div className="space-y-4">
-          {/* Filter bar */}
           <div className="bg-white rounded-xl border border-slate-200 px-4 py-3 flex items-center gap-3 flex-wrap">
             <span className="text-xs font-medium text-slate-400 uppercase tracking-wide">
               Show:
@@ -687,7 +752,6 @@ export default function GalleryClient({
             </span>
           </div>
 
-          {/* Grid */}
           {filtered.length === 0 ? (
             <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
               <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-100 flex items-center justify-center">
@@ -719,7 +783,6 @@ export default function GalleryClient({
                     key={item.id}
                     className="group relative bg-white rounded-xl border border-slate-200 overflow-hidden hover:border-slate-300 hover:shadow-sm transition-all"
                   >
-                    {/* Image */}
                     <div
                       className="aspect-square bg-slate-100 cursor-pointer overflow-hidden"
                       onClick={() =>
@@ -751,8 +814,6 @@ export default function GalleryClient({
                         </div>
                       )}
                     </div>
-
-                    {/* Audience badge */}
                     <div
                       className={`absolute top-2 left-2 px-2 py-0.5 rounded-full text-xs font-medium ${audCfg.bg} ${audCfg.color} border ${audCfg.border} border-opacity-30`}
                     >
@@ -762,8 +823,6 @@ export default function GalleryClient({
                           ? (item.target_grade ?? "Class")
                           : "Student"}
                     </div>
-
-                    {/* Delete button (appears on hover) */}
                     <button
                       aria-label="delete image"
                       onClick={() => setConfirmDelete(item.id)}
@@ -783,8 +842,6 @@ export default function GalleryClient({
                         />
                       </svg>
                     </button>
-
-                    {/* Info */}
                     <div className="px-3 py-2">
                       <p className="text-xs font-medium text-slate-700 truncate">
                         {item.title}

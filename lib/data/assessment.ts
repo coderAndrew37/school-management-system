@@ -1,6 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { SubjectLevel } from "@/lib/types/allocation";
-import type { CbcScore } from "@/lib/types/assessment";
+import type { CbcScore, AssessmentGridState } from "@/lib/types/assessment";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -22,19 +22,11 @@ export interface ClassStudent {
   current_grade: string;
 }
 
-// Updated to match the "Flat Key" requirement of the UI Grid
-export interface AssessmentCell {
-  assessmentId: string | null;
-  score: CbcScore | null;
-  dirty: boolean;
-}
-
-// Key format: `${studentId}:${subjectName}:${strandId}`
-export type AssessmentGridState = Record<string, AssessmentCell>;
-
 export interface ClassAssessmentData {
   students: ClassStudent[];
-  gridState: AssessmentGridState;
+  gridState: AssessmentGridState; // flat: `${studentId}:${subjectName}:${strandId}`
+  prevTermScores: AssessmentGridState | null; // flat grid from the previous term, null if none
+  hasPrevTerm: boolean; // true when prevTermScores has at least one score
 }
 
 export interface TeacherDiaryEntry {
@@ -98,17 +90,29 @@ async function fetchStudentCountsByGrade(
     .select("current_grade")
     .in("current_grade", grades);
   const counts: Record<string, number> = {};
-  for (const row of (data ?? []) as { current_grade: string }[]) {
+  for (const row of (data ?? []) as { current_grade: string }[])
     counts[row.current_grade] = (counts[row.current_grade] ?? 0) + 1;
-  }
   return counts;
+}
+
+/** Build a flat AssessmentGridState from raw DB rows.
+ *  Key format: `${studentId}:${subjectName}:${strandId}` — matches BatchAssessmentGrid. */
+function buildGridState(
+  rows: { student_id: string; strand_id: string; score: CbcScore | null }[],
+  subjectName: string,
+  dirty = false,
+): AssessmentGridState {
+  const grid: AssessmentGridState = {};
+  for (const row of rows) {
+    if (!row.score) continue;
+    const key = `${row.student_id}:${subjectName}:${row.strand_id}`;
+    grid[key] = { assessmentId: null, score: row.score, dirty };
+  }
+  return grid;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/**
- * All allocations for a teacher, enriched with student counts.
- */
 export async function fetchTeacherAssessmentAllocations(
   teacherId: string,
   academicYear = 2026,
@@ -148,8 +152,10 @@ export async function fetchTeacherAssessmentAllocations(
 }
 
 /**
- * All students + existing assessments for one class/subject/term.
- * Builds the flat grid state keyed by "studentId:subjectName:strandId".
+ * Fetch students + their existing assessments for one class/subject/term.
+ * Also fetches the previous term's scores so the grid can offer copy-forward.
+ *
+ * Grid state key format: `${studentId}:${subjectName}:${strandId}`
  */
 export async function fetchClassAssessments(
   grade: string,
@@ -158,38 +164,58 @@ export async function fetchClassAssessments(
   academicYear = 2026,
 ): Promise<ClassAssessmentData> {
   const supabase = await createSupabaseServerClient();
+  const prevTerm = term > 1 ? ((term - 1) as 1 | 2) : null;
 
-  const [{ data: students }, { data: assessments }] = await Promise.all([
+  type AssessRow = {
+    student_id: string;
+    strand_id: string;
+    score: CbcScore | null;
+  };
+
+  // Three-way parallel fetch.
+  // prevTerm slot resolves to empty array when term === 1 to avoid the
+  // PostgrestFilterBuilder-is-not-a-Promise type error from a dynamic queries array.
+  const [studentsRes, currentRes, prevRes] = await Promise.all([
     supabase
       .from("students")
       .select("id, full_name, readable_id, gender, current_grade")
       .eq("current_grade", grade)
+      .eq("status", "active")
       .order("full_name")
       .returns<ClassStudent[]>(),
 
     supabase
       .from("assessments")
-      .select("id, student_id, strand_id, score")
+      .select("student_id, strand_id, score")
       .eq("subject_name", subjectName)
       .eq("term", term)
       .eq("academic_year", academicYear),
+
+    prevTerm
+      ? supabase
+          .from("assessments")
+          .select("student_id, strand_id, score")
+          .eq("subject_name", subjectName)
+          .eq("term", prevTerm)
+          .eq("academic_year", academicYear)
+      : Promise.resolve({ data: [] as AssessRow[], error: null }),
   ]);
 
-  const gridState: AssessmentGridState = {};
+  const students = (studentsRes.data ?? []) as ClassStudent[];
+  const assessments = (currentRes.data ?? []) as AssessRow[];
+  const prevAssessments = (prevRes.data ?? []) as AssessRow[];
 
-  // Map database rows to the flat grid state format
-  for (const row of (assessments ?? []) as any[]) {
-    const key = `${row.student_id}:${subjectName}:${row.strand_id}`;
-    gridState[key] = {
-      assessmentId: row.id,
-      score: row.score as CbcScore,
-      dirty: false,
-    };
-  }
+  const gridState = buildGridState(assessments, subjectName, false);
+  const prevTermScores = prevTerm
+    ? buildGridState(prevAssessments, subjectName, false)
+    : null;
 
   return {
-    students: (students ?? []) as ClassStudent[],
+    students,
     gridState,
+    prevTermScores,
+    hasPrevTerm:
+      prevTerm !== null && Object.keys(prevTermScores ?? {}).length > 0,
   };
 }
 
@@ -204,9 +230,9 @@ export async function fetchClassStudents(
     .from("students")
     .select("id, full_name, readable_id, gender, current_grade")
     .eq("current_grade", grade)
+    .eq("status", "active")
     .order("full_name")
     .returns<ClassStudent[]>();
-
   if (error) {
     console.error("[fetchClassStudents]", error.message);
     return [];
@@ -214,18 +240,13 @@ export async function fetchClassStudents(
   return data ?? [];
 }
 
-/**
- * Attendance records for a class on a specific date.
- */
 export async function fetchClassAttendance(
   grade: string,
   date: string,
 ): Promise<AttendanceRecord[]> {
   const supabase = await createSupabaseServerClient();
-
   const students = await fetchClassStudents(grade);
   if (students.length === 0) return [];
-
   const { data, error } = await supabase
     .from("attendance")
     .select("id, student_id, status, date, remarks")
@@ -235,7 +256,6 @@ export async function fetchClassAttendance(
     )
     .eq("date", date)
     .returns<AttendanceRecord[]>();
-
   if (error) {
     console.error("[fetchClassAttendance]", error.message);
     return [];
@@ -243,29 +263,21 @@ export async function fetchClassAttendance(
   return data ?? [];
 }
 
-/**
- * Recent diary entries across all grades this teacher covers.
- */
 export async function fetchTeacherDiaryEntries(
   grades: string[],
   limit = 20,
 ): Promise<TeacherDiaryEntry[]> {
   if (grades.length === 0) return [];
   const supabase = await createSupabaseServerClient();
-
   const { data: studentRows } = await supabase
     .from("students")
     .select("id, full_name, current_grade")
     .in("current_grade", grades);
-
   const studentMap: Record<string, { name: string; grade: string }> = {};
-  for (const s of (studentRows ?? []) as any[]) {
+  for (const s of (studentRows ?? []) as any[])
     studentMap[s.id] = { name: s.full_name, grade: s.current_grade };
-  }
-
   const studentIds = Object.keys(studentMap);
   if (studentIds.length === 0) return [];
-
   const { data, error } = await supabase
     .from("student_diary")
     .select(
@@ -274,12 +286,10 @@ export async function fetchTeacherDiaryEntries(
     .in("student_id", studentIds)
     .order("created_at", { ascending: false })
     .limit(limit);
-
   if (error) {
     console.error("[fetchTeacherDiaryEntries]", error.message);
     return [];
   }
-
   return (data ?? []).map((row) => ({
     id: row.id,
     student_id: row.student_id,

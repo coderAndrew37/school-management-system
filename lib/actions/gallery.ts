@@ -3,14 +3,9 @@
 // lib/actions/gallery.ts
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createClient } from "@supabase/supabase-js";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
 
 export interface GalleryActionResult {
   success: boolean;
@@ -32,7 +27,81 @@ const gallerySchema = z.object({
   academicYear: z.coerce.number().int().default(2026),
 });
 
-// ── Upload single image ───────────────────────────────────────────────────────
+const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+
+// ── Core upload — extracts shared logic used by both single + bulk ────────────
+
+async function uploadOneImage(
+  userId: string,
+  file: File,
+  meta: {
+    audience: "student" | "class" | "school";
+    studentId: string | null;
+    targetGrade: string | null;
+    title: string;
+    caption: string | null;
+    category: string | null;
+    term: number | null;
+    academicYear: number;
+  },
+): Promise<GalleryActionResult> {
+  if (!ALLOWED_TYPES.includes(file.type))
+    return {
+      success: false,
+      message: "Only JPEG, PNG, WebP, or GIF images are allowed.",
+    };
+  if (file.size > MAX_SIZE)
+    return { success: false, message: "Image must be under 10 MB." };
+
+  const supabase = await createSupabaseServerClient();
+
+  const ext = file.name.split(".").pop() ?? "jpg";
+  const fileName = `${userId}/${crypto.randomUUID()}.${ext}`;
+  const buffer = await file.arrayBuffer();
+
+  const { error: uploadError } = await supabaseAdmin.storage
+    .from("gallery")
+    .upload(fileName, buffer, { contentType: file.type, upsert: false });
+
+  if (uploadError) {
+    console.error("[gallery] storage upload:", uploadError.message);
+    return { success: false, message: `Upload failed: ${uploadError.message}` };
+  }
+
+  const { data: inserted, error: dbError } = await supabase
+    .from("talent_gallery")
+    .insert({
+      teacher_id: userId,
+      student_id: meta.audience === "student" ? meta.studentId : null,
+      target_grade: meta.audience === "class" ? meta.targetGrade : null,
+      audience: meta.audience,
+      title: meta.title,
+      caption: meta.caption ?? null,
+      category: meta.category ?? null,
+      term: meta.term ?? null,
+      academic_year: meta.academicYear,
+      media_url: fileName,
+    })
+    .select("id")
+    .single();
+
+  if (dbError) {
+    console.error("[gallery] db insert:", dbError.message);
+    // Best-effort storage cleanup
+    await supabaseAdmin.storage.from("gallery").remove([fileName]);
+    return { success: false, message: "Failed to save gallery record." };
+  }
+
+  return {
+    success: true,
+    message: "Uploaded.",
+    id: inserted.id,
+    imageUrl: fileName,
+  };
+}
+
+// ── Single image upload (form action) ────────────────────────────────────────
 
 export async function uploadGalleryImageAction(
   formData: FormData,
@@ -43,7 +112,6 @@ export async function uploadGalleryImageAction(
   } = await supabase.auth.getUser();
   if (!user) return { success: false, message: "Not authenticated." };
 
-  // Validate metadata
   const raw = {
     audience: formData.get("audience"),
     studentId: formData.get("studentId") || null,
@@ -56,12 +124,11 @@ export async function uploadGalleryImageAction(
   };
 
   const parsed = gallerySchema.safeParse(raw);
-  if (!parsed.success) {
+  if (!parsed.success)
     return {
       success: false,
       message: parsed.error.issues[0]?.message ?? "Invalid input",
     };
-  }
 
   const {
     audience,
@@ -74,103 +141,40 @@ export async function uploadGalleryImageAction(
     academicYear,
   } = parsed.data;
 
-  // Validate audience-specific requirements
-  if (audience === "student" && !studentId) {
+  if (audience === "student" && !studentId)
     return {
       success: false,
       message: "A student must be selected for student-specific posts.",
     };
-  }
-  if (audience === "class" && !targetGrade) {
+  if (audience === "class" && !targetGrade)
     return {
       success: false,
       message: "A grade must be selected for class-wide posts.",
     };
-  }
 
-  // Get the image file
   const file = formData.get("image") as File | null;
-  if (!file || file.size === 0) {
+  if (!file || file.size === 0)
     return { success: false, message: "No image provided." };
+
+  const result = await uploadOneImage(user.id, file, {
+    audience,
+    studentId: studentId ?? null,
+    targetGrade: targetGrade ?? null,
+    title,
+    caption: caption ?? null,
+    category: category ?? null,
+    term: term ?? null,
+    academicYear,
+  });
+
+  if (result.success) {
+    revalidatePath("/teacher/gallery");
+    revalidatePath("/parent");
   }
-
-  // Validate file
-  const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-  const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
-
-  if (!ALLOWED_TYPES.includes(file.type)) {
-    return {
-      success: false,
-      message: "Only JPEG, PNG, WebP, or GIF images are allowed.",
-    };
-  }
-  if (file.size > MAX_SIZE_BYTES) {
-    return { success: false, message: "Image must be under 10 MB." };
-  }
-
-  // ── Upload to Supabase Storage ──────────────────────────────────────────────
-  const ext = file.name.split(".").pop() ?? "jpg";
-  const fileName = `${user.id}/${crypto.randomUUID()}.${ext}`;
-  const arrayBuffer = await file.arrayBuffer();
-
-  const { error: uploadError } = await supabaseAdmin.storage
-    .from("gallery")
-    .upload(fileName, arrayBuffer, {
-      contentType: file.type,
-      upsert: false,
-    });
-
-  if (uploadError) {
-    console.error(
-      "[uploadGalleryImageAction] storage upload error:",
-      uploadError.message,
-    );
-    return { success: false, message: `Upload failed: ${uploadError.message}` };
-  }
-
-  // Get the storage path (not a public URL — we'll generate signed URLs on read)
-  const storagePath = fileName;
-
-  // ── Insert DB record ────────────────────────────────────────────────────────
-  const { data: inserted, error: dbError } = await supabase
-    .from("talent_gallery")
-    .insert({
-      teacher_id: user.id,
-      student_id: audience === "student" ? studentId : null,
-      target_grade: audience === "class" ? targetGrade : null,
-      audience,
-      title,
-      caption: caption ?? null,
-      category: category ?? null,
-      term: term ?? null,
-      academic_year: academicYear,
-      media_url: storagePath, // store path; app generates signed URL on read
-    })
-    .select("id")
-    .single();
-
-  if (dbError) {
-    console.error(
-      "[uploadGalleryImageAction] db insert error:",
-      dbError.message,
-    );
-    // Attempt to clean up the uploaded file
-    await supabaseAdmin.storage.from("gallery").remove([storagePath]);
-    return { success: false, message: "Failed to save gallery record." };
-  }
-
-  revalidatePath("/teacher/gallery");
-  revalidatePath("/parent");
-
-  return {
-    success: true,
-    message: "Image uploaded successfully.",
-    id: inserted.id,
-    imageUrl: storagePath,
-  };
+  return result;
 }
 
-// ── Bulk upload (multiple images at once) ────────────────────────────────────
+// ── Bulk upload — all files in parallel (no serial re-auth per file) ──────────
 
 export async function bulkUploadGalleryAction(
   files: File[],
@@ -202,32 +206,39 @@ export async function bulkUploadGalleryAction(
       message: "Not authenticated.",
     };
 
-  let uploaded = 0;
-  let failed = 0;
+  const meta = {
+    audience: metadata.audience,
+    studentId: metadata.studentId ?? null,
+    targetGrade: metadata.targetGrade ?? null,
+    title: metadata.title,
+    caption: metadata.caption ?? null,
+    category: metadata.category ?? null,
+    term: metadata.term ?? null,
+    academicYear: metadata.academicYear ?? 2026,
+  };
 
-  for (const file of files) {
-    const fd = new FormData();
-    fd.set("audience", metadata.audience);
-    fd.set("studentId", metadata.studentId ?? "");
-    fd.set("targetGrade", metadata.targetGrade ?? "");
-    fd.set("title", metadata.title || file.name.replace(/\.[^.]+$/, ""));
-    fd.set("caption", metadata.caption ?? "");
-    fd.set("category", metadata.category ?? "");
-    fd.set("term", String(metadata.term ?? ""));
-    fd.set("academicYear", String(metadata.academicYear ?? 2026));
-    fd.set("image", file);
+  // Upload all files in parallel — single auth check above, no per-file re-auth
+  const results = await Promise.all(
+    files.map((file) =>
+      uploadOneImage(user.id, file, {
+        ...meta,
+        // Per-file title: use file name if shared title is generic
+        title:
+          metadata.title ||
+          file.name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " "),
+      }),
+    ),
+  );
 
-    const result = await uploadGalleryImageAction(fd);
-    if (result.success) {
-      uploaded++;
-    } else {
-      failed++;
-      console.error(
-        "[bulkUploadGalleryAction] file failed:",
-        file.name,
-        result.message,
+  const uploaded = results.filter((r) => r.success).length;
+  const failed = results.filter((r) => !r.success).length;
+
+  if (failed > 0) {
+    results
+      .filter((r) => !r.success)
+      .forEach((r, i) =>
+        console.error(`[bulkUpload] file ${i} failed:`, r.message),
       );
-    }
   }
 
   revalidatePath("/teacher/gallery");
@@ -237,11 +248,11 @@ export async function bulkUploadGalleryAction(
     success: failed === 0,
     uploaded,
     failed,
-    message: `${uploaded} uploaded, ${failed} failed.`,
+    message: `${uploaded} uploaded${failed > 0 ? `, ${failed} failed` : ""}.`,
   };
 }
 
-// ── Delete gallery item ───────────────────────────────────────────────────────
+// ── Delete ────────────────────────────────────────────────────────────────────
 
 export async function deleteGalleryItemAction(
   itemId: string,
@@ -252,39 +263,31 @@ export async function deleteGalleryItemAction(
   } = await supabase.auth.getUser();
   if (!user) return { success: false, message: "Not authenticated." };
 
-  // Get the item first (to retrieve storage path)
   const { data: item, error: fetchErr } = await supabase
     .from("talent_gallery")
     .select("id, media_url, teacher_id")
     .eq("id", itemId)
     .single();
 
-  if (fetchErr || !item) {
-    return { success: false, message: "Item not found." };
-  }
+  if (fetchErr || !item) return { success: false, message: "Item not found." };
 
-  // Soft-delete in DB
   const { error: delErr } = await supabase
     .from("talent_gallery")
     .update({ deleted_at: new Date().toISOString() })
     .eq("id", itemId);
 
-  if (delErr) {
-    return { success: false, message: "Failed to delete item." };
-  }
+  if (delErr) return { success: false, message: "Failed to delete item." };
 
-  // Remove from storage (best-effort, don't fail if it errors)
-  if (item.media_url) {
+  // Best-effort storage cleanup
+  if (item.media_url)
     await supabaseAdmin.storage.from("gallery").remove([item.media_url]);
-  }
 
   revalidatePath("/teacher/gallery");
   revalidatePath("/parent");
-
   return { success: true, message: "Image deleted." };
 }
 
-// ── Generate signed URL for reading ──────────────────────────────────────────
+// ── Signed URL ────────────────────────────────────────────────────────────────
 
 export async function getSignedGalleryUrl(
   storagePath: string,
@@ -293,16 +296,14 @@ export async function getSignedGalleryUrl(
   const { data, error } = await supabaseAdmin.storage
     .from("gallery")
     .createSignedUrl(storagePath, expiresInSeconds);
-
   if (error) {
-    console.error("[getSignedGalleryUrl] error:", error.message);
+    console.error("[getSignedGalleryUrl]", error.message);
     return null;
   }
-
   return data.signedUrl;
 }
 
-// ── Fetch gallery items for teacher ──────────────────────────────────────────
+// ── Fetch teacher's gallery ───────────────────────────────────────────────────
 
 export interface GalleryItemFull {
   id: string;
@@ -312,13 +313,12 @@ export interface GalleryItemFull {
   title: string;
   caption: string | null;
   category: string | null;
-  media_url: string; // storage path
-  signedUrl?: string; // hydrated after fetch
+  media_url: string;
+  signedUrl?: string;
   term: number | null;
   academic_year: number;
   teacher_id: string | null;
   created_at: string;
-  // joined
   student_name?: string;
 }
 
@@ -327,7 +327,6 @@ export async function fetchTeacherGallery(
   limit = 60,
 ): Promise<GalleryItemFull[]> {
   const supabase = await createSupabaseServerClient();
-
   const { data, error } = await supabase
     .from("talent_gallery")
     .select(
@@ -337,11 +336,9 @@ export async function fetchTeacherGallery(
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(limit);
-
   if (error) {
-    console.error("[fetchTeacherGallery] error:", error.message);
+    console.error("[fetchTeacherGallery]", error.message);
     return [];
   }
-
   return (data ?? []) as GalleryItemFull[];
 }
