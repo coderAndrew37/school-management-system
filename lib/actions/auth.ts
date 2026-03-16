@@ -1,19 +1,24 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { Profile } from "@/lib/types/auth";
+import { createClient } from "@supabase/supabase-js";
 import {
-  forgotPasswordSchema,
   loginSchema,
+  forgotPasswordSchema,
   resetPasswordSchema,
   ROLE_ROUTES,
 } from "@/lib/types/auth";
-import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import type { Profile, UserRole } from "@/lib/types/auth";
 import { resolveAllRoles, resolvePrimaryRole } from "./auth-utils";
-import { supabaseAdmin } from "../supabase/admin";
+import { sendPasswordResetEmail } from "../mail";
 
 // Admin client — needed to update parents table after password set
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+);
 
 export interface AuthActionResult {
   success: boolean;
@@ -92,7 +97,7 @@ export async function loginAction(
     }
   }
 
-  revalidatePath("/admin", "layout");
+  revalidatePath("/", "layout");
 
   return {
     success: true,
@@ -106,7 +111,7 @@ export async function loginAction(
 export async function logoutAction(): Promise<void> {
   const supabase = await createSupabaseServerClient();
   await supabase.auth.signOut();
-  revalidatePath("/admin", "layout");
+  revalidatePath("/", "layout");
   redirect("/login");
 }
 
@@ -116,7 +121,6 @@ export async function forgotPasswordAction(
   formData: FormData,
 ): Promise<AuthActionResult> {
   const raw = { email: formData.get("email") };
-
   const parsed = forgotPasswordSchema.safeParse(raw);
   if (!parsed.success) {
     return {
@@ -125,24 +129,53 @@ export async function forgotPasswordAction(
     };
   }
 
-  const supabase = await createSupabaseServerClient();
+  const email = parsed.data.email;
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
-  const { error } = await supabase.auth.resetPasswordForEmail(
-    parsed.data.email,
-    { redirectTo: `${siteUrl}/auth/confirm` },
-  );
+  // Generate a recovery link via the admin client so we can send our own
+  // branded Resend email instead of Supabase's default template.
+  // The link uses the Fragment (Format B) token flow handled by /auth/confirm.
+  const { data: linkData, error: linkError } =
+    await supabaseAdmin.auth.admin.generateLink({
+      type: "recovery",
+      email,
+      options: { redirectTo: `${siteUrl}/auth/confirm` },
+    });
 
-  if (error) {
-    console.error("forgotPassword error:", error.message);
-  }
-
-  // Always respond the same way — never reveal whether the email exists
-  return {
+  // Always respond identically — never reveal whether the address exists.
+  const SAFE_RESPONSE: AuthActionResult = {
     success: true,
     message:
       "If an account with that email exists, you will receive a reset link within a few minutes.",
   };
+
+  if (linkError || !linkData?.properties?.action_link) {
+    if (linkError)
+      console.error("[forgotPassword] generateLink error:", linkError.message);
+    return SAFE_RESPONSE;
+  }
+
+  // Fetch display name for a personalised email (best-effort)
+  let recipientName = email.split("@")[0] ?? "there";
+  try {
+    const { data: profileRow } = await supabaseAdmin
+      .from("profiles")
+      .select("full_name")
+      .eq("id", linkData.user.id)
+      .maybeSingle();
+    if (profileRow?.full_name) recipientName = profileRow.full_name;
+  } catch {
+    /* non-blocking — proceed without name */
+  }
+
+  await sendPasswordResetEmail({
+    recipientEmail: email,
+    recipientName,
+    resetLink: linkData.properties.action_link,
+    isFirstSetup: false,
+  });
+
+  return SAFE_RESPONSE;
 }
 
 // ── Reset password (called from /auth/reset-password after invite link) ───────
@@ -214,7 +247,7 @@ export async function resetPasswordAction(
   const primaryRole = resolvePrimaryRole(profile);
   const destination = ROLE_ROUTES[primaryRole] ?? "/parent/portal";
 
-  revalidatePath("/admin", "layout");
+  revalidatePath("/", "layout");
 
   // Return the destination — the client (reset-password page) handles the
   // toast then navigates. Parent is ALREADY logged in — no second login needed.

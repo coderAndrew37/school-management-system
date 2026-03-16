@@ -413,6 +413,95 @@ export async function sendAllocationEmail({
   }
 }
 
+// ── Password reset email ──────────────────────────────────────────────────────
+
+export interface PasswordResetEmailParams {
+  recipientEmail: string;
+  recipientName: string;
+  resetLink: string;
+  isFirstSetup?: boolean; // true = first-time parent/teacher setup, false = forgot password
+}
+
+export async function sendPasswordResetEmail({
+  recipientEmail,
+  recipientName,
+  resetLink,
+  isFirstSetup = false,
+}: PasswordResetEmailParams): Promise<{ success: boolean; error?: unknown }> {
+  const firstName = recipientName.split(" ")[0] ?? recipientName;
+
+  const body = isFirstSetup
+    ? `
+    <p style="margin:0 0 16px;">Dear <strong>${recipientName}</strong>,</p>
+    <p style="margin:0 0 16px;color:#4a5568;">
+      Your Kibali Academy account has been created. Use the button below to set
+      your password and access the portal.
+    </p>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px;margin:24px 0;text-align:center;">
+      <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#1a202c;">Set Your Password</p>
+      <p style="margin:0 0 20px;font-size:12px;color:#a0aec0;">⏱ This link expires in <strong>24 hours</strong></p>
+      ${ctaButton(resetLink, "Set My Password →")}
+      <p style="margin:12px 0 0;font-size:11px;color:#cbd5e0;word-break:break-all;">${resetLink}</p>
+    </div>
+    <p style="margin:0;font-size:13px;color:#a0aec0;">
+      🔒 Never share this link. It is unique to your account.
+      If you did not request this, please ignore it or contact the school office.
+    </p>`
+    : `
+    <p style="margin:0 0 16px;">Hello <strong>${firstName}</strong>,</p>
+    <p style="margin:0 0 16px;color:#4a5568;">
+      We received a request to reset the password for your Kibali Academy account.
+      Click the button below to choose a new password.
+    </p>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px;margin:24px 0;text-align:center;">
+      <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#1a202c;">Reset Your Password</p>
+      <p style="margin:0 0 20px;font-size:12px;color:#a0aec0;">⏱ This link expires in <strong>1 hour</strong></p>
+      ${ctaButton(resetLink, "Reset My Password →")}
+      <p style="margin:12px 0 0;font-size:11px;color:#cbd5e0;word-break:break-all;">${resetLink}</p>
+    </div>
+    <div style="background:#fffbeb;border:1px solid #fef3c7;border-radius:10px;padding:14px 18px;margin:16px 0;">
+      <p style="margin:0;font-size:13px;color:#92400e;">
+        🔒 <strong>Didn't request this?</strong> Your account is safe —
+        simply ignore this email. No changes will be made.
+      </p>
+    </div>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 18px;margin:0;">
+      <p style="margin:0 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#a0aec0;">Need help?</p>
+      <p style="margin:0;font-size:13px;color:#718096;line-height:1.6;">
+        Visit the school office and a staff member can reset your account in person.
+        No email required.
+      </p>
+    </div>`;
+
+  try {
+    const { error } = await resend.emails.send({
+      from: `Kibali Academy <${SENDER_EMAIL}>`,
+      to: resolveRecipient(recipientEmail),
+      subject: isFirstSetup
+        ? "Set Up Your Kibali Academy Account"
+        : "Reset Your Kibali Academy Password",
+      html: buildEmail({
+        previewText: isFirstSetup
+          ? "Your Kibali Academy account is ready — set your password to get started."
+          : `Hi ${firstName}, here is your password reset link for Kibali Academy.`,
+        headerBg: "#f59e0b",
+        headerLabel: isFirstSetup ? "Account Setup" : "Password Reset",
+        headerSubtitle: "Kibali Academy · School Portal",
+        body,
+      }),
+    });
+
+    if (error) {
+      console.error("sendPasswordResetEmail error:", error);
+      return { success: false, error };
+    }
+    return { success: true };
+  } catch (err) {
+    console.error("sendPasswordResetEmail crash:", err);
+    return { success: false, error: err };
+  }
+}
+
 // ── Broadcast engine ──────────────────────────────────────────────────────────
 
 export interface BroadcastEmailParams {
@@ -502,14 +591,14 @@ export async function broadcastEmail({
 
 // ── Audience resolver ─────────────────────────────────────────────────────────
 
-import { createServerClient } from "@/lib/supabase/client";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type RecipientRow = { id: string; full_name: string; email: string };
 
 export async function resolveAudienceRecipients(
   audience: AudienceSelection,
 ): Promise<SingleRecipient[]> {
-  const supabase = createServerClient();
+  const supabase = await createSupabaseServerClient();
 
   switch (audience.type) {
     case "single_teacher":
