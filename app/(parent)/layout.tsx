@@ -1,6 +1,6 @@
 "use client";
 
-// app/parent/layout.tsx — updated with Notices + Events nav items
+// app/parent/layout.tsx
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
@@ -16,6 +16,7 @@ import {
   School,
   Bell,
   CalendarDays,
+  FileText,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -27,17 +28,18 @@ const NAV_ITEMS = [
   { label: "Messages", href: "/parent/messages", icon: MessageSquare },
   { label: "Gallery", href: "/parent/gallery", icon: Image },
   { label: "Academics", href: "/parent/academics", icon: GraduationCap },
+  { label: "Reports", href: "/parent/reports", icon: FileText },
   { label: "Fees", href: "/parent/fees", icon: Wallet },
   { label: "Pathway", href: "/parent/pathway", icon: Compass },
 ];
 
-// Bottom nav shows 5 most-used items on mobile
+// Bottom nav — 5 most-used items on mobile
 const BOTTOM_NAV = [
   { label: "Home", href: "/parent", icon: LayoutDashboard },
   { label: "Notices", href: "/parent/announcements", icon: Bell },
   { label: "Diary", href: "/parent/diary", icon: BookOpen },
   { label: "Messages", href: "/parent/messages", icon: MessageSquare },
-  { label: "Academics", href: "/parent/academics", icon: GraduationCap },
+  { label: "Reports", href: "/parent/reports", icon: FileText },
 ];
 
 export default function ParentLayout({
@@ -85,7 +87,11 @@ export default function ParentLayout({
                 ].join(" ")}
               >
                 <Icon
-                  className={`h-4 w-4 shrink-0 ${active ? "text-white" : "text-slate-400 group-hover:text-slate-600"}`}
+                  className={`h-4 w-4 shrink-0 ${
+                    active
+                      ? "text-white"
+                      : "text-slate-400 group-hover:text-slate-600"
+                  }`}
                 />
                 {label}
               </Link>
@@ -93,7 +99,6 @@ export default function ParentLayout({
           })}
         </nav>
 
-        {/* Footer */}
         <div className="px-5 py-4 border-t border-slate-100">
           <p className="text-[10px] text-slate-400 font-medium">
             Kibali Academy · Parent Portal

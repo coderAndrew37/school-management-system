@@ -13,18 +13,28 @@ import type {
   TalentCompetency,
 } from "@/lib/types/parent";
 import { supabaseAdmin } from "../supabase/admin";
-
-// ── IMPORT GOVERNANCE TYPES ──────────────────────────────────────────────────
 import type {
   Announcement,
   SchoolEvent,
   FeePayment,
 } from "@/lib/types/governance";
 
-// ── Re-export types for components ───────────────────────────────────────────
 export type { AttendanceRecord, DiaryEntry } from "@/lib/types/parent";
 
-// ── Exported aggregate types ──────────────────────────────────────────────────
+// ── Published report card as seen by a parent ─────────────────────────────────
+
+export type ParentReportCard = {
+  id: string;
+  term: number;
+  academic_year: number;
+  status: "draft" | "published";
+  class_teacher_remarks: string | null;
+  conduct_grade: string | null;
+  effort_grade: string | null;
+  published_at: string | null;
+};
+
+// ── Aggregate portal data for one child ───────────────────────────────────────
 
 export interface ChildPortalData {
   notifications: StudentNotification[];
@@ -37,10 +47,12 @@ export interface ChildPortalData {
   announcements: Announcement[];
   events: SchoolEvent[];
   feePayments: FeePayment[];
+  reportCards: ParentReportCard[];
   unreadCount: number;
 }
 
-// ── Raw DB shape for talent_gallery ──────────────────────────────────────────
+// ── Raw DB shapes ─────────────────────────────────────────────────────────────
+
 interface RawGalleryRow {
   id: string;
   student_id: string | null;
@@ -65,8 +77,6 @@ const GALLERY_SELECT =
   "title, caption, description, category, media_type, " +
   "media_url, image_url, tags, term, academic_year, created_at";
 
-// ── Student query helpers ─────────────────────────────────────────────────────
-
 type AssessmentRow = {
   id: string;
   student_id: string;
@@ -89,22 +99,23 @@ type RawStudentRow = {
   date_of_birth: string;
   gender: "Male" | "Female" | null;
   current_grade: string;
+  photo_url: string | null;
+  status: string;
   created_at: string;
   student_parents: {
     is_primary_contact: boolean;
     relationship_type: string;
-    parents: { full_name: string; phone_number: string } | null;
+    parents: { id: string; full_name: string; phone_number: string } | null;
   }[];
   assessments: AssessmentRow[];
 };
 
 const STUDENT_WITH_ASSESSMENTS_SELECT = `
   id, readable_id, upi_number, full_name,
-  date_of_birth, gender, current_grade, created_at,
+  date_of_birth, gender, current_grade, photo_url, status, created_at,
   student_parents (
-    is_primary_contact,
-    relationship_type,
-    parents ( full_name, phone_number )
+    is_primary_contact, relationship_type,
+    parents ( id, full_name, phone_number )
   ),
   assessments (
     id, student_id, teacher_id, subject_name,
@@ -129,6 +140,13 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
     current_grade: row.current_grade,
     parent_id: null,
     created_at: row.created_at,
+    photo_url: row.photo_url ?? null,
+    status: (row.status ?? "active") as
+      | "active"
+      | "transferred"
+      | "graduated"
+      | "withdrawn",
+    all_parents: [], // not needed in parent portal — primary contact is sufficient
     parents: getPrimaryParent(row.student_parents),
     assessments: row.assessments.map(
       (r): Assessment => ({
@@ -148,7 +166,6 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
   };
 }
 
-// ── signGalleryUrl ────────────────────────────────────────────────────────────
 async function signGalleryUrl(
   mediaUrl: string,
   imageUrl: string | null,
@@ -156,24 +173,16 @@ async function signGalleryUrl(
   if (imageUrl && imageUrl.startsWith("http")) return imageUrl;
   if (!mediaUrl) return "";
   if (mediaUrl.startsWith("http")) return mediaUrl;
-
   const { data, error } = await supabaseAdmin.storage
     .from("gallery")
     .createSignedUrl(mediaUrl, 3600);
-
   if (error) {
-    console.error(
-      "[signGalleryUrl] failed:",
-      error.message,
-      "| path:",
-      mediaUrl,
-    );
+    console.error("[signGalleryUrl]", error.message);
     return "";
   }
   return data.signedUrl;
 }
 
-// ── mapGalleryRow ─────────────────────────────────────────────────────────────
 async function mapGalleryRow(row: RawGalleryRow): Promise<GalleryItem> {
   const signedUrl = await signGalleryUrl(row.media_url, row.image_url);
   return {
@@ -213,7 +222,6 @@ export async function fetchMyProfile(): Promise<Parent | null> {
     .select("id, full_name, email, phone_number, created_at")
     .eq("id", user.id)
     .single<Parent>();
-
   if (error) {
     const { data: byEmail, error: emailErr } = await supabase
       .from("parents")
@@ -233,7 +241,6 @@ export async function fetchMyChildren(): Promise<ChildWithAssessments[]> {
     .select(STUDENT_WITH_ASSESSMENTS_SELECT)
     .order("full_name", { ascending: true })
     .returns<RawStudentRow[]>();
-
   if (error) return [];
   return (data ?? []).map(mapStudentRow);
 }
@@ -247,7 +254,6 @@ export async function fetchChild(
     .select(STUDENT_WITH_ASSESSMENTS_SELECT)
     .eq("id", studentId)
     .single<RawStudentRow>();
-
   if (error) return null;
   return data ? mapStudentRow(data) : null;
 }
@@ -257,7 +263,6 @@ export async function fetchAllChildData(
   grade: string,
 ): Promise<ChildPortalData> {
   const supabase = await createSupabaseServerClient();
-  const competencies: TalentCompetency[] = [];
 
   const [
     { data: notifications },
@@ -271,29 +276,33 @@ export async function fetchAllChildData(
     { data: announcements },
     { data: events },
     { data: feePayments },
+    { data: reportCards },
   ] = await Promise.all([
     supabase
       .from("notifications")
       .select("*")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
+
     supabase
       .from("student_diary")
       .select("*")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
+
     supabase
       .from("attendance")
       .select("*")
       .eq("student_id", studentId)
       .order("date", { ascending: false }),
+
     supabase
       .from("communication_book")
       .select("*")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
 
-    // Gallery tier fetches
+    // Gallery — three-tier fetch
     supabase
       .from("talent_gallery")
       .select(GALLERY_SELECT)
@@ -302,6 +311,7 @@ export async function fetchAllChildData(
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(60),
+
     supabase
       .from("talent_gallery")
       .select(GALLERY_SELECT)
@@ -310,6 +320,7 @@ export async function fetchAllChildData(
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(40),
+
     supabase
       .from("talent_gallery")
       .select(GALLERY_SELECT)
@@ -324,11 +335,10 @@ export async function fetchAllChildData(
       .eq("student_id", studentId)
       .maybeSingle(),
 
-    // ── GOVERNANCE DATA FETCHES (Strict Columns) ─────────────────────────────
     supabase
       .from("announcements")
       .select(
-        `id, title, body, audience, target_grade, priority, pinned, published_at, expires_at, author_id, created_at, updated_at`,
+        "id, title, body, audience, target_grade, priority, pinned, published_at, expires_at, author_id, created_at, updated_at",
       )
       .order("created_at", { ascending: false })
       .limit(50),
@@ -336,7 +346,7 @@ export async function fetchAllChildData(
     supabase
       .from("school_events")
       .select(
-        `id, title, description, category, start_date, end_date, start_time, end_time, location, target_grades, is_public, author_id, created_at, updated_at`,
+        "id, title, description, category, start_date, end_date, start_time, end_time, location, target_grades, is_public, author_id, created_at, updated_at",
       )
       .gte(
         "start_date",
@@ -348,13 +358,24 @@ export async function fetchAllChildData(
     supabase
       .from("fee_payments")
       .select(
-        `id, student_id, fee_structure_id, term, academic_year, amount_due, amount_paid, status, payment_method, mpesa_code, paid_at, notes, recorded_by, created_at, updated_at, payment_date, reference_number`,
+        "id, student_id, fee_structure_id, term, academic_year, amount_due, amount_paid, status, payment_method, mpesa_code, paid_at, notes, recorded_by, created_at, updated_at, payment_date, reference_number",
       )
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
+
+    // Published report cards — parents only see published ones
+    supabase
+      .from("report_cards")
+      .select(
+        "id, term, academic_year, status, class_teacher_remarks, conduct_grade, effort_grade, published_at",
+      )
+      .eq("student_id", studentId)
+      .eq("status", "published")
+      .order("academic_year", { ascending: false })
+      .order("term", { ascending: false }),
   ]);
 
-  // Gallery merging
+  // Gallery merging + dedup
   const seenIds = new Set<string>();
   const rawGallery: RawGalleryRow[] = [];
   for (const row of [
@@ -362,7 +383,7 @@ export async function fetchAllChildData(
     ...(galleryClass ?? []),
     ...(gallerySchool ?? []),
   ] as unknown as RawGalleryRow[]) {
-    if (row && row.id && !seenIds.has(row.id)) {
+    if (row?.id && !seenIds.has(row.id)) {
       seenIds.add(row.id);
       rawGallery.push(row);
     }
@@ -381,12 +402,13 @@ export async function fetchAllChildData(
     diary: diary ?? [],
     attendance: attendance ?? [],
     messages: messages ?? [],
-    competencies,
+    competencies: [],
     gallery,
     pathway: pathway ?? null,
     announcements: (announcements as unknown as Announcement[]) ?? [],
     events: (events as unknown as SchoolEvent[]) ?? [],
     feePayments: (feePayments as unknown as FeePayment[]) ?? [],
+    reportCards: (reportCards ?? []) as ParentReportCard[],
     unreadCount,
   };
 }
