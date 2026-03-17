@@ -4,19 +4,20 @@ import type {
   SingleRecipient,
 } from "@/lib/types/communications";
 
+// ── Resend client ─────────────────────────────────────────────────────────────
+
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 const SENDER_EMAIL =
   process.env.NODE_ENV === "production"
-    ? (process.env.PROD_EMAIL ?? "noreply@kibali.ac.ke")
+    ? `noreply@${process.env.PROD_EMAIL ?? "kibali.ac.ke"}`
     : "onboarding@resend.dev";
 
 const SENDER_STAFF_EMAIL =
   process.env.NODE_ENV === "production"
-    ? (process.env.PROD_STAFF_EMAIL ?? "staff@kibali.ac.ke")
+    ? `staff@${process.env.PROD_STAFF_EMAIL ?? "kibali.ac.ke"}`
     : "onboarding@resend.dev";
 
-/** In dev, Resend sandbox only delivers to this verified address */
 const DEV_EMAIL = process.env.DEV_EMAIL ?? "omollondrw@gmail.com";
 
 function resolveRecipient(email: string): string {
@@ -24,8 +25,6 @@ function resolveRecipient(email: string): string {
 }
 
 // ── Branded HTML shell ────────────────────────────────────────────────────────
-// Renders consistently in Gmail, Outlook, Apple Mail.
-// Uses table-based layout for max email client compatibility.
 
 function buildEmail({
   previewText,
@@ -35,10 +34,10 @@ function buildEmail({
   body,
 }: {
   previewText: string;
-  headerBg: string; // hex or css color
-  headerLabel: string; // bold title in header
-  headerSubtitle: string; // smaller line under title
-  body: string; // inner HTML content
+  headerBg: string;
+  headerLabel: string;
+  headerSubtitle: string;
+  body: string;
 }): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -50,28 +49,22 @@ function buildEmail({
 </head>
 <body style="margin:0;padding:0;background:#f1f5f9;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
 
-  <!-- Preview text (hidden) -->
   <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">
     ${previewText}&nbsp;‌&nbsp;‌&nbsp;‌&nbsp;‌&nbsp;‌&nbsp;‌&nbsp;‌&nbsp;‌
   </div>
 
-  <!-- Outer wrapper -->
   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f1f5f9;padding:40px 16px;">
     <tr>
       <td align="center">
-        <!-- Email card -->
         <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
 
-          <!-- Header bar -->
           <tr>
             <td style="background:${headerBg};padding:0;">
               <table width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                  <!-- Left: logo mark + text -->
                   <td style="padding:28px 32px 24px;">
                     <table cellpadding="0" cellspacing="0" border="0">
                       <tr>
-                        <!-- Logo circle -->
                         <td style="padding-right:14px;vertical-align:middle;">
                           <div style="width:44px;height:44px;background:rgba(255,255,255,0.15);border-radius:12px;text-align:center;line-height:44px;font-size:22px;">
                             🎓
@@ -86,7 +79,6 @@ function buildEmail({
                     </table>
                   </td>
                 </tr>
-                <!-- Accent bottom edge -->
                 <tr>
                   <td style="height:4px;background:rgba(255,255,255,0.15);"></td>
                 </tr>
@@ -94,14 +86,12 @@ function buildEmail({
             </td>
           </tr>
 
-          <!-- Body content -->
           <tr>
             <td style="padding:36px 32px 28px;color:#1a202c;font-size:15px;line-height:1.7;">
               ${body}
             </td>
           </tr>
 
-          <!-- Footer -->
           <tr>
             <td style="padding:20px 32px 32px;border-top:1px solid #edf2f7;">
               <table width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -119,9 +109,7 @@ function buildEmail({
           </tr>
 
         </table>
-        <!-- /Email card -->
 
-        <!-- Below-card note -->
         <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;margin-top:20px;">
           <tr>
             <td style="text-align:center;padding:0 16px;">
@@ -182,7 +170,7 @@ function infoRow(label: string, value: string): string {
 
 interface ResendAttachment {
   filename: string;
-  content: string; // base64
+  content: string;
 }
 
 // ── Welcome email (parent invite) ─────────────────────────────────────────────
@@ -213,7 +201,6 @@ export async function sendWelcomeEmail({
       child's profile is now active in our system.
     </p>
 
-    <!-- Student info card -->
     <div style="background:#fffbeb;border:1px solid #fef3c7;border-radius:12px;padding:20px 24px;margin:24px 0;">
       <p style="margin:0 0 12px;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;color:#92400e;">
         Student Details
@@ -225,7 +212,6 @@ export async function sendWelcomeEmail({
       </table>
     </div>
 
-    <!-- Setup CTA -->
     <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px;margin:24px 0;text-align:center;">
       <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#1a202c;">
         Set Up Your Parent Account
@@ -278,6 +264,7 @@ export async function sendWelcomeEmail({
       console.error("sendWelcomeEmail error:", error);
       return { success: false, error };
     }
+
     return { success: true };
   } catch (err) {
     console.error("sendWelcomeEmail crash:", err);
@@ -355,7 +342,7 @@ export async function sendTeacherWelcomeEmail({
   }
 }
 
-// ── Subject allocation email ───────────────────────────────────────────────────
+// ── Subject allocation email ──────────────────────────────────────────────────
 
 export interface AllocationEmailParams {
   teacherEmail: string;
@@ -419,7 +406,7 @@ export interface PasswordResetEmailParams {
   recipientEmail: string;
   recipientName: string;
   resetLink: string;
-  isFirstSetup?: boolean; // true = first-time parent/teacher setup, false = forgot password
+  isFirstSetup?: boolean;
 }
 
 export async function sendPasswordResetEmail({
@@ -495,6 +482,7 @@ export async function sendPasswordResetEmail({
       console.error("sendPasswordResetEmail error:", error);
       return { success: false, error };
     }
+
     return { success: true };
   } catch (err) {
     console.error("sendPasswordResetEmail crash:", err);
@@ -519,6 +507,8 @@ export interface BroadcastResult {
   failures: Array<{ email: string; error: string }>;
 }
 
+const BATCH_SIZE = 100;
+
 export async function broadcastEmail({
   recipients,
   subject,
@@ -533,8 +523,6 @@ export async function broadcastEmail({
     filename: a.name,
     content: a.base64,
   }));
-
-  const BATCH_SIZE = 100;
 
   for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
     const chunk = recipients.slice(i, i + BATCH_SIZE);
@@ -565,16 +553,26 @@ export async function broadcastEmail({
 
     try {
       const { data, error } = await resend.batch.send(batchPayload);
+
       if (error) {
+        console.error("broadcastEmail batch error:", error);
         chunk.forEach((r) =>
-          failures.push({ email: r.email, error: String(error) }),
+          failures.push({ email: r.email, error: JSON.stringify(error) }),
         );
       } else if (data) {
         data.data.forEach((item) => {
           if (item.id) messageIds.push(item.id);
         });
+      } else {
+        chunk.forEach((r) =>
+          failures.push({
+            email: r.email,
+            error: "No data and no error returned from Resend",
+          }),
+        );
       }
     } catch (err) {
+      console.error("broadcastEmail batch threw:", err);
       chunk.forEach((r) =>
         failures.push({ email: r.email, error: String(err) }),
       );
@@ -613,7 +611,7 @@ export async function resolveAudienceRecipients(
         .select("id, full_name, email")
         .returns<RecipientRow[]>();
       if (error) {
-        console.error(error);
+        console.error("resolveAudienceRecipients teachers error:", error);
         return [];
       }
       return data ?? [];
@@ -625,7 +623,7 @@ export async function resolveAudienceRecipients(
         .select("id, full_name, email")
         .returns<RecipientRow[]>();
       if (error) {
-        console.error(error);
+        console.error("resolveAudienceRecipients parents error:", error);
         return [];
       }
       return data ?? [];
@@ -648,7 +646,7 @@ export async function resolveAudienceRecipients(
         >();
 
       if (error) {
-        console.error(error);
+        console.error("resolveAudienceRecipients grade_parents error:", error);
         return [];
       }
 
@@ -673,6 +671,18 @@ export async function resolveAudienceRecipients(
           .select("id, full_name, email")
           .returns<RecipientRow[]>(),
       ]);
+
+      if (teachersRes.error)
+        console.error(
+          "resolveAudienceRecipients teachers error:",
+          teachersRes.error,
+        );
+      if (parentsRes.error)
+        console.error(
+          "resolveAudienceRecipients parents error:",
+          parentsRes.error,
+        );
+
       return [...(teachersRes.data ?? []), ...(parentsRes.data ?? [])];
     }
   }
