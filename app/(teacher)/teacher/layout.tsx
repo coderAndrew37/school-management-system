@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/actions/auth";
 import { fetchMyClassTeacherAssignments } from "@/lib/actions/class-teacher";
-import { TeacherLayoutShell } from "./_components/nav/TeacherLayoutShell";
+import { TeacherLayoutShell } from "../_components/nav/TeacherLayoutShell";
 
 export default async function TeacherLayout({
   children,
