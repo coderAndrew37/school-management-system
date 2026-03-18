@@ -104,14 +104,14 @@ export default async function DashboardPage() {
             value={stats.totalTeachers}
             icon="📋"
             accent="emerald"
-            href="/teachers"
+            href="/admin/teachers"
           />
           <StatCard
             label="Registered Parents"
             value={stats.totalParents}
             icon="👪"
             accent="sky"
-            href="/parents"
+            href="/admin/parents"
           />
         </section>
 
