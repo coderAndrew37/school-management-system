@@ -53,7 +53,7 @@ export async function addTeacherAction(formData: FormData) {
     //    the production domain, never localhost
     const { data: linkData, error: linkError } =
       await supabaseAdmin.auth.admin.generateLink({
-        type: "recovery",
+        type: "magiclink",
         email,
         options: { redirectTo: getAuthConfirmUrl() },
       });

@@ -11,8 +11,9 @@ import {
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { sendPasswordResetEmail } from "../mail";
-import { supabaseAdmin } from "../supabase/admin";
 import { resolveAllRoles, resolvePrimaryRole } from "./auth-utils";
+import { supabaseAdmin } from "../supabase/admin";
+import { getAuthConfirmUrl } from "@/lib/utils/site-url";
 
 export interface AuthActionResult {
   success: boolean;
@@ -46,15 +47,13 @@ export async function loginAction(
   });
 
   if (error) {
-    if (error.message.toLowerCase().includes("invalid login")) {
+    if (error.message.toLowerCase().includes("invalid login"))
       return { success: false, message: "Incorrect email or password." };
-    }
-    if (error.message.toLowerCase().includes("email not confirmed")) {
+    if (error.message.toLowerCase().includes("email not confirmed"))
       return {
         success: false,
         message: "Please verify your email address before signing in.",
       };
-    }
     return { success: false, message: "Sign-in failed. Please try again." };
   }
 
@@ -64,7 +63,6 @@ export async function loginAction(
   if (!user)
     return { success: false, message: "Session error. Please try again." };
 
-  // Fetch BOTH role fields so multi-role users land on the right dashboard
   const { data: profile } = await supabase
     .from("profiles")
     .select("role, roles")
@@ -73,15 +71,12 @@ export async function loginAction(
 
   const primaryRole = resolvePrimaryRole(profile);
 
-  // Check if parent hasn't completed onboarding (invite_accepted = false)
-  // Redirect them to complete password setup before accessing the portal
   if (primaryRole === "parent") {
     const { data: parentRow } = await supabaseAdmin
       .from("parents")
       .select("invite_accepted")
       .eq("id", user.id)
       .maybeSingle();
-
     if (parentRow && parentRow.invite_accepted === false) {
       return {
         success: false,
@@ -92,7 +87,6 @@ export async function loginAction(
   }
 
   revalidatePath("/", "layout");
-
   return {
     success: true,
     message: "Signed in successfully.",
@@ -124,16 +118,16 @@ export async function forgotPasswordAction(
   }
 
   const email = parsed.data.email;
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
   // Generate a recovery link via the admin client so we can send our own
   // branded Resend email instead of Supabase's default template.
-  // The link uses the Fragment (Format B) token flow handled by /auth/confirm.
+  // getAuthConfirmUrl() resolves: NEXT_PUBLIC_SITE_URL → VERCEL_URL → localhost,
+  // so the link is never hardcoded to localhost in production.
   const { data: linkData, error: linkError } =
     await supabaseAdmin.auth.admin.generateLink({
-      type: "recovery",
+      type: "magiclink",
       email,
-      options: { redirectTo: `${siteUrl}/auth/confirm` },
+      options: { redirectTo: getAuthConfirmUrl() },
     });
 
   // Always respond identically — never reveal whether the address exists.
@@ -159,7 +153,7 @@ export async function forgotPasswordAction(
       .maybeSingle();
     if (profileRow?.full_name) recipientName = profileRow.full_name;
   } catch {
-    /* non-blocking — proceed without name */
+    /* non-blocking */
   }
 
   await sendPasswordResetEmail({
@@ -172,7 +166,7 @@ export async function forgotPasswordAction(
   return SAFE_RESPONSE;
 }
 
-// ── Reset password (called from /auth/reset-password after invite link) ───────
+// ── Reset password ────────────────────────────────────────────────────────────
 
 export async function resetPasswordAction(
   formData: FormData,
@@ -192,7 +186,6 @@ export async function resetPasswordAction(
 
   const supabase = await createSupabaseServerClient();
 
-  // Get the current user — session was established by /auth/confirm
   const {
     data: { user },
     error: userError,
@@ -205,18 +198,16 @@ export async function resetPasswordAction(
     };
   }
 
-  // Update the password
   const { error } = await supabase.auth.updateUser({
     password: parsed.data.password,
   });
 
   if (error) {
-    if (error.message.toLowerCase().includes("same password")) {
+    if (error.message.toLowerCase().includes("same password"))
       return {
         success: false,
         message: "New password must be different from your current password.",
       };
-    }
     return {
       success: false,
       message:
@@ -225,13 +216,11 @@ export async function resetPasswordAction(
   }
 
   // Mark invite_accepted = true so the parent can now log in normally
-  // Use admin client to bypass RLS (parents can't update their own row by default)
   await supabaseAdmin
     .from("parents")
     .update({ invite_accepted: true })
     .eq("id", user.id);
 
-  // Fetch primary role to send parent directly to the right portal
   const { data: profile } = await supabase
     .from("profiles")
     .select("role, roles")
@@ -239,12 +228,9 @@ export async function resetPasswordAction(
     .single();
 
   const primaryRole = resolvePrimaryRole(profile);
-  const destination = ROLE_ROUTES[primaryRole] ?? "/parent/portal";
+  const destination = ROLE_ROUTES[primaryRole] ?? "/parent";
 
   revalidatePath("/", "layout");
-
-  // Return the destination — the client (reset-password page) handles the
-  // toast then navigates. Parent is ALREADY logged in — no second login needed.
   return {
     success: true,
     message: "Password set successfully! Welcome to Kibali Academy.",
@@ -252,7 +238,7 @@ export async function resetPasswordAction(
   };
 }
 
-// ── Get current session (for Server Components) ───────────────────────────────
+// ── Get current session ───────────────────────────────────────────────────────
 
 export async function getSession() {
   const supabase = await createSupabaseServerClient();
@@ -260,7 +246,6 @@ export async function getSession() {
     data: { user },
     error,
   } = await supabase.auth.getUser();
-
   if (error || !user) return null;
 
   const { data: profile } = await supabase
@@ -268,7 +253,6 @@ export async function getSession() {
     .select("*")
     .eq("id", user.id)
     .single();
-
   if (!profile) return null;
 
   return {

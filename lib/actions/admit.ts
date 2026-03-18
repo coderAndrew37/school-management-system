@@ -4,11 +4,12 @@
 
 import { sendWelcomeEmail } from "@/lib/mail";
 import { revalidatePath } from "next/cache";
+import { supabaseAdmin } from "../supabase/admin";
 import {
   admissionSchema,
   type AdmissionActionResult,
 } from "../schemas/admission";
-import { supabaseAdmin } from "../supabase/admin";
+import { z } from "zod";
 import { getAuthConfirmUrl } from "../utils/site-url";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -192,7 +193,7 @@ export async function admitStudentAction(
 
       const { data: linkData, error: linkError } =
         await supabaseAdmin.auth.admin.generateLink({
-          type: "recovery",
+          type: "magiclink",
           email: d.parentEmail!,
           options: { redirectTo: getAuthConfirmUrl() },
         });
@@ -283,7 +284,7 @@ export async function resendInviteAction(parentId: string) {
 
     const { data: linkData, error: linkError } =
       await supabaseAdmin.auth.admin.generateLink({
-        type: "recovery",
+        type: "magiclink",
         email: parent.email,
         options: { redirectTo: getAuthConfirmUrl() },
       });
