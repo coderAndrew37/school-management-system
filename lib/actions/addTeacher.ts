@@ -1,8 +1,9 @@
 "use server";
 
-import { sendTeacherWelcomeEmail } from "@/lib/mail"; // Import the new function
+import { sendTeacherWelcomeEmail } from "@/lib/mail";
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "../supabase/admin";
+import { getAuthConfirmUrl } from "@/lib/utils/site-url";
 
 export async function addTeacherAction(formData: FormData) {
   const fullName = formData.get("fullName") as string;
@@ -29,10 +30,10 @@ export async function addTeacherAction(formData: FormData) {
       .insert({
         id: userId,
         full_name: fullName,
-        email: email,
+        email,
         phone_number: phone,
         tsc_number: tscNumber,
-        last_invite_sent: new Date().toISOString(), // Track the invite
+        last_invite_sent: new Date().toISOString(),
       });
 
     if (teacherError) {
@@ -48,31 +49,29 @@ export async function addTeacherAction(formData: FormData) {
 
     if (profileError) throw profileError;
 
-    // 4. Generate Link
+    // 4. Generate setup link — uses getAuthConfirmUrl() so it's always
+    //    the production domain, never localhost
     const { data: linkData, error: linkError } =
       await supabaseAdmin.auth.admin.generateLink({
         type: "recovery",
         email,
-        options: {
-          redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
-        },
+        options: { redirectTo: getAuthConfirmUrl() },
       });
 
     if (linkError) throw linkError;
 
-    // 5. Send Professional Welcome Email
-    const setupLink = linkData.properties.action_link;
+    // 5. Send branded welcome email via Resend
     await sendTeacherWelcomeEmail({
       teacherEmail: email,
       teacherName: fullName,
-      setupLink,
+      setupLink: linkData.properties.action_link,
     });
 
     revalidatePath("/teachers");
-    revalidatePath("/admin"); // Update dashboard stats too
+    revalidatePath("/admin");
     return { success: true };
   } catch (error: any) {
-    console.error("Add Teacher Action Failed:", error.message);
+    console.error("addTeacherAction failed:", error.message);
     return { success: false, message: error.message };
   }
 }

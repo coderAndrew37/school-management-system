@@ -1,24 +1,18 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createClient } from "@supabase/supabase-js";
+import type { Profile } from "@/lib/types/auth";
 import {
-  loginSchema,
   forgotPasswordSchema,
+  loginSchema,
   resetPasswordSchema,
   ROLE_ROUTES,
 } from "@/lib/types/auth";
-import type { Profile, UserRole } from "@/lib/types/auth";
-import { resolveAllRoles, resolvePrimaryRole } from "./auth-utils";
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { sendPasswordResetEmail } from "../mail";
-
-// Admin client — needed to update parents table after password set
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+import { supabaseAdmin } from "../supabase/admin";
+import { resolveAllRoles, resolvePrimaryRole } from "./auth-utils";
 
 export interface AuthActionResult {
   success: boolean;
