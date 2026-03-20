@@ -21,11 +21,14 @@ import {
   ShieldCheck,
   BookOpen,
   Users,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { loginSchema, type LoginFormValues } from "@/lib/types/auth";
 import Link from "next/link";
 import { loginAction } from "@/lib/actions/auth";
 import { AuthLayout } from "./AuthLayout";
+import { AuthFragmentForwarder } from "./AuthFragmentForwader";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -44,31 +47,35 @@ const ROLES: {
   description: string;
   icon: React.ReactNode;
   accent: string;
-  ring: string;
+  inputRing: string;
+  btnCls: string;
 }[] = [
   {
     id: "admin",
     label: "Administrator",
     description: "School management & reports",
     icon: <ShieldCheck className="h-4 w-4" />,
-    accent: "bg-amber-500 text-white border-amber-500",
-    ring: "focus:ring-amber-500/30 focus:border-amber-500",
+    accent: "border-amber-500 bg-amber-500 text-white",
+    inputRing: "focus:border-amber-400 focus:ring-amber-100",
+    btnCls: "bg-amber-500 hover:bg-amber-600 shadow-amber-200",
   },
   {
     id: "teacher",
     label: "Teacher",
     description: "CBC assessments & timetable",
     icon: <BookOpen className="h-4 w-4" />,
-    accent: "bg-emerald-600 text-white border-emerald-600",
-    ring: "focus:ring-emerald-500/30 focus:border-emerald-500",
+    accent: "border-emerald-600 bg-emerald-600 text-white",
+    inputRing: "focus:border-emerald-400 focus:ring-emerald-100",
+    btnCls: "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200",
   },
   {
     id: "parent",
     label: "Parent / Guardian",
     description: "Child results & communication",
     icon: <Users className="h-4 w-4" />,
-    accent: "bg-sky-600 text-white border-sky-600",
-    ring: "focus:ring-sky-500/30 focus:border-sky-500",
+    accent: "border-sky-600 bg-sky-600 text-white",
+    inputRing: "focus:border-sky-400 focus:ring-sky-100",
+    btnCls: "bg-sky-600 hover:bg-sky-700 shadow-sky-200",
   },
 ];
 
@@ -83,6 +90,7 @@ const DEMO_EMAILS: Record<Role, string> = {
 
 export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
   const [role, setRole] = useState<Role>("admin");
+  const [showPassword, setShowPassword] = useState(false);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -96,10 +104,9 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
     formState: { errors },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { email: DEMO_EMAILS.admin, password: "" },
+    defaultValues: { email: "", password: "" },
   });
 
-  // Show URL error once via toast
   if (errorParam) {
     const msg: Record<string, string> = {
       missing_code: "The sign-in link was invalid or expired.",
@@ -110,9 +117,9 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
 
   const handleRoleSwitch = (r: Role) => {
     setRole(r);
-    // Pre-fill demo email for selected role (optional helper)
-    setValue("email", DEMO_EMAILS[r]);
+    setValue("email", "");
     setValue("password", "");
+    setShowPassword(false);
   };
 
   const doLogin = (email: string, password: string) => {
@@ -137,18 +144,19 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
     doLogin(values.email, values.password);
   };
 
-  // Input style — adapts accent to selected role
-  const inputCls = `
-    w-full px-4 py-3 border-2 border-slate-200 rounded-xl text-sm text-slate-800
-    outline-none transition-all duration-200 bg-slate-50
-    placeholder:text-slate-400
-    ${activeRole.ring}
-    focus:bg-white
-  `;
+  const baseInput = [
+    "w-full px-4 py-3 border-2 border-slate-200 rounded-xl text-sm text-slate-800",
+    "outline-none transition-all duration-200 bg-slate-50 placeholder:text-slate-400",
+    "focus:bg-white focus:ring-2",
+    activeRole.inputRing,
+  ].join(" ");
 
   return (
     <AuthLayout>
-      {/* Brand */}
+      {/* Detects auth token fragments landing on /login and forwards to /auth/confirm */}
+      <AuthFragmentForwarder />
+
+      {/* ── Brand ────────────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3 mb-7">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 border border-amber-200">
           <GraduationCap className="h-5 w-5 text-amber-600" />
@@ -163,7 +171,7 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
         </div>
       </div>
 
-      {/* Role selector */}
+      {/* ── Role selector ────────────────────────────────────────────────────── */}
       <div className="mb-6">
         <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
           Sign in as
@@ -186,23 +194,19 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
             </button>
           ))}
         </div>
-
-        {/* Role description */}
         <p className="mt-2 text-center text-[11px] text-slate-400">
           {activeRole.description}
         </p>
       </div>
 
-      {/* Form */}
+      {/* ── Form ─────────────────────────────────────────────────────────────── */}
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
-        {/* Root/server error */}
         {errors.root && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
             {errors.root.message}
           </div>
         )}
 
-        {/* Email */}
         <div className="space-y-1.5">
           <label className="text-xs font-bold text-slate-600 uppercase tracking-wide">
             Email Address
@@ -210,8 +214,8 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
           <input
             type="email"
             autoComplete="email"
-            placeholder="Enter your email"
-            className={inputCls}
+            placeholder="Enter your email address"
+            className={baseInput}
             disabled={isPending}
             {...register("email")}
           />
@@ -220,7 +224,6 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
           )}
         </div>
 
-        {/* Password */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <label className="text-xs font-bold text-slate-600 uppercase tracking-wide">
@@ -228,25 +231,41 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
             </label>
             <Link
               href="/auth/forgot-password"
-              className="text-xs text-amber-600 hover:text-amber-700 font-medium"
+              className="text-xs text-amber-600 hover:text-amber-700 font-semibold transition-colors"
             >
               Forgot password?
             </Link>
           </div>
-          <input
-            type="password"
-            autoComplete="current-password"
-            placeholder="Enter your password"
-            className={inputCls}
-            disabled={isPending}
-            {...register("password")}
-          />
+
+          <div className="relative">
+            <input
+              type={showPassword ? "text" : "password"}
+              autoComplete="current-password"
+              placeholder="Enter your password"
+              className={`${baseInput} pr-11`}
+              disabled={isPending}
+              {...register("password")}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              disabled={isPending}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              className="absolute right-3 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+            >
+              {showPassword ? (
+                <EyeOff className="h-4 w-4" />
+              ) : (
+                <Eye className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+
           {errors.password && (
             <p className="text-xs text-red-500">{errors.password.message}</p>
           )}
         </div>
 
-        {/* Parent help text — only shown when parent role selected */}
         {role === "parent" && (
           <div className="rounded-xl bg-sky-50 border border-sky-100 px-4 py-3 text-xs text-sky-700 leading-relaxed">
             <strong>First time?</strong> Check your email for a setup link from
@@ -255,19 +274,14 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
           </div>
         )}
 
-        {/* Submit */}
         <button
           type="submit"
           disabled={isPending}
           className={[
-            "w-full py-3 rounded-xl text-sm font-bold text-white transition-all duration-200",
+            "w-full py-3 rounded-xl text-sm font-bold text-white transition-all duration-200 mt-1",
             "disabled:opacity-60 disabled:cursor-not-allowed",
-            "flex items-center justify-center gap-2 shadow-sm mt-1",
-            role === "admin"
-              ? "bg-amber-500 hover:bg-amber-600 shadow-amber-200"
-              : role === "teacher"
-                ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200"
-                : "bg-sky-600 hover:bg-sky-700 shadow-sky-200",
+            "flex items-center justify-center gap-2 shadow-sm",
+            activeRole.btnCls,
           ].join(" ")}
         >
           {isPending ? (
@@ -281,7 +295,7 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
         </button>
       </form>
 
-      {/* ── Demo Quick Access — REMOVE IN PRODUCTION ─────────────────────────── */}
+      {/* ── Dev quick-access — REMOVE IN PRODUCTION ─────────────────────────── */}
       {process.env.NODE_ENV === "development" && (
         <div className="mt-6 pt-5 border-t border-dashed border-slate-200">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3 text-center">
@@ -298,7 +312,7 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
               >
                 <span>{r.icon}</span>
                 <span className="font-semibold">{r.label}</span>
-                <span className="ml-auto text-slate-400">
+                <span className="ml-auto font-mono text-slate-400">
                   {DEMO_EMAILS[r.id]}
                 </span>
               </button>
