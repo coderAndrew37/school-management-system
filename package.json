@@ -2,20 +2,24 @@
   "name": "school-management-system",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "africastalking": "node --env-file=.env lib/africas-talking.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
     "@react-pdf/renderer": "^4.3.2",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.97.0",
+    "africastalking": "^0.7.9",
     "clsx": "^2.1.1",
     "crypto": "^1.0.1",
     "date-fns": "^4.1.0",
+    "dotenv": "^16.4.7",
     "lucide-react": "^0.574.0",
     "next": "16.1.6",
     "react": "19.2.3",
@@ -29,11 +33,13 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/africastalking": "^0.6.2",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "esm": "^3.2.25",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
