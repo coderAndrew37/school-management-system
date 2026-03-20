@@ -1,0 +1,1 @@
+ALTER TABLE subjects ADD CONSTRAINT subjects_code_key UNIQUE (code);
