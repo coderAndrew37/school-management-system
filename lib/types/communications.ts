@@ -44,6 +44,31 @@ export interface MessageTemplate {
   audienceHint: AudienceType[];
 }
 
+// ── SMS Templates ─────────────────────────────────────────────────────────────
+
+export type SmsTemplateId =
+  | "sms_blank"
+  | "sms_fee_reminder"
+  | "sms_fee_overdue"
+  | "sms_event_notice"
+  | "sms_term_dates"
+  | "sms_emergency_closure"
+  | "sms_report_available"
+  | "sms_absence_alert"
+  | "sms_early_dismissal"
+  | "sms_payment_received"
+  | "sms_staff_meeting"
+  | "sms_exam_reminder";
+
+export interface SmsTemplate {
+  id: SmsTemplateId;
+  label: string;
+  icon: string;
+  body: string; // plain text, max ~459 chars
+  audienceHint: AudienceType[];
+  charHint: number; // approximate char count for the default body
+}
+
 // ── Attachments ───────────────────────────────────────────────────────────────
 
 export interface AttachmentFile {
@@ -59,6 +84,7 @@ export interface ComposeFormState {
   channel: SendChannel;
   audience: AudienceSelection;
   templateId: TemplateId;
+  smsTemplateId: SmsTemplateId;
   subject: string;
   body: string;
   attachments: AttachmentFile[];

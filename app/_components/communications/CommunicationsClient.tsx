@@ -12,11 +12,14 @@ import type {
   SendChannel,
   SendEmailRequest,
   SendEmailResponse,
+  SmsTemplate,
+  SmsTemplateId,
   TemplateId,
 } from "@/lib/types/communications";
 import {
   AUDIENCE_LABELS,
   getTemplatesForAudience,
+  getSmsTemplatesForAudience,
 } from "@/lib/utils/communication-templates";
 import {
   AlertCircle,
@@ -97,6 +100,7 @@ const DEFAULT_FORM: ComposeFormState = {
   channel: "email",
   audience: DEFAULT_AUDIENCE,
   templateId: "blank",
+  smsTemplateId: "sms_blank",
   subject: "",
   body: "",
   attachments: [],
@@ -323,6 +327,57 @@ function TemplateSelector({
   );
 }
 
+// ── SMS Template selector ─────────────────────────────────────────────────────
+
+function SmsTemplateSelector({
+  audienceType,
+  activeId,
+  onSelect,
+}: {
+  audienceType: AudienceType;
+  activeId: SmsTemplateId;
+  onSelect: (t: SmsTemplate) => void;
+}) {
+  const templates = getSmsTemplatesForAudience(audienceType);
+  return (
+    <div className="space-y-2">
+      <label className="text-[10px] font-black uppercase tracking-widest text-white/35">
+        Template
+      </label>
+      <div className="flex flex-wrap gap-2">
+        {templates.map((t) => {
+          const active = activeId === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => onSelect(t)}
+              className={[
+                "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all",
+                active
+                  ? "bg-sky-400/15 border-sky-400/35 text-sky-400"
+                  : "bg-white/[0.02] border-white/[0.06] text-white/35 hover:text-white/65 hover:border-white/[0.12]",
+              ].join(" ")}
+            >
+              <span>{t.icon}</span>
+              <span>{t.label}</span>
+              {t.charHint > 0 && (
+                <span
+                  className={`text-[9px] font-mono ml-0.5 ${
+                    active ? "text-sky-400/60" : "text-white/20"
+                  }`}
+                >
+                  {t.charHint}c
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Attachment uploader ───────────────────────────────────────────────────────
 
 function AttachmentUploader({
@@ -526,6 +581,14 @@ export function CommunicationsClient({
     }));
   }, []);
 
+  const applySmsTemplate = useCallback((t: SmsTemplate) => {
+    setForm((prev) => ({
+      ...prev,
+      smsTemplateId: t.id,
+      body: t.body || prev.body,
+    }));
+  }, []);
+
   const handleSend = useCallback(async () => {
     const isSms = form.channel === "sms";
 
@@ -672,16 +735,22 @@ export function CommunicationsClient({
           </div>
         </div>
 
-        {/* Template — only for email */}
-        {!isSms && (
-          <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5">
+        {/* Template picker — email or SMS */}
+        <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5">
+          {isSms ? (
+            <SmsTemplateSelector
+              audienceType={form.audience.type}
+              activeId={form.smsTemplateId}
+              onSelect={applySmsTemplate}
+            />
+          ) : (
             <TemplateSelector
               audienceType={form.audience.type}
               activeId={form.templateId}
               onSelect={applyTemplate}
             />
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Message */}
         <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5 space-y-4">
