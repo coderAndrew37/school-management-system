@@ -2,6 +2,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type {
   CommunicationLogEntry,
   RecipientsPayload,
+  SendChannel,
   SingleRecipient,
 } from "@/lib/types/communications";
 
@@ -31,6 +32,7 @@ type LogRow = {
   body_preview: string;
   recipient_count: number;
   status: string;
+  channel: string; // <--- Add this line
   scheduled_at: string | null;
   sent_at: string | null;
   created_at: string;
@@ -56,6 +58,7 @@ function mapLogEntry(row: LogRow): CommunicationLogEntry {
     body_preview: row.body_preview,
     recipient_count: row.recipient_count,
     status: row.status as CommunicationLogEntry["status"],
+    channel: row.channel as SendChannel, // <--- Add this line
     scheduled_at: row.scheduled_at,
     sent_at: row.sent_at,
     created_at: row.created_at,
@@ -125,6 +128,7 @@ export async function fetchCommunicationsLog(): Promise<
       `
       id, audience_type, audience_label, subject,
       body_preview, recipient_count, status,
+      channel,
       scheduled_at, sent_at, created_at,
       profiles ( full_name )
     `,
