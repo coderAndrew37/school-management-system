@@ -1,3 +1,5 @@
+// lib/types/allocation.ts
+
 export type SubjectLevel =
   | "lower_primary"
   | "upper_primary"
@@ -51,12 +53,16 @@ export interface TimetableSlot {
   } | null;
 }
 
-// UI-oriented types
+// ── UI timetable cell ─────────────────────────────────────────────────────────
+// slotId and teacherId are required for editing (swap, move, clear, conflict check)
+
 export interface TimetableCell {
+  slotId: string; // timetable_slots.id — needed for mutations
   teacherName: string;
   subjectName: string;
   subjectCode: string;
   allocationId: string;
+  teacherId: string; // for teacher conflict detection
 }
 
 // Keyed by `${day}-${period}`

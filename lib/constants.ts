@@ -68,6 +68,12 @@ export const ADMIN_LINKS: NavLink[] = [
     group: "People",
   },
   {
+    label: "Subject Allocations",
+    href: "/admin/allocation",
+    icon: GraduationCap,
+    group: "People",
+  },
+  {
     label: "Parent Invites",
     href: "/admin/invites",
     icon: MailCheck,

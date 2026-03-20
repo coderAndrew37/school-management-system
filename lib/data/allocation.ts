@@ -1,5 +1,5 @@
 import { createServerClient } from "@/lib/supabase/client";
-import {
+import type {
   Subject,
   TeacherSubjectAllocation,
   TimetableGrid,
@@ -19,13 +19,9 @@ export async function fetchSubjects(): Promise<Subject[]> {
   return (data ?? []) as Subject[];
 }
 
-/**
- * Helper to transform Supabase array-based joins into single objects
- */
 function mapAllocationRow(row: any): TeacherSubjectAllocation {
   return {
     ...row,
-    // Supabase returns these as arrays if it's not sure about the relationship cardinality
     teachers: Array.isArray(row.teachers) ? row.teachers[0] : row.teachers,
     subjects: Array.isArray(row.subjects) ? row.subjects[0] : row.subjects,
   };
@@ -47,13 +43,10 @@ export async function fetchAllocations(
     .eq("academic_year", academicYear)
     .order("grade")
     .order("created_at");
-
   if (error) {
     console.error("fetchAllocations:", error);
     return [];
   }
-
-  // Transform data to fix the array vs object mismatch
   return (data ?? []).map(mapAllocationRow);
 }
 
@@ -74,16 +67,17 @@ export async function fetchAllocationsByTeacher(
     .eq("teacher_id", teacherId)
     .eq("academic_year", academicYear)
     .order("grade");
-
   if (error) {
     console.error("fetchAllocationsByTeacher:", error);
     return [];
   }
-
-  // Transform data to fix the array vs object mismatch
   return (data ?? []).map(mapAllocationRow);
 }
 
+/**
+ * Fetch timetable grid for a grade.
+ * Now includes slotId and teacherId in each cell for editing support.
+ */
 export async function fetchTimetableForGrade(
   grade: string,
   academicYear = 2026,
@@ -95,9 +89,9 @@ export async function fetchTimetableForGrade(
       `
       id, allocation_id, grade, day_of_week, period, academic_year,
       teacher_subject_allocations (
-        grade,
-        teachers ( full_name ),
-        subjects ( name, code )
+        teacher_id,
+        teachers ( id, full_name ),
+        subjects  ( name, code )
       )
     `,
     )
@@ -111,34 +105,28 @@ export async function fetchTimetableForGrade(
 
   const grid: TimetableGrid = {};
 
-  // Cast to any first to handle the potential array wrapping in nested objects
-  const rawSlots = (data ?? []) as any[];
-
-  for (const rawSlot of rawSlots) {
-    // Correctly handle the potential array wrapping in nested join
+  for (const rawSlot of (data ?? []) as any[]) {
     let alloc = rawSlot.teacher_subject_allocations;
-    if (Array.isArray(alloc)) {
-      alloc = alloc[0];
-    }
+    if (Array.isArray(alloc)) alloc = alloc[0];
+    if (!alloc) continue;
 
-    if (alloc) {
-      // Further flatten nested teachers/subjects if they came back as arrays
-      const teacher = Array.isArray(alloc.teachers)
-        ? alloc.teachers[0]
-        : alloc.teachers;
-      const subject = Array.isArray(alloc.subjects)
-        ? alloc.subjects[0]
-        : alloc.subjects;
+    const teacher = Array.isArray(alloc.teachers)
+      ? alloc.teachers[0]
+      : alloc.teachers;
+    const subject = Array.isArray(alloc.subjects)
+      ? alloc.subjects[0]
+      : alloc.subjects;
 
-      if (teacher && subject) {
-        const key = `${rawSlot.day_of_week}-${rawSlot.period}`;
-        grid[key] = {
-          teacherName: teacher.full_name,
-          subjectName: subject.name,
-          subjectCode: subject.code,
-          allocationId: rawSlot.allocation_id,
-        };
-      }
+    if (teacher && subject) {
+      const key = `${rawSlot.day_of_week}-${rawSlot.period}`;
+      grid[key] = {
+        slotId: rawSlot.id, // ← new: needed for mutations
+        teacherName: teacher.full_name,
+        subjectName: subject.name,
+        subjectCode: subject.code,
+        allocationId: rawSlot.allocation_id,
+        teacherId: teacher.id ?? alloc.teacher_id, // ← new: for conflict UI
+      };
     }
   }
   return grid;
@@ -153,8 +141,56 @@ export async function fetchAllGradesWithTimetable(
     .select("grade")
     .eq("academic_year", academicYear);
   if (error) return [];
-  const grades = [
+  return [
     ...new Set((data ?? []).map((r: { grade: string }) => r.grade)),
-  ];
-  return grades.sort();
+  ].sort();
+}
+
+// ── Fetch allocations for a grade (used by timetable assign dropdown) ─────────
+
+export interface GradeAllocation {
+  allocationId: string;
+  subjectName: string;
+  subjectCode: string;
+  teacherName: string;
+  teacherId: string;
+}
+
+export async function fetchGradeAllocations(
+  grade: string,
+  academicYear = 2026,
+): Promise<GradeAllocation[]> {
+  const supabase = createServerClient();
+  const { data, error } = await supabase
+    .from("teacher_subject_allocations")
+    .select(
+      `
+      id,
+      teachers ( id, full_name ),
+      subjects  ( name, code )
+    `,
+    )
+    .eq("grade", grade)
+    .eq("academic_year", academicYear);
+
+  if (error) {
+    console.error("fetchGradeAllocations:", error);
+    return [];
+  }
+
+  return ((data ?? []) as any[]).map((row): GradeAllocation => {
+    const teacher = Array.isArray(row.teachers)
+      ? row.teachers[0]
+      : row.teachers;
+    const subject = Array.isArray(row.subjects)
+      ? row.subjects[0]
+      : row.subjects;
+    return {
+      allocationId: row.id,
+      subjectName: subject?.name ?? "Unknown",
+      subjectCode: subject?.code ?? "?",
+      teacherName: teacher?.full_name ?? "Unknown",
+      teacherId: teacher?.id ?? "",
+    };
+  });
 }
