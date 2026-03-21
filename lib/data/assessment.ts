@@ -138,17 +138,23 @@ export async function fetchTeacherAssessmentAllocations(
   const grades = [...new Set(data.map((r) => r.grade))];
   const studentCounts = await fetchStudentCountsByGrade(grades);
 
-  return data.map(
-    (row): TeacherAllocationSummary => ({
+  return data.map((row): TeacherAllocationSummary => {
+    // Supabase returns subjects as a plain object on many-to-one FK joins,
+    // but occasionally as a single-element array. Guard handles both.
+    const rawRow = row as any;
+    const sub = Array.isArray(rawRow.subjects)
+      ? rawRow.subjects[0]
+      : rawRow.subjects;
+    return {
       id: row.id,
       grade: row.grade,
-      subjectName: row.subjects?.[0]?.name ?? "Unknown Subject",
-      subjectCode: row.subjects?.[0]?.code ?? "—",
-      subjectLevel: row.subjects?.[0]?.level ?? "upper_primary",
-      weeklyLessons: row.subjects?.[0]?.weekly_lessons ?? 0,
+      subjectName: sub?.name ?? "Unknown Subject",
+      subjectCode: sub?.code ?? "—",
+      subjectLevel: sub?.level ?? "upper_primary",
+      weeklyLessons: sub?.weekly_lessons ?? 0,
       studentCount: studentCounts[row.grade] ?? 0,
-    }),
-  );
+    };
+  });
 }
 
 /**

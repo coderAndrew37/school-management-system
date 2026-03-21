@@ -73,9 +73,16 @@ export default async function AssessPage({ searchParams }: PageProps) {
     teacherId,
     academicYear,
   );
+  // Security: allocations are already filtered to this teacher's ID above.
+  // If ?alloc= doesn't match any of their allocations, treat as not found —
+  // the teacher either guessed a UUID or the allocation was removed.
   const selectedAlloc = allocId
     ? (allocations.find((a) => a.id === allocId) ?? null)
     : null;
+
+  // Redirect rather than silently showing the picker when an explicit alloc was given
+  // but doesn't belong to this teacher — prevents confusion from URL manipulation.
+  if (allocId && !selectedAlloc) redirect("/teacher/assess");
 
   const classData = selectedAlloc
     ? await fetchClassAssessments(

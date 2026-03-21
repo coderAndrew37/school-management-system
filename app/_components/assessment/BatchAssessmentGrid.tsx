@@ -3,17 +3,24 @@
 import { useState, useCallback, useTransition, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import {
-  Save,
-  Loader2,
+  CheckCircle2,
   ChevronDown,
   Edit3,
+  Loader2,
+  RefreshCw,
+  Save,
+  Sparkles,
   X,
-  CheckCircle2,
 } from "lucide-react";
 import {
   batchUpsertAssessmentsAction,
+  generateNarrativeAction,
   saveNarrativeAction,
 } from "@/lib/actions/assessment";
+import {
+  buildTemplateRemark,
+  summariseScores,
+} from "@/lib/utils/remark-templates";
 import { getStrands, formatStrand, SCORE_COLORS } from "@/lib/types/assessment";
 import type {
   CbcScore,
@@ -98,6 +105,7 @@ export function BatchAssessmentGrid({
   const [editingNarrative, setEditingNarrative] = useState<string | null>(null);
   const [draftNarrative, setDraftNarrative] = useState("");
   const [isSaving, startSave] = useTransition();
+  const [isGenerating, startGenerate] = useTransition();
   const dirtyCount = countDirty(grid);
   const gridRef = useRef<HTMLTableElement>(null);
 
@@ -188,12 +196,53 @@ export function BatchAssessmentGrid({
 
   // ── Narrative editing ─────────────────────────────────────────────────────
   const startEdit = (studentId: string) => {
-    setDraftNarrative(narratives[studentId] ?? "");
+    const existing = narratives[studentId];
+    if (existing) {
+      // Has existing remark — edit it as-is
+      setDraftNarrative(existing);
+    } else {
+      // No remark yet — pre-fill with template based on current scores
+      const student = students.find((s) => s.id === studentId);
+      const summary = summariseScores(studentId, subjectName, strands, grid);
+      setDraftNarrative(
+        student
+          ? buildTemplateRemark(student.full_name, grade, subjectName, summary)
+          : "",
+      );
+    }
     setEditingNarrative(studentId);
   };
   const cancelEdit = () => {
     setEditingNarrative(null);
     setDraftNarrative("");
+  };
+
+  const applyTemplate = (studentId: string) => {
+    const student = students.find((s) => s.id === studentId);
+    if (!student) return;
+    const summary = summariseScores(studentId, subjectName, strands, grid);
+    setDraftNarrative(
+      buildTemplateRemark(student.full_name, grade, subjectName, summary),
+    );
+  };
+
+  const generateAiRemark = (student: GridStudent) => {
+    startGenerate(async () => {
+      const fd = new FormData();
+      fd.append("student_id", student.id);
+      fd.append("student_name", student.full_name);
+      fd.append("subject_name", subjectName);
+      fd.append("grade", grade);
+      fd.append("term", String(term));
+      fd.append("academic_year", String(academicYear));
+      const res = await generateNarrativeAction(fd);
+      if (res.success && res.narrative) {
+        setDraftNarrative(res.narrative);
+        toast.success("AI remark generated — review and save.");
+      } else {
+        toast.error(res.message ?? "Generation failed");
+      }
+    });
   };
   const saveEdit = async (student: GridStudent) => {
     const fd = new FormData();
@@ -512,6 +561,31 @@ export function BatchAssessmentGrid({
                     <td className="border-l border-slate-200 px-3 py-3 align-top min-w-[220px]">
                       {isEditing ? (
                         <div className="space-y-2">
+                          {/* Template + AI helper buttons */}
+                          <div className="flex gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => applyTemplate(student.id)}
+                              title="Fill with score-based template"
+                              className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 px-2 py-1 text-[9px] font-bold text-slate-500 transition-colors"
+                            >
+                              <RefreshCw className="h-2.5 w-2.5" /> Template
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => generateAiRemark(student)}
+                              disabled={isGenerating}
+                              title="Generate richer remark with AI"
+                              className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 hover:bg-violet-100 px-2 py-1 text-[9px] font-bold text-violet-600 transition-colors disabled:opacity-50"
+                            >
+                              {isGenerating ? (
+                                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                              ) : (
+                                <Sparkles className="h-2.5 w-2.5" />
+                              )}
+                              AI Generate
+                            </button>
+                          </div>
                           <textarea
                             value={draftNarrative}
                             onChange={(e) => setDraftNarrative(e.target.value)}
@@ -528,7 +602,7 @@ export function BatchAssessmentGrid({
                               <Save className="h-3 w-3" /> Save
                             </button>
                             <button
-                              aria-label="cancel edit"
+                              aria-label="cancel editing"
                               onClick={cancelEdit}
                               className="px-2.5 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-700 text-[10px] transition-colors"
                             >
