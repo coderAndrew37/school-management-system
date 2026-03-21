@@ -107,7 +107,9 @@ export async function fetchTeachers(): Promise<Teacher[]> {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("teachers")
-    .select("id, full_name, tsc_number, email, phone_number, created_at")
+    .select(
+      "id, full_name, tsc_number, email, phone_number, status, last_invite_sent, created_at",
+    )
     .order("full_name", { ascending: true });
   if (error) {
     console.error("fetchTeachers error:", error);
@@ -116,31 +118,7 @@ export async function fetchTeachers(): Promise<Teacher[]> {
   return (data ?? []) as Teacher[];
 }
 
-// ── fetchParents ──────────────────────────────────────────────────────────────
-
-export async function fetchParents(): Promise<Parent[]> {
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("parents")
-    .select(
-      `id, full_name, email, phone_number, created_at,
-      student_parents (
-        students ( id, full_name, current_grade )
-      )`,
-    )
-    .order("full_name", { ascending: true });
-  if (error) {
-    console.error("fetchParents error:", error);
-    return [];
-  }
-  // Flatten children onto each parent for convenient access in the UI
-  return (data ?? []).map((p: any) => ({
-    ...p,
-    children: (p.student_parents ?? [])
-      .map((sp: any) => sp.students)
-      .filter(Boolean),
-  })) as Parent[];
-}
+// fetchParents → moved to lib/data/parents.ts as fetchAllParents
 
 // ── fetchDashboardStats ───────────────────────────────────────────────────────
 

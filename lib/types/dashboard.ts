@@ -1,11 +1,15 @@
 // lib/types/dashboard.ts
 
+export type TeacherStatus = "active" | "on_leave" | "resigned" | "terminated";
+
 export interface Teacher {
   id: string;
   full_name: string;
   tsc_number: string | null;
   email: string;
   phone_number: string | null;
+  status: TeacherStatus;
+  last_invite_sent: string | null;
   created_at: string;
 }
 
@@ -24,7 +28,7 @@ export interface ParentFeeBalance {
   student_name: string;
   total_paid: number;
   total_due: number;
-  balance: number; // positive = credit, negative = owes money
+  balance: number;
 }
 
 export interface ParentNotificationSummary {
@@ -41,11 +45,10 @@ export interface Parent {
   id: string;
   full_name: string;
   email: string;
-  phone_number: string | null; // nullable — not always collected
+  phone_number: string | null;
   created_at: string;
   invite_accepted: boolean;
-  last_invite_sent: string | null; // null if invite never sent
-  // joined from student_parents → students
+  last_invite_sent: string | null;
   children: ParentChild[];
 }
 
@@ -77,10 +80,9 @@ export interface Student {
   current_grade: string;
   photo_url: string | null;
   status: StudentStatus;
-  parent_id: string | null; // always null — kept for legacy compat
-  all_parents: StudentParentLink[]; // all linked parents, not just primary
+  parent_id: string | null;
+  all_parents: StudentParentLink[];
   created_at: string;
-  // joined from student_parents → parents (primary contact only)
   parents: Pick<Parent, "id" | "full_name" | "phone_number"> | null;
 }
 

@@ -1467,7 +1467,7 @@ export function StudentsTableClient({ students, uniqueGrades }: Props) {
                         {student.gender}
                       </span>
                     ) : (
-                      <span className="text-white/25">—</span>
+                      <span className="text-black/25">—</span>
                     )}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
