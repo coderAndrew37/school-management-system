@@ -121,6 +121,12 @@ export const ADMIN_LINKS: NavLink[] = [
     icon: Bell,
     group: "Comms",
   },
+  {
+    label: "Announcements",
+    href: "/admin/announcements",
+    icon: Megaphone,
+    group: "Comms",
+  },
 
   // ── System ────────────────────────────────────────────────────────────────
   {
