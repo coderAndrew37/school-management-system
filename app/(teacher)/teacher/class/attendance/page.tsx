@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fetchMyClassTeacherAssignments } from "@/lib/actions/class-teacher";
 import { fetchClassStudents } from "@/lib/data/assessment";
 import { ClassAttendanceClient } from "./ClassAttendanceClient";
@@ -38,13 +39,11 @@ export default async function ClassAttendancePage({ searchParams }: Props) {
 
   const { grades } = assignment;
   const sp = await searchParams;
-  const gradeParam = sp.grade;
-  const dateParam = sp.date;
   const tabParam = sp.tab === "trends" ? "trends" : "register";
 
   const activeGrade =
-    gradeParam && grades.includes(gradeParam)
-      ? gradeParam
+    sp.grade && grades.includes(sp.grade)
+      ? sp.grade
       : grades.length === 1
         ? grades[0]!
         : null;
@@ -60,78 +59,85 @@ export default async function ClassAttendancePage({ searchParams }: Props) {
 
   const today = toLocalDate(new Date());
   const selectedDate =
-    dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) && dateParam <= today
-      ? dateParam
+    sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) && sp.date <= today
+      ? sp.date
       : today;
 
   const students = await fetchClassStudents(activeGrade);
   const studentIds = students.map((s) => s.id);
 
-  // Week range for indicator dots
+  // ── Week range for nav dots ───────────────────────────────────────────────
   const weekStart = new Date(selectedDate + "T00:00:00");
   weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 4);
 
-  // 30-day lookback for trends
+  // ── 30-day lookback ───────────────────────────────────────────────────────
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
+  if (studentIds.length === 0) {
+    return (
+      <ClassAttendanceClient
+        teacherName={teacher.full_name}
+        grade={activeGrade}
+        grades={grades}
+        students={[]}
+        studentsWithParents={[]}
+        selectedDate={selectedDate}
+        today={today}
+        preFill={{}}
+        weekDatesRecorded={[]}
+        attendanceHistory={{}}
+        classWeeklyTrend={[]}
+        activeTab={tabParam}
+      />
+    );
+  }
+
+  // ── All queries in parallel ───────────────────────────────────────────────
   const [dateAttRes, weekAttRes, historyRes, parentsRes] = await Promise.all([
-    // Today's attendance for the register
-    studentIds.length > 0
-      ? supabase
-          .from("attendance")
-          .select("student_id, status, remarks")
-          .in("student_id", studentIds)
-          .eq("date", selectedDate)
-      : Promise.resolve({ data: [] }),
+    supabase
+      .from("attendance")
+      .select("student_id, status, remarks")
+      .in("student_id", studentIds)
+      .eq("date", selectedDate),
 
-    // Week records for indicator dots
-    studentIds.length > 0
-      ? supabase
-          .from("attendance")
-          .select("date")
-          .in("student_id", studentIds)
-          .gte("date", toLocalDate(weekStart))
-          .lte("date", toLocalDate(weekEnd))
-      : Promise.resolve({ data: [] }),
+    supabase
+      .from("attendance")
+      .select("date")
+      .in("student_id", studentIds)
+      .gte("date", toLocalDate(weekStart))
+      .lte("date", toLocalDate(weekEnd)),
 
-    // 30-day history for trends
-    studentIds.length > 0
-      ? supabase
-          .from("attendance")
-          .select("student_id, date, status")
-          .in("student_id", studentIds)
-          .gte("date", toLocalDate(thirtyDaysAgo))
-          .order("date", { ascending: true })
-      : Promise.resolve({ data: [] }),
+    supabase
+      .from("attendance")
+      .select("student_id, date, status")
+      .in("student_id", studentIds)
+      .gte("date", toLocalDate(thirtyDaysAgo))
+      .order("date", { ascending: true }),
 
-    // Parent contacts — join through student_parents → parents
-    studentIds.length > 0
-      ? supabase
-          .from("student_parents")
-          .select("student_id, parents ( full_name, email, phone_number )")
-          .in("student_id", studentIds)
-      : Promise.resolve({ data: [] }),
+    // Use supabaseAdmin to bypass RLS — teachers can't read parents table directly
+    supabaseAdmin
+      .from("student_parents")
+      .select("student_id, parents ( id, full_name, email, phone_number )")
+      .in("student_id", studentIds),
   ]);
 
-  // Build preFill
+  // ── preFill ───────────────────────────────────────────────────────────────
+  type AttRow = { student_id: string; status: string; remarks: string | null };
   const preFill: Record<string, { status: string; remarks: string }> = {};
-  for (const r of (dateAttRes.data ?? []) as {
-    student_id: string;
-    status: string;
-    remarks: string | null;
-  }[]) {
+  for (const r of (dateAttRes.data ?? []) as AttRow[]) {
     preFill[r.student_id] = { status: r.status, remarks: r.remarks ?? "" };
   }
 
-  // Dates with records this week
+  // ── Week indicator dots ───────────────────────────────────────────────────
+  type DateRow = { date: string };
   const weekDatesRecorded = [
-    ...new Set((weekAttRes.data ?? []).map((r: { date: string }) => r.date)),
+    ...new Set((weekAttRes.data ?? []).map((r) => (r as DateRow).date)),
   ];
 
-  // 30-day history grouped by studentId
+  // ── 30-day history ────────────────────────────────────────────────────────
   type AttStatus = "Present" | "Absent" | "Late" | "Excused";
   type HistoryRow = { student_id: string; date: string; status: AttStatus };
   const attendanceHistory: Record<
@@ -143,26 +149,68 @@ export default async function ClassAttendancePage({ searchParams }: Props) {
     attendanceHistory[r.student_id]!.push({ date: r.date, status: r.status });
   }
 
-  // Parent contacts grouped by studentId
-  type ParentJoinRow = {
-    student_id: string;
-    parents: {
+  // ── Weekly class trend (last 5 weeks Mon-Fri, rate per week) ─────────────
+  type WeekPoint = {
+    week: string;
+    rate: number;
+    present: number;
+    absent: number;
+    total: number;
+  };
+  const allHistory = (historyRes.data ?? []) as unknown as HistoryRow[];
+  const weekBuckets: Record<string, { present: number; total: number }> = {};
+  for (const r of allHistory) {
+    const d = new Date(r.date + "T00:00:00");
+    const mon = new Date(d);
+    mon.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    const key = toLocalDate(mon);
+    if (!weekBuckets[key]) weekBuckets[key] = { present: 0, total: 0 };
+    weekBuckets[key]!.total++;
+    if (r.status === "Present" || r.status === "Late")
+      weekBuckets[key]!.present++;
+  }
+  const classWeeklyTrend: WeekPoint[] = Object.entries(weekBuckets)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-6)
+    .map(([week, { present, total }]) => {
+      const absent = total - present;
+      const d = new Date(week + "T00:00:00");
+      const label = d.toLocaleDateString("en-KE", {
+        day: "numeric",
+        month: "short",
+      });
+      return {
+        week: label,
+        rate: total > 0 ? Math.round((present / total) * 100) : 0,
+        present,
+        absent,
+        total,
+      };
+    });
+
+  // ── Parent contacts (via admin to bypass RLS) ─────────────────────────────
+  type ParentObj = {
+    id: string;
+    full_name: string;
+    email: string;
+    phone_number: string | null;
+  } | null;
+  type JoinRow = { student_id: string; parents: ParentObj };
+  const parentsByStudent: Record<
+    string,
+    {
+      id: string;
       full_name: string;
       email: string;
       phone_number: string | null;
-    } | null;
-  };
-  const parentsByStudent: Record<
-    string,
-    { full_name: string; email: string; phone_number: string | null }[]
+    }[]
   > = {};
-  for (const r of (parentsRes.data ?? []) as unknown as ParentJoinRow[]) {
+  for (const r of (parentsRes.data ?? []) as unknown as JoinRow[]) {
     if (!r.parents) continue;
     if (!parentsByStudent[r.student_id]) parentsByStudent[r.student_id] = [];
     parentsByStudent[r.student_id]!.push(r.parents);
   }
 
-  // Merge parents onto students
   const studentsWithParents = students.map((s) => ({
     ...s,
     parents: parentsByStudent[s.id] ?? [],
@@ -180,6 +228,7 @@ export default async function ClassAttendancePage({ searchParams }: Props) {
       preFill={preFill}
       weekDatesRecorded={weekDatesRecorded}
       attendanceHistory={attendanceHistory}
+      classWeeklyTrend={classWeeklyTrend}
       activeTab={tabParam}
     />
   );
