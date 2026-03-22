@@ -1,281 +1,325 @@
-"use server";
-
-import { revalidatePath } from "next/cache";
-import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { getSession } from "@/lib/actions/auth";
-import {
-  GRADE_LEVEL_MAP,
-  NARRATIVE_CONTEXT,
-  SCORE_LABELS,
-} from "@/lib/types/assessment";
-import type { CbcScore } from "@/lib/types/assessment";
+import type { SubjectLevel } from "@/lib/types/allocation";
+import type { CbcScore, AssessmentGridState } from "@/lib/types/assessment";
 
-export interface AssessmentActionResult {
-  success: boolean;
-  message: string;
-  savedCount?: number;
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface TeacherAllocationSummary {
+  id: string;
+  grade: string;
+  subjectName: string;
+  subjectCode: string;
+  subjectLevel: SubjectLevel;
+  weeklyLessons: number;
+  studentCount: number;
 }
 
-export interface NarrativeResult {
-  success: boolean;
-  narrative?: string;
-  message: string;
+export interface ClassStudent {
+  id: string;
+  full_name: string;
+  readable_id: string | null;
+  gender: "Male" | "Female" | null;
+  current_grade: string;
 }
 
-// ── Guard: teachers only ──────────────────────────────────────────────────────
+export interface ClassAssessmentData {
+  students: ClassStudent[];
+  gridState: AssessmentGridState; // flat: `${studentId}:${subjectName}:${strandId}`
+  prevTermScores: AssessmentGridState | null; // flat grid from the previous term, null if none
+  hasPrevTerm: boolean; // true when prevTermScores has at least one score
+}
 
-async function requireTeacher(): Promise<{
-  teacherId: string;
-  userId: string;
-}> {
-  const session = await getSession();
-  if (!session) throw new Error("Not authenticated");
-  if (session.profile.role !== "teacher" && session.profile.role !== "admin") {
-    throw new Error("Forbidden");
+export interface TeacherDiaryEntry {
+  id: string;
+  student_id: string;
+  student_name: string;
+  grade: string;
+  title: string;
+  content: string | null;
+  homework: boolean;
+  due_date: string | null;
+  is_completed: boolean;
+  created_at: string;
+}
+
+export interface AttendanceRecord {
+  id: string;
+  student_id: string;
+  status: "Present" | "Absent" | "Late";
+  date: string;
+  remarks: string | null;
+}
+
+// ── Raw DB shapes ─────────────────────────────────────────────────────────────
+
+interface RawAllocationRow {
+  id: string;
+  teacher_id: string;
+  subject_id: string;
+  grade: string;
+  academic_year: number;
+  created_at: string;
+  teachers:
+    | {
+        id: string;
+        full_name: string;
+        email: string;
+        tsc_number: string | null;
+      }[]
+    | null;
+  subjects:
+    | {
+        id: string;
+        name: string;
+        code: string;
+        level: SubjectLevel;
+        weekly_lessons: number;
+      }[]
+    | null;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+async function fetchStudentCountsByGrade(
+  grades: string[],
+): Promise<Record<string, number>> {
+  if (grades.length === 0) return {};
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .from("students")
+    .select("current_grade")
+    .in("current_grade", grades);
+  const counts: Record<string, number> = {};
+  for (const row of (data ?? []) as { current_grade: string }[])
+    counts[row.current_grade] = (counts[row.current_grade] ?? 0) + 1;
+  return counts;
+}
+
+/** Build a flat AssessmentGridState from raw DB rows.
+ *  Key format: `${studentId}:${subjectName}:${strandId}` — matches BatchAssessmentGrid. */
+function buildGridState(
+  rows: { student_id: string; strand_id: string; score: CbcScore | null }[],
+  subjectName: string,
+  dirty = false,
+): AssessmentGridState {
+  const grid: AssessmentGridState = {};
+  for (const row of rows) {
+    if (!row.score) continue;
+    const key = `${row.student_id}:${subjectName}:${row.strand_id}`;
+    grid[key] = { assessmentId: null, score: row.score, dirty };
   }
-  return {
-    teacherId: session.profile.teacher_id ?? "",
-    userId: session.user.id,
-  };
+  return grid;
 }
 
-// ── 1. Batch upsert assessments ───────────────────────────────────────────────
+// ── Public API ────────────────────────────────────────────────────────────────
 
-const rowSchema = z.object({
-  studentId: z.string().uuid(),
-  subjectName: z.string().min(1),
-  strandId: z.string().min(1),
-  score: z.enum(["EE", "ME", "AE", "BE"]).nullable(),
-  term: z.number().int().min(1).max(3),
-  academicYear: z.number().int(),
-});
-
-export async function batchUpsertAssessmentsAction(
-  rows: {
-    studentId: string;
-    subjectName: string;
-    strandId: string;
-    score: CbcScore | null;
-    term: number;
-    academicYear: number;
-  }[],
-): Promise<AssessmentActionResult> {
-  const { teacherId } = await requireTeacher();
+export async function fetchTeacherAssessmentAllocations(
+  teacherId: string,
+  academicYear = 2026,
+): Promise<TeacherAllocationSummary[]> {
   const supabase = await createSupabaseServerClient();
 
-  if (rows.length === 0) {
-    return { success: true, message: "Nothing to save.", savedCount: 0 };
-  }
-
-  const validated = rows.map((r) => rowSchema.safeParse(r));
-  const invalid = validated.filter((v) => !v.success);
-  if (invalid.length > 0) {
-    return { success: false, message: "Some rows failed validation." };
-  }
-
-  const upsertRows = validated
-    .filter((v) => v.success && (v as any).data.score !== null)
-    .map((v) => {
-      const d = (v as any).data;
-      return {
-        student_id: d.studentId,
-        subject_name: d.subjectName,
-        strand_id: d.strandId,
-        score: d.score,
-        term: d.term,
-        academic_year: d.academicYear,
-        teacher_id: teacherId || null,
-      };
-    });
-
-  const clearRows = validated
-    .filter((v) => v.success && (v as any).data.score === null)
-    .map((v) => (v as any).data);
-
-  let savedCount = 0;
-
-  if (upsertRows.length > 0) {
-    const { error } = await supabase.from("assessments").upsert(upsertRows, {
-      onConflict: "student_id,subject_name,strand_id,term,academic_year",
-      ignoreDuplicates: false,
-    });
-
-    if (error) {
-      console.error("[batchUpsertAssessments]", error);
-      return { success: false, message: "Database error: " + error.message };
-    }
-    savedCount = upsertRows.length;
-  }
-
-  for (const r of clearRows) {
-    await supabase.from("assessments").delete().match({
-      student_id: r.studentId,
-      subject_name: r.subjectName,
-      strand_id: r.strandId,
-      term: r.term,
-      academic_year: r.academicYear,
-    });
-  }
-
-  revalidatePath("/teacher/assess");
-  return {
-    success: true,
-    message: `Saved ${savedCount} assessment${savedCount !== 1 ? "s" : ""}.`,
-    savedCount,
-  };
-}
-
-// ── 2. Generate AI narrative remark ──────────────────────────────────────────
-
-export async function generateNarrativeAction(
-  fd: FormData,
-): Promise<NarrativeResult> {
-  await requireTeacher();
-  const supabase = await createSupabaseServerClient();
-
-  const studentId = fd.get("student_id") as string;
-  const studentName = fd.get("student_name") as string;
-  const subjectName = fd.get("subject_name") as string;
-  const grade = fd.get("grade") as string;
-  const term = parseInt(fd.get("term") as string, 10);
-  const academicYear = parseInt(
-    (fd.get("academic_year") as string) || "2026",
-    10,
-  );
-
-  const { data: assessData } = await supabase
-    .from("assessments")
-    .select("strand_id, score")
-    .eq("student_id", studentId)
-    .eq("subject_name", subjectName)
-    .eq("term", term)
-    .eq("academic_year", academicYear);
-
-  const scores = (assessData ?? []) as { strand_id: string; score: CbcScore }[];
-
-  if (scores.length === 0) {
-    return {
-      success: false,
-      message: "No scores recorded yet for this student in this subject.",
-    };
-  }
-
-  const scoreSummary = scores
-    .map(
-      (s) =>
-        `- ${s.strand_id.replace(/-/g, " ")}: ${s.score} (${SCORE_LABELS[s.score]})`,
+  const { data, error } = await supabase
+    .from("teacher_subject_allocations")
+    .select(
+      `
+      id, teacher_id, subject_id, grade, academic_year, created_at,
+      teachers ( id, full_name, email, tsc_number ),
+      subjects ( id, name, code, level, weekly_lessons )
+    `,
     )
-    .join("\n");
+    .eq("teacher_id", teacherId)
+    .eq("academic_year", academicYear)
+    .order("grade")
+    .returns<RawAllocationRow[]>();
 
-  const level = GRADE_LEVEL_MAP[grade] ?? "upper_primary";
-  const gradeContext = NARRATIVE_CONTEXT[level];
+  if (error || !data) return [];
 
-  const prompt = `${gradeContext}
+  const grades = [...new Set(data.map((r) => r.grade))];
+  const studentCounts = await fetchStudentCountsByGrade(grades);
 
-Student: ${studentName}
-Grade: ${grade}
-Subject: ${subjectName}
-Term: ${term}
-
-Strand Performance:
-${scoreSummary}
-
-Write a narrative remark for ${studentName}'s ${subjectName} performance this term. 
-Do not include the student's name in the remark — it will be prefixed automatically.
-Do not use bullet points or lists. Write in flowing prose.
-Do not mention letter codes like EE/ME/AE/BE — describe performance naturally.
-Respond with ONLY the narrative remark text, no preamble.`;
-
-  try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 200,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-
-    if (!response.ok) {
-      const err = await response.text();
-      console.error("[generateNarrative] API error:", err);
-      return { success: false, message: "AI service error. Please try again." };
-    }
-
-    const data = (await response.json()) as {
-      content: { type: string; text: string }[];
+  return data.map((row): TeacherAllocationSummary => {
+    // Supabase returns subjects as a plain object on many-to-one FK joins,
+    // but occasionally as a single-element array. Guard handles both shapes.
+    type SubjectShape = {
+      id: string;
+      name: string;
+      code: string;
+      level: SubjectLevel;
+      weekly_lessons: number;
     };
-
-    const narrative = data.content
-      .filter((c) => c.type === "text")
-      .map((c) => c.text)
-      .join("")
-      .trim();
-
-    if (!narrative) {
-      return { success: false, message: "No narrative returned." };
-    }
-
-    await supabase.from("assessment_narratives").upsert(
-      {
-        student_id: studentId,
-        subject_name: subjectName,
-        term,
-        academic_year: academicYear,
-        narrative,
-        generated_at: new Date().toISOString(),
-      },
-      { onConflict: "student_id,subject_name,term,academic_year" },
-    );
-
-    revalidatePath("/teacher/assess");
-    // FIXED: Added missing 'message' property required by NarrativeResult
+    type RowWithSubject = Omit<typeof row, "subjects"> & {
+      subjects: SubjectShape | SubjectShape[] | null;
+    };
+    const subjects = (row as RowWithSubject).subjects;
+    const sub: SubjectShape | null = Array.isArray(subjects)
+      ? (subjects[0] ?? null)
+      : subjects;
     return {
-      success: true,
-      narrative,
-      message: "Narrative generated successfully.",
+      id: row.id,
+      grade: row.grade,
+      subjectName: sub?.name ?? "Unknown Subject",
+      subjectCode: sub?.code ?? "—",
+      subjectLevel: sub?.level ?? "upper_primary",
+      weeklyLessons: sub?.weekly_lessons ?? 0,
+      studentCount: studentCounts[row.grade] ?? 0,
     };
-  } catch (err) {
-    console.error("[generateNarrative]", err);
-    return { success: false, message: "Failed to generate narrative." };
-  }
+  });
 }
 
-// ── 3. Save a manually edited narrative ──────────────────────────────────────
-
-export async function saveNarrativeAction(
-  fd: FormData,
-): Promise<NarrativeResult> {
-  await requireTeacher();
+/**
+ * Fetch students + their existing assessments for one class/subject/term.
+ * Also fetches the previous term's scores so the grid can offer copy-forward.
+ *
+ * Grid state key format: `${studentId}:${subjectName}:${strandId}`
+ */
+export async function fetchClassAssessments(
+  grade: string,
+  subjectName: string,
+  term: 1 | 2 | 3,
+  academicYear = 2026,
+): Promise<ClassAssessmentData> {
   const supabase = await createSupabaseServerClient();
+  const prevTerm = term > 1 ? ((term - 1) as 1 | 2) : null;
 
-  const studentId = fd.get("student_id") as string;
-  const subjectName = fd.get("subject_name") as string;
-  const term = parseInt(fd.get("term") as string, 10);
-  const academicYear = parseInt(
-    (fd.get("academic_year") as string) || "2026",
-    10,
-  );
-  const narrative = ((fd.get("narrative") as string) ?? "").trim();
+  type AssessRow = {
+    student_id: string;
+    strand_id: string;
+    score: CbcScore | null;
+  };
 
-  if (!narrative)
-    return { success: false, message: "Narrative cannot be empty." };
+  // Three-way parallel fetch.
+  // prevTerm slot resolves to empty array when term === 1 to avoid the
+  // PostgrestFilterBuilder-is-not-a-Promise type error from a dynamic queries array.
+  const [studentsRes, currentRes, prevRes] = await Promise.all([
+    supabase
+      .from("students")
+      .select("id, full_name, readable_id, gender, current_grade")
+      .eq("current_grade", grade)
+      .eq("status", "active")
+      .order("full_name")
+      .returns<ClassStudent[]>(),
 
-  const { error } = await supabase.from("assessment_narratives").upsert(
-    {
-      student_id: studentId,
-      subject_name: subjectName,
-      term,
-      academic_year: academicYear,
-      narrative,
-      generated_at: new Date().toISOString(),
-    },
-    { onConflict: "student_id,subject_name,term,academic_year" },
-  );
+    supabase
+      .from("assessments")
+      .select("student_id, strand_id, score")
+      .eq("subject_name", subjectName)
+      .eq("term", term)
+      .eq("academic_year", academicYear),
 
-  if (error) return { success: false, message: "Failed to save." };
-  revalidatePath("/teacher/assess");
-  return { success: true, narrative, message: "Saved." };
+    prevTerm
+      ? supabase
+          .from("assessments")
+          .select("student_id, strand_id, score")
+          .eq("subject_name", subjectName)
+          .eq("term", prevTerm)
+          .eq("academic_year", academicYear)
+      : Promise.resolve({ data: [] as AssessRow[], error: null }),
+  ]);
+
+  const students = (studentsRes.data ?? []) as ClassStudent[];
+  const assessments = (currentRes.data ?? []) as AssessRow[];
+  const prevAssessments = (prevRes.data ?? []) as AssessRow[];
+
+  const gridState = buildGridState(assessments, subjectName, false);
+  const prevTermScores = prevTerm
+    ? buildGridState(prevAssessments, subjectName, false)
+    : null;
+
+  return {
+    students,
+    gridState,
+    prevTermScores,
+    hasPrevTerm:
+      prevTerm !== null && Object.keys(prevTermScores ?? {}).length > 0,
+  };
+}
+
+/**
+ * All students in a grade — used for attendance + diary views.
+ */
+export async function fetchClassStudents(
+  grade: string,
+): Promise<ClassStudent[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("students")
+    .select("id, full_name, readable_id, gender, current_grade")
+    .eq("current_grade", grade)
+    .eq("status", "active")
+    .order("full_name")
+    .returns<ClassStudent[]>();
+  if (error) {
+    console.error("[fetchClassStudents]", error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+export async function fetchClassAttendance(
+  grade: string,
+  date: string,
+): Promise<AttendanceRecord[]> {
+  const supabase = await createSupabaseServerClient();
+  const students = await fetchClassStudents(grade);
+  if (students.length === 0) return [];
+  const { data, error } = await supabase
+    .from("attendance")
+    .select("id, student_id, status, date, remarks")
+    .in(
+      "student_id",
+      students.map((s) => s.id),
+    )
+    .eq("date", date)
+    .returns<AttendanceRecord[]>();
+  if (error) {
+    console.error("[fetchClassAttendance]", error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+export async function fetchTeacherDiaryEntries(
+  grades: string[],
+  limit = 20,
+): Promise<TeacherDiaryEntry[]> {
+  if (grades.length === 0) return [];
+  const supabase = await createSupabaseServerClient();
+  const { data: studentRows } = await supabase
+    .from("students")
+    .select("id, full_name, current_grade")
+    .in("current_grade", grades);
+  const studentMap: Record<string, { name: string; grade: string }> = {};
+  for (const s of (studentRows ?? []) as {
+    id: string;
+    full_name: string;
+    current_grade: string;
+  }[])
+    studentMap[s.id] = { name: s.full_name, grade: s.current_grade };
+  const studentIds = Object.keys(studentMap);
+  if (studentIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("student_diary")
+    .select(
+      "id, student_id, title, content, homework, due_date, is_completed, created_at",
+    )
+    .in("student_id", studentIds)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error("[fetchTeacherDiaryEntries]", error.message);
+    return [];
+  }
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    student_id: row.student_id,
+    student_name: studentMap[row.student_id]?.name ?? "Unknown",
+    grade: studentMap[row.student_id]?.grade ?? "—",
+    title: row.title,
+    content: row.content,
+    homework: row.homework,
+    due_date: row.due_date,
+    is_completed: row.is_completed,
+    created_at: row.created_at,
+  }));
 }

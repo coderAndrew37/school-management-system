@@ -2,11 +2,10 @@
 
 // lib/actions/teacher.ts
 
+import { notifyAbsence } from "@/lib/notifications/parent-notify";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { notifyAbsence } from "@/lib/notifications/parent-notify";
 import { supabaseAdmin } from "../supabase/admin";
 
 export interface ActionResult {
