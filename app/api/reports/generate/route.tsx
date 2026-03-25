@@ -11,9 +11,8 @@ import React from "react";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ReportCardPage } from "@/lib/pdf/ReportCardDocument";
-import { getLogoPublicUrl } from "@/lib/utils/settings";
-
-// ── Score helper ──────────────────────────────────────────────────────────────
+import { getLogoPublicUrl, getActiveTermYear } from "@/lib/utils/settings";
+import { getStudentPhotoUrl } from "@/lib/utils/student-photo";
 
 const SCORE_N: Record<string, number> = { EE: 4, ME: 3, AE: 2, BE: 1 };
 
@@ -26,11 +25,8 @@ function computeOverall(scores: string[]): string {
   return "BE";
 }
 
-// ── Route ─────────────────────────────────────────────────────────────────────
-
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    // Auth
     const supabase = await createSupabaseServerClient();
     const {
       data: { user },
@@ -49,7 +45,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const body = await req.json();
     const grade = body.grade as string;
     const term = Number(body.term);
-    const academicYear = Number(body.academic_year ?? 2026);
+    // Use school_settings active year if caller didn't specify
+    const { academicYear: defaultYear } = await getActiveTermYear();
+    const academicYear = Number(body.academic_year ?? defaultYear);
 
     if (!grade || ![1, 2, 3].includes(term))
       return NextResponse.json(
@@ -57,22 +55,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { status: 400 },
       );
 
-    // Class teachers can only generate for their assigned grade
     if (profile.role === "teacher") {
+      // Filter by both teacher_id AND grade — handles multi-grade teachers correctly
       const { data: assignment } = await supabaseAdmin
         .from("class_teacher_assignments")
-        .select("grade")
+        .select("id")
         .eq("teacher_id", user.id)
+        .eq("grade", grade)
         .eq("academic_year", academicYear)
         .maybeSingle();
-      if (!assignment || assignment.grade !== grade)
+      if (!assignment)
         return NextResponse.json(
           { error: "Not your assigned grade" },
           { status: 403 },
         );
     }
 
-    // Parallel: students + assessments + attendance + report cards + settings
     const [studentsRes, assessRes, attRes, rcRes, settingsRes] =
       await Promise.all([
         supabaseAdmin
@@ -124,7 +122,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const reportCards = (rcRes.data ?? []) as any[];
     const settings = settingsRes.data;
 
-    // Resolve class teacher name (first generated_by for this grade)
     let classTeacherName = "Class Teacher";
     const firstRc = reportCards[0];
     if (firstRc?.generated_by) {
@@ -145,15 +142,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         : undefined,
     };
 
-    // Build per-student pages
     const pages = students.map((student: any) => {
-      // Attendance
       const sa = attRows.filter((r: any) => r.student_id === student.id);
       const present = sa.filter((r: any) => r.status === "Present").length;
       const absent = sa.filter((r: any) => r.status === "Absent").length;
       const late = sa.filter((r: any) => r.status === "Late").length;
 
-      // Subject map (deduplicate by strand_id, latest wins)
       const subjectMap = new Map<
         string,
         { strand_id: string; score: string; teacher_remarks: string | null }[]
@@ -186,9 +180,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           gender: student.gender ?? undefined,
           dateOfBirth: student.date_of_birth,
           grade: student.current_grade,
-          photoUrl: student.photo_url
-            ? (getLogoPublicUrl(student.photo_url) ?? undefined)
-            : undefined,
+          photoUrl: getStudentPhotoUrl(student.photo_url) ?? undefined,
         },
         report: {
           term,
@@ -213,6 +205,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ...pages,
     );
 
+    // Buffer.from converts the Node Buffer returned by renderToBuffer
+    // into a Uint8Array, which NextResponse accepts as BodyInit.
     const buffer = Buffer.from(await renderToBuffer(doc as any));
     const filename = `${grade.replace(/\s+/g, "_")}_Term${term}_${academicYear}_Reports.pdf`;
 

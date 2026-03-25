@@ -180,6 +180,8 @@ const s = StyleSheet.create({
     backgroundColor: C.s200,
     marginRight: 12,
   },
+  initialsBox: { alignItems: "center", justifyContent: "center" },
+  initialsText: { fontSize: 18, fontWeight: "bold", color: C.s600 },
   infoRow: { flexDirection: "row", marginBottom: 4 },
   infoLabel: {
     color: C.s400,
@@ -412,8 +414,19 @@ function ReportContent({
       <View style={s.content}>
         {/* ── Student info ── */}
         <View style={s.infoCard}>
-          {student.photoUrl && (
+          {student.photoUrl ? (
             <Image src={student.photoUrl} style={s.photoBox} />
+          ) : (
+            <View style={[s.photoBox, s.initialsBox]}>
+              <Text style={s.initialsText}>
+                {student.fullName
+                  .split(" ")
+                  .slice(0, 2)
+                  .map((n: string) => n[0] ?? "")
+                  .join("")
+                  .toUpperCase()}
+              </Text>
+            </View>
           )}
           <View style={[s.infoCol, { flex: 2 }]}>
             {[

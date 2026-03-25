@@ -1,3 +1,4 @@
+// lib/data/assessment.ts
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { SubjectLevel } from "@/lib/types/allocation";
 import type { CbcScore, AssessmentGridState } from "@/lib/types/assessment";
@@ -25,21 +26,8 @@ export interface ClassStudent {
 export interface ClassAssessmentData {
   students: ClassStudent[];
   gridState: AssessmentGridState; // flat: `${studentId}:${subjectName}:${strandId}`
-  prevTermScores: AssessmentGridState | null; // flat grid from the previous term, null if none
+  prevTermScores: AssessmentGridState | null; // flat grid from the previous term
   hasPrevTerm: boolean; // true when prevTermScores has at least one score
-}
-
-export interface TeacherDiaryEntry {
-  id: string;
-  student_id: string;
-  student_name: string;
-  grade: string;
-  title: string;
-  content: string | null;
-  homework: boolean;
-  due_date: string | null;
-  is_completed: boolean;
-  created_at: string;
 }
 
 export interface AttendanceRecord {
@@ -89,14 +77,14 @@ async function fetchStudentCountsByGrade(
     .from("students")
     .select("current_grade")
     .in("current_grade", grades);
+
   const counts: Record<string, number> = {};
   for (const row of (data ?? []) as { current_grade: string }[])
     counts[row.current_grade] = (counts[row.current_grade] ?? 0) + 1;
   return counts;
 }
 
-/** Build a flat AssessmentGridState from raw DB rows.
- *  Key format: `${studentId}:${subjectName}:${strandId}` — matches BatchAssessmentGrid. */
+/** Build a flat AssessmentGridState from raw DB rows. */
 function buildGridState(
   rows: { student_id: string; strand_id: string; score: CbcScore | null }[],
   subjectName: string,
@@ -139,8 +127,6 @@ export async function fetchTeacherAssessmentAllocations(
   const studentCounts = await fetchStudentCountsByGrade(grades);
 
   return data.map((row): TeacherAllocationSummary => {
-    // Supabase returns subjects as a plain object on many-to-one FK joins,
-    // but occasionally as a single-element array. Guard handles both.
     const rawRow = row as any;
     const sub = Array.isArray(rawRow.subjects)
       ? rawRow.subjects[0]
@@ -157,12 +143,6 @@ export async function fetchTeacherAssessmentAllocations(
   });
 }
 
-/**
- * Fetch students + their existing assessments for one class/subject/term.
- * Also fetches the previous term's scores so the grid can offer copy-forward.
- *
- * Grid state key format: `${studentId}:${subjectName}:${strandId}`
- */
 export async function fetchClassAssessments(
   grade: string,
   subjectName: string,
@@ -178,9 +158,6 @@ export async function fetchClassAssessments(
     score: CbcScore | null;
   };
 
-  // Three-way parallel fetch.
-  // prevTerm slot resolves to empty array when term === 1 to avoid the
-  // PostgrestFilterBuilder-is-not-a-Promise type error from a dynamic queries array.
   const [studentsRes, currentRes, prevRes] = await Promise.all([
     supabase
       .from("students")
@@ -225,9 +202,6 @@ export async function fetchClassAssessments(
   };
 }
 
-/**
- * All students in a grade — used for attendance + diary views.
- */
 export async function fetchClassStudents(
   grade: string,
 ): Promise<ClassStudent[]> {
@@ -267,45 +241,4 @@ export async function fetchClassAttendance(
     return [];
   }
   return data ?? [];
-}
-
-export async function fetchTeacherDiaryEntries(
-  grades: string[],
-  limit = 20,
-): Promise<TeacherDiaryEntry[]> {
-  if (grades.length === 0) return [];
-  const supabase = await createSupabaseServerClient();
-  const { data: studentRows } = await supabase
-    .from("students")
-    .select("id, full_name, current_grade")
-    .in("current_grade", grades);
-  const studentMap: Record<string, { name: string; grade: string }> = {};
-  for (const s of (studentRows ?? []) as any[])
-    studentMap[s.id] = { name: s.full_name, grade: s.current_grade };
-  const studentIds = Object.keys(studentMap);
-  if (studentIds.length === 0) return [];
-  const { data, error } = await supabase
-    .from("student_diary")
-    .select(
-      "id, student_id, title, content, homework, due_date, is_completed, created_at",
-    )
-    .in("student_id", studentIds)
-    .order("created_at", { ascending: false })
-    .limit(limit);
-  if (error) {
-    console.error("[fetchTeacherDiaryEntries]", error.message);
-    return [];
-  }
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    student_id: row.student_id,
-    student_name: studentMap[row.student_id]?.name ?? "Unknown",
-    grade: studentMap[row.student_id]?.grade ?? "—",
-    title: row.title,
-    content: row.content,
-    homework: row.homework,
-    due_date: row.due_date,
-    is_completed: row.is_completed,
-    created_at: row.created_at,
-  }));
 }

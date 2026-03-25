@@ -10,7 +10,8 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ReportCardDocument } from "@/lib/pdf/ReportCardDocument";
-import { getLogoPublicUrl } from "@/lib/utils/settings";
+import { getActiveTermYear, getLogoPublicUrl } from "@/lib/utils/settings";
+import { getStudentPhotoUrl } from "@/lib/utils/student-photo";
 
 // ── Score helper ──────────────────────────────────────────────────────────────
 
@@ -31,7 +32,9 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const studentId = searchParams.get("studentId");
   const termStr = searchParams.get("term");
-  const yearStr = searchParams.get("year") ?? "2026";
+  // Fall back to school_settings active year if not specified
+  const { academicYear: defaultYear } = await getActiveTermYear();
+  const yearStr = searchParams.get("year") ?? String(defaultYear);
 
   if (!studentId || !termStr)
     return NextResponse.json(
@@ -196,9 +199,7 @@ export async function GET(req: NextRequest) {
       gender: studentRes.data.gender ?? undefined,
       dateOfBirth: studentRes.data.date_of_birth,
       grade: studentRes.data.current_grade,
-      photoUrl: studentRes.data.photo_url
-        ? (getLogoPublicUrl(studentRes.data.photo_url) ?? undefined)
-        : undefined,
+      photoUrl: getStudentPhotoUrl(studentRes.data.photo_url) ?? undefined,
     },
     report: {
       term,

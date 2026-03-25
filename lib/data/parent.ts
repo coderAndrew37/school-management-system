@@ -6,7 +6,6 @@ import type {
   AttendanceRecord,
   ChildWithAssessments,
   CommMessage,
-  DiaryEntry,
   GalleryItem,
   JssPathway,
   StudentNotification,
@@ -19,7 +18,12 @@ import type {
   FeePayment,
 } from "@/lib/types/governance";
 
-export type { AttendanceRecord, DiaryEntry } from "@/lib/types/parent";
+// Import the consolidated diary types
+import {
+  TeacherDiaryEntry,
+  ClassDiaryEntry,
+  ObservationEntry,
+} from "../types/diary";
 
 // ── Published report card as seen by a parent ─────────────────────────────────
 
@@ -38,7 +42,7 @@ export type ParentReportCard = {
 
 export interface ChildPortalData {
   notifications: StudentNotification[];
-  diary: DiaryEntry[];
+  diary: TeacherDiaryEntry[]; // Updated to use the union type
   attendance: AttendanceRecord[];
   messages: CommMessage[];
   competencies: TalentCompetency[];
@@ -146,7 +150,7 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
       | "transferred"
       | "graduated"
       | "withdrawn",
-    all_parents: [], // not needed in parent portal — primary contact is sufficient
+    all_parents: [],
     parents: getPrimaryParent(row.student_parents),
     assessments: row.assessments.map(
       (r): Assessment => ({
@@ -245,17 +249,67 @@ export async function fetchMyChildren(): Promise<ChildWithAssessments[]> {
   return (data ?? []).map(mapStudentRow);
 }
 
-export async function fetchChild(
-  studentId: string,
-): Promise<ChildWithAssessments | null> {
+/**
+ * Optimized fetch for the diary feed (Homework/Notices + Observations)
+ */
+export async function fetchParentDiaryFeed(
+  childId: string,
+  childGrade: string,
+  limit = 40,
+): Promise<TeacherDiaryEntry[]> {
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("students")
-    .select(STUDENT_WITH_ASSESSMENTS_SELECT)
-    .eq("id", studentId)
-    .single<RawStudentRow>();
-  if (error) return null;
-  return data ? mapStudentRow(data) : null;
+
+  const [classRes, obsRes] = await Promise.all([
+    supabase
+      .from("student_diary")
+      .select(
+        "id, entry_type, grade, title, content, due_date, is_completed, created_at",
+      )
+      .eq("grade", childGrade)
+      .in("entry_type", ["homework", "notice"])
+      .is("student_id", null)
+      .order("created_at", { ascending: false })
+      .limit(limit),
+    supabase
+      .from("student_diary")
+      .select(
+        "id, entry_type, grade, student_id, title, content, is_completed, created_at",
+      )
+      .eq("student_id", childId)
+      .eq("entry_type", "observation")
+      .order("created_at", { ascending: false })
+      .limit(limit),
+  ]);
+
+  const classResult: ClassDiaryEntry[] = (classRes.data ?? []).map(
+    (r: any) => ({
+      id: r.id,
+      entry_type: r.entry_type as "homework" | "notice",
+      grade: r.grade,
+      title: r.title,
+      content: r.content,
+      due_date: r.due_date,
+      is_completed: !!r.is_completed,
+      created_at: r.created_at,
+    }),
+  );
+
+  const obsResult: ObservationEntry[] = (obsRes.data ?? []).map((r: any) => ({
+    id: r.id,
+    entry_type: "observation" as const,
+    grade: r.grade,
+    student_id: r.student_id,
+    student_name: "",
+    title: r.title,
+    content: r.content,
+    is_completed: !!r.is_completed,
+    created_at: r.created_at,
+  }));
+
+  return [...classResult, ...obsResult].sort(
+    (a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
 }
 
 export async function fetchAllChildData(
@@ -266,7 +320,7 @@ export async function fetchAllChildData(
 
   const [
     { data: notifications },
-    { data: diary },
+    diary, // Fetched via our custom helper below
     { data: attendance },
     { data: messages },
     { data: galleryStudent },
@@ -284,11 +338,7 @@ export async function fetchAllChildData(
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
 
-    supabase
-      .from("student_diary")
-      .select("*")
-      .eq("student_id", studentId)
-      .order("created_at", { ascending: false }),
+    fetchParentDiaryFeed(studentId, grade), // Integrated the unified logic
 
     supabase
       .from("attendance")
@@ -302,7 +352,6 @@ export async function fetchAllChildData(
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
 
-    // Gallery — three-tier fetch
     supabase
       .from("talent_gallery")
       .select(GALLERY_SELECT)
@@ -363,7 +412,6 @@ export async function fetchAllChildData(
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
 
-    // Published report cards — parents only see published ones
     supabase
       .from("report_cards")
       .select(
@@ -375,7 +423,6 @@ export async function fetchAllChildData(
       .order("term", { ascending: false }),
   ]);
 
-  // Gallery merging + dedup
   const seenIds = new Set<string>();
   const rawGallery: RawGalleryRow[] = [];
   for (const row of [
@@ -399,7 +446,7 @@ export async function fetchAllChildData(
 
   return {
     notifications: notifications ?? [],
-    diary: diary ?? [],
+    diary,
     attendance: attendance ?? [],
     messages: messages ?? [],
     competencies: [],
@@ -411,4 +458,17 @@ export async function fetchAllChildData(
     reportCards: (reportCards ?? []) as ParentReportCard[],
     unreadCount,
   };
+}
+
+export async function fetchChild(
+  studentId: string,
+): Promise<ChildWithAssessments | null> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("students")
+    .select(STUDENT_WITH_ASSESSMENTS_SELECT)
+    .eq("id", studentId)
+    .single<RawStudentRow>();
+  if (error) return null;
+  return data ? mapStudentRow(data) : null;
 }

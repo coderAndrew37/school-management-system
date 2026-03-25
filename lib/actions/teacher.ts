@@ -1,12 +1,8 @@
 "use server";
 
-// lib/actions/teacher.ts
-
-import { notifyAbsence } from "@/lib/notifications/parent-notify";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { supabaseAdmin } from "../supabase/admin";
 
 export interface ActionResult {
   success: boolean;
@@ -60,7 +56,7 @@ export async function createDiaryEntryAction(
   });
 
   if (error) {
-    console.error("[createDiaryEntryAction]", error.message);
+    console.error("[createDiaryEntryAction] error:", error.message);
     return { success: false, message: "Failed to save diary entry." };
   }
 
@@ -99,15 +95,10 @@ export async function updateDiaryEntryAction(
 }
 
 // ── Attendance ────────────────────────────────────────────────────────────────
-// Status enum matches the DB check constraint:
-//   "Present" | "Absent" | "Late" | "Excused"
-
-const ATTENDANCE_STATUSES = ["Present", "Absent", "Late", "Excused"] as const;
-export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
 
 const attendanceSchema = z.object({
   studentId: z.string().uuid(),
-  status: z.enum(ATTENDANCE_STATUSES),
+  status: z.enum(["Present", "Absent", "Late"]),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format"),
   remarks: z.string().optional().nullable(),
 });
@@ -136,6 +127,7 @@ export async function recordAttendanceAction(
     };
   }
 
+  // Upsert — one record per student per date
   const { error } = await supabase.from("attendance").upsert(
     {
       student_id: parsed.data.studentId,
@@ -147,13 +139,8 @@ export async function recordAttendanceAction(
   );
 
   if (error) {
-    console.error("[recordAttendanceAction]", error.message);
+    console.error("[recordAttendanceAction] error:", error.message);
     return { success: false, message: "Failed to record attendance." };
-  }
-
-  // Phase 3: notify parents when student is absent (non-blocking)
-  if (parsed.data.status === "Absent") {
-    fireAbsenceNotification(parsed.data.studentId, parsed.data.date);
   }
 
   revalidatePath("/teacher");
@@ -163,12 +150,12 @@ export async function recordAttendanceAction(
 
 /**
  * Bulk attendance — save a whole class at once.
- * Called by the class teacher's bulk register (/teacher/class/attendance).
+ * Expects JSON: Array<{ studentId, status, date, remarks? }>
  */
 export async function bulkRecordAttendanceAction(
   records: {
     studentId: string;
-    status: AttendanceStatus;
+    status: "Present" | "Absent" | "Late";
     date: string;
     remarks?: string;
   }[],
@@ -191,25 +178,11 @@ export async function bulkRecordAttendanceAction(
     .upsert(rows, { onConflict: "student_id,date" });
 
   if (error) {
-    console.error("[bulkRecordAttendanceAction]", error.message);
+    console.error("[bulkRecordAttendanceAction] error:", error.message);
     return {
       success: false,
       message: `Failed to save attendance: ${error.message}`,
     };
-  }
-
-  // Phase 3: fire absence notifications for all absent students (non-blocking)
-  const absentIds = records
-    .filter((r) => r.status === "Absent")
-    .map((r) => ({ studentId: r.studentId, date: r.date }));
-
-  if (absentIds.length > 0) {
-    // Don't await — fire and forget so the teacher's UI doesn't wait
-    Promise.allSettled(
-      absentIds.map(({ studentId, date }) =>
-        fireAbsenceNotification(studentId, date),
-      ),
-    ).catch((err) => console.error("[bulkRecordAttendanceAction notify]", err));
   }
 
   revalidatePath("/teacher");
@@ -218,33 +191,6 @@ export async function bulkRecordAttendanceAction(
     success: true,
     message: `Attendance saved for ${records.length} students.`,
   };
-}
-
-// ── Internal: fetch student info then fire notification ───────────────────────
-
-async function fireAbsenceNotification(studentId: string, date: string) {
-  try {
-    const { data: student, error } = await supabaseAdmin
-      .from("students")
-      .select("full_name, current_grade")
-      .eq("id", studentId)
-      .single();
-
-    if (error || !student) {
-      console.error("[fireAbsenceNotification] student not found:", studentId);
-      return;
-    }
-
-    await notifyAbsence({
-      studentId,
-      studentName: student.full_name,
-      grade: student.current_grade,
-      date,
-    });
-  } catch (err) {
-    // Never let notification failure surface to the teacher
-    console.error("[fireAbsenceNotification]", err);
-  }
 }
 
 // ── Assessment / Narrative ────────────────────────────────────────────────────
@@ -294,7 +240,7 @@ export async function saveAssessmentAction(
   );
 
   if (error) {
-    console.error("[saveAssessmentAction]", error.message);
+    console.error("[saveAssessmentAction] error:", error.message);
     return { success: false, message: "Failed to save assessment." };
   }
 
@@ -351,7 +297,7 @@ export async function saveJssPathwayAction(
   );
 
   if (error) {
-    console.error("[saveJssPathwayAction]", error.message);
+    console.error("[saveJssPathwayAction] error:", error.message);
     return { success: false, message: "Failed to save pathway." };
   }
 
@@ -360,9 +306,7 @@ export async function saveJssPathwayAction(
   return { success: true, message: "Pathway saved successfully." };
 }
 
-// ── In-app notification to parent ────────────────────────────────────────────
-// Writes to the `notifications` table (in-app bell).
-// For SMS/email use notifyAbsence / notifyReportReady from parent-notify.ts.
+// ── Notification to parent ────────────────────────────────────────────────────
 
 export async function sendParentNotificationAction(
   studentId: string,
@@ -376,8 +320,7 @@ export async function sendParentNotificationAction(
   } = await supabase.auth.getUser();
   if (!user) return { success: false, message: "Not authenticated." };
 
-  // Use service role — writes notifications on behalf of the system, bypasses RLS
-  const { error } = await supabaseAdmin.from("notifications").insert({
+  const { error } = await supabase.from("notifications").insert({
     student_id: studentId,
     title,
     body: message,
@@ -386,10 +329,80 @@ export async function sendParentNotificationAction(
   });
 
   if (error) {
-    console.error("[sendParentNotificationAction]", error.message);
+    console.error("[sendParentNotificationAction] error:", error.message);
     return { success: false, message: "Failed to send notification." };
   }
 
   revalidatePath("/parent");
   return { success: true, message: "Notification sent to parent." };
+}
+
+// ── Delete diary entry ────────────────────────────────────────────────────────
+
+export async function deleteDiaryEntryAction(
+  entryId: string,
+): Promise<ActionResult> {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+  if (authError || !user)
+    return { success: false, message: "Not authenticated." };
+
+  // Verify ownership — only the user who created the entry may delete it
+  const { data: entry, error: fetchError } = await supabase
+    .from("student_diary")
+    .select("id")
+    .eq("id", entryId)
+    .single<{ id: string }>();
+
+  if (fetchError || !entry)
+    return { success: false, message: "Entry not found." };
+
+  const { error } = await supabase
+    .from("student_diary")
+    .delete()
+    .eq("id", entryId);
+
+  if (error) {
+    console.error("[deleteDiaryEntryAction]", error.message);
+    return { success: false, message: "Failed to delete entry." };
+  }
+
+  revalidatePath("/teacher");
+  revalidatePath("/parent");
+  return { success: true, message: "Entry deleted." };
+}
+
+// ── Toggle diary entry completed ──────────────────────────────────────────────
+
+export async function toggleDiaryCompleteAction(
+  entryId: string,
+  completed: boolean,
+): Promise<ActionResult> {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+  if (authError || !user)
+    return { success: false, message: "Not authenticated." };
+
+  const { error } = await supabase
+    .from("student_diary")
+    .update({ is_completed: completed })
+    .eq("id", entryId);
+
+  if (error) {
+    console.error("[toggleDiaryCompleteAction]", error.message);
+    return { success: false, message: "Failed to update entry." };
+  }
+
+  revalidatePath("/teacher");
+  revalidatePath("/parent");
+  return {
+    success: true,
+    message: completed ? "Marked complete." : "Marked incomplete.",
+  };
 }

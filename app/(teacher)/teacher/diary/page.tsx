@@ -1,12 +1,13 @@
 // app/teacher/diary/page.tsx
+
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   fetchTeacherAssessmentAllocations,
   fetchClassStudents,
-  fetchTeacherDiaryEntries,
 } from "@/lib/data/assessment";
 import DiaryClient from "./DiaryClient";
 import { redirect } from "next/navigation";
+import { fetchTeacherDiaryEntries } from "@/lib/data/diary";
 
 export default async function DiaryPage() {
   const supabase = await createSupabaseServerClient();
@@ -26,7 +27,7 @@ export default async function DiaryPage() {
   const allocations = await fetchTeacherAssessmentAllocations(teacher.id, 2026);
   const uniqueGrades = [...new Set(allocations.map((a) => a.grade))].sort();
 
-  // All students across teacher's grades (for the student picker)
+  // Fetch students per grade for the observation student picker
   const studentsByGrade: Record<
     string,
     Awaited<ReturnType<typeof fetchClassStudents>>
@@ -37,14 +38,15 @@ export default async function DiaryPage() {
     }),
   );
 
-  const recentEntries = await fetchTeacherDiaryEntries(uniqueGrades, 30);
+  // Fetch all three entry types — limit 60 to cover a busy term
+  const initialEntries = await fetchTeacherDiaryEntries(uniqueGrades, 60);
 
   return (
     <DiaryClient
       teacherName={teacher.full_name}
       grades={uniqueGrades}
       studentsByGrade={studentsByGrade}
-      initialEntries={recentEntries}
+      initialEntries={initialEntries}
     />
   );
 }
