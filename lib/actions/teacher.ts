@@ -155,7 +155,7 @@ export async function recordAttendanceAction(
 export async function bulkRecordAttendanceAction(
   records: {
     studentId: string;
-    status: "Present" | "Absent" | "Late";
+    status: "Present" | "Absent" | "Late" | "Excused";
     date: string;
     remarks?: string;
   }[],

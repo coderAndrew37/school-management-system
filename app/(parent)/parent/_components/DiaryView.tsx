@@ -1,37 +1,38 @@
 "use client";
 
 import { TeacherDiaryEntry, isHomework } from "@/lib/types/diary";
-import {
-  AlertCircle,
-  BookOpen,
-  ChevronDown,
-  Clock,
-  Filter,
-  PenLine,
-} from "lucide-react";
+import { AlertCircle, BookOpen, Clock, Filter, PenLine } from "lucide-react";
 import { useState } from "react";
 
-function formatDate(dateStr: string) {
-  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-KE", {
+// Helper to handle potential undefined/null strings before creating a Date
+function safeDate(d: string | null | undefined) {
+  if (!d) return new Date();
+  return new Date(d.includes("T") ? d : d + "T00:00:00");
+}
+
+function formatDate(dateStr: string | null | undefined) {
+  if (!dateStr) return "No date";
+  return safeDate(dateStr).toLocaleDateString("en-KE", {
     weekday: "long",
     day: "numeric",
     month: "long",
   });
 }
 
-function isDueSoon(d: string | null): boolean {
+function isDueSoon(d: string | null | undefined): boolean {
   if (!d) return false;
-  const diff = (new Date(d + "T00:00:00").getTime() - Date.now()) / 86400000;
+  const diff = (safeDate(d).getTime() - Date.now()) / 86400000;
   return diff >= 0 && diff <= 3;
 }
 
-function isOverdue(d: string | null): boolean {
+function isOverdue(d: string | null | undefined): boolean {
   if (!d) return false;
-  return new Date(d + "T00:00:00") < new Date();
+  return safeDate(d) < new Date();
 }
 
-function shortDate(d: string) {
-  return new Date(d + "T00:00:00").toLocaleDateString("en-KE", {
+function shortDate(d: string | null | undefined) {
+  if (!d) return "";
+  return safeDate(d).toLocaleDateString("en-KE", {
     weekday: "short",
     day: "numeric",
     month: "short",
@@ -46,8 +47,7 @@ export function DiaryView({ entries }: Props) {
   const [showOnlyHw, setShowOnlyHw] = useState(false);
 
   const filtered = entries.filter((e) => {
-    const mh = !showOnlyHw || e.entry_type === "homework";
-    return mh;
+    return !showOnlyHw || e.entry_type === "homework";
   });
 
   const urgentHw = entries.filter(
@@ -66,12 +66,10 @@ export function DiaryView({ entries }: Props) {
           {urgentHw.map((e) => (
             <div key={e.id} className="flex items-start gap-2">
               <span className="text-[10px] font-black text-amber-600 min-w-[72px] flex-shrink-0 mt-0.5">
-                {/* ClassDiaryEntry doesn't have subject_name in the new type, 
-                    using title or a placeholder if subject is omitted */}
-                {e.title}
+                {e.subject_name || e.title}
               </span>
               <span className="flex-1 text-xs text-amber-800 leading-relaxed line-clamp-1">
-                {e.content}
+                {e.body || e.content}
               </span>
               {isHomework(e) && e.due_date && (
                 <span
@@ -158,7 +156,7 @@ export function DiaryView({ entries }: Props) {
                       </p>
                       <span
                         className={[
-                          "text-[10px] font-bold px-2 py-0.5 rounded-full border",
+                          "text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase",
                           isHw
                             ? "border-amber-200 bg-amber-100 text-amber-700"
                             : isObs
@@ -178,7 +176,7 @@ export function DiaryView({ entries }: Props) {
 
                 {/* Content */}
                 <p className="text-sm text-slate-600 leading-relaxed">
-                  {entry.content}
+                  {entry.body || entry.content}
                 </p>
 
                 {/* Homework specific footer info */}

@@ -1,4 +1,3 @@
-// lib/data/parent.ts
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Parent } from "@/lib/types/dashboard";
 import type {
@@ -288,9 +287,14 @@ export async function fetchParentDiaryFeed(
       grade: r.grade,
       title: r.title,
       content: r.content,
+      // Map required fields for consolidated types
+      body: r.content,
+      diary_date: r.created_at?.slice(0, 10) || "",
       due_date: r.due_date,
+      student_id: null,
       is_completed: !!r.is_completed,
       created_at: r.created_at,
+      homework: r.entry_type === "homework" ? r.content : null,
     }),
   );
 
@@ -299,10 +303,14 @@ export async function fetchParentDiaryFeed(
     entry_type: "observation" as const,
     grade: r.grade,
     student_id: r.student_id,
-    student_name: "",
+    student_name: "", // Usually resolved in the UI or profile context
     title: r.title,
     content: r.content,
-    is_completed: !!r.is_completed,
+    // Map required fields for consolidated types
+    body: r.content,
+    diary_date: r.created_at?.slice(0, 10) || "",
+    due_date: null,
+    is_completed: false,
     created_at: r.created_at,
   }));
 
@@ -320,7 +328,7 @@ export async function fetchAllChildData(
 
   const [
     { data: notifications },
-    diary, // Fetched via our custom helper below
+    diary,
     { data: attendance },
     { data: messages },
     { data: galleryStudent },
@@ -338,7 +346,7 @@ export async function fetchAllChildData(
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
 
-    fetchParentDiaryFeed(studentId, grade), // Integrated the unified logic
+    fetchParentDiaryFeed(studentId, grade),
 
     supabase
       .from("attendance")

@@ -5,20 +5,19 @@ import { getSession } from "@/lib/actions/auth";
 import { fetchAllChildData, fetchMyChildren } from "@/lib/data/parent";
 import type { ChildWithAssessments } from "@/lib/types/parent";
 import {
+  AlertTriangle,
+  ArrowRight,
   Bell,
   BookOpen,
-  CalendarCheck,
   CalendarDays,
   CheckCircle2,
   GraduationCap,
   Image,
+  Info,
   MessageSquare,
   TrendingUp,
   Wallet,
   XCircle,
-  AlertTriangle,
-  Info,
-  ArrowRight,
 } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";

@@ -1,49 +1,42 @@
-// lib/types/diary.ts
-// Single source of truth for all diary-related types and type guards.
-// Both the teacher and parent data fetchers import from here.
-
-// ── Entry types ───────────────────────────────────────────────────────────────
+"use client";
 
 export type DiaryEntryType = "homework" | "notice" | "observation";
 
-/**
- * Class-wide entry — homework or notice.
- * student_id is NULL in the DB.
- * Visible to ALL parents in the grade.
- */
-export interface ClassDiaryEntry {
+// ── Base ──────────────────────────────────────────────────────────────────────
+export interface DiaryBase {
   id: string;
-  entry_type: "homework" | "notice";
   grade: string;
+  entry_type: DiaryEntryType;
   title: string;
   content: string | null;
-  due_date: string | null;
-  is_completed: boolean;
+  body: string | null;
   created_at: string;
+  diary_date: string;
+  subject_name?: string | null;
+  author_name?: string | null;
+  due_date?: string | null;
 }
 
-/**
- * Student-scoped CBC observation / competency note.
- * student_id is set in the DB.
- * Visible ONLY to that student's parent.
- */
-export interface ObservationEntry {
-  id: string;
+// ── Class-wide (Homework/Notice) ─────────────────────────────────────────────
+export interface ClassDiaryEntry extends DiaryBase {
+  entry_type: "homework" | "notice";
+  student_id: null;
+  is_completed: boolean;
+  homework?: string | null;
+}
+
+// ── Individual Observation ────────────────────────────────────────────────────
+export interface ObservationEntry extends DiaryBase {
   entry_type: "observation";
-  grade: string;
   student_id: string;
   student_name: string;
-  title: string;
-  content: string | null;
-  is_completed: boolean;
-  created_at: string;
+  is_completed: false;
+  homework?: never; // Explicitly tell TS this never exists here
 }
 
-/** Discriminated union — used everywhere (teacher UI, parent portal, actions) */
 export type TeacherDiaryEntry = ClassDiaryEntry | ObservationEntry;
 
 // ── Type guards ───────────────────────────────────────────────────────────────
-
 export function isObservation(e: TeacherDiaryEntry): e is ObservationEntry {
   return e.entry_type === "observation";
 }
@@ -52,14 +45,6 @@ export function isClassWide(e: TeacherDiaryEntry): e is ClassDiaryEntry {
   return e.entry_type === "homework" || e.entry_type === "notice";
 }
 
-export function isHomework(
-  e: TeacherDiaryEntry,
-): e is ClassDiaryEntry & { entry_type: "homework" } {
+export function isHomework(e: TeacherDiaryEntry): e is ClassDiaryEntry {
   return e.entry_type === "homework";
-}
-
-export function isNotice(
-  e: TeacherDiaryEntry,
-): e is ClassDiaryEntry & { entry_type: "notice" } {
-  return e.entry_type === "notice";
 }

@@ -64,3 +64,32 @@ CREATE INDEX IF NOT EXISTS idx_student_diary_grade
 --   FROM student_diary GROUP BY entry_type;
 -- SELECT * FROM student_diary WHERE grade IS NULL;
 -- SELECT conname FROM pg_constraint WHERE conrelid = 'student_diary'::regclass;
+
+
+-- ── Migration: student_diary v2 ───────────────────────────────────────────────
+-- Adds entry_type and grade columns to support class-wide entries (homework,
+-- notices) and individual observations without requiring a student_id.
+
+-- 1. Add entry_type column (replaces the boolean `homework` column)
+ALTER TABLE student_diary
+  ADD COLUMN IF NOT EXISTS entry_type TEXT NOT NULL DEFAULT 'homework'
+  CHECK (entry_type IN ('homework', 'notice', 'observation'));
+
+-- 2. Add grade column so class-wide entries know which class they belong to
+ALTER TABLE student_diary
+  ADD COLUMN IF NOT EXISTS grade TEXT;
+
+-- 3. Backfill: all existing rows are homework entries linked to a student
+UPDATE student_diary SET entry_type = 'homework' WHERE entry_type IS NULL;
+UPDATE student_diary SET entry_type = CASE WHEN homework = true THEN 'homework' ELSE 'observation' END
+  WHERE entry_type = 'homework' AND student_id IS NOT NULL;
+
+-- 4. Backfill grade from the student's current_grade where possible
+UPDATE student_diary d
+SET grade = s.current_grade
+FROM students s
+WHERE d.student_id = s.id AND d.grade IS NULL;
+
+-- 5. Index for grade-based queries (teacher fetches by their grades)
+CREATE INDEX IF NOT EXISTS idx_student_diary_grade ON student_diary (grade);
+CREATE INDEX IF NOT EXISTS idx_student_diary_entry_type ON student_diary (entry_type);

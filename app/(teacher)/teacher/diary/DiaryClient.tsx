@@ -466,23 +466,32 @@ export default function DiaryClient({
             created_at: new Date().toISOString(),
           };
 
+          const todayDate = base.created_at.slice(0, 10);
+          const bodyVal = base.content ?? null;
+
           const newEntry: TeacherDiaryEntry =
             form.mode === "observation"
-              ? {
+              ? ({
                   ...base,
-                  entry_type: "observation",
+                  entry_type: "observation" as const,
+                  body: bodyVal,
+                  diary_date: todayDate,
                   student_id: form.studentId,
                   student_name:
                     students.find((s) => s.id === form.studentId)?.full_name ??
                     "Unknown",
-                }
-              : {
+                  is_completed: false as const,
+                } satisfies ObservationEntry)
+              : ({
                   ...base,
-                  entry_type: form.mode,
+                  entry_type: form.mode as "homework" | "notice",
+                  body: bodyVal,
+                  diary_date: todayDate,
+                  student_id: null,
+                  is_completed: false,
                   due_date:
                     form.mode === "homework" ? form.dueDate || null : null,
-                };
-
+                } satisfies ClassDiaryEntry);
           setEntries((prev) => [newEntry, ...prev]);
         }
 

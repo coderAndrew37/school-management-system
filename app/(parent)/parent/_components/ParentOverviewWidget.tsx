@@ -2,19 +2,13 @@
 
 // components/parent/MyChildTodayWidget.tsx
 // "My Child Today" — single-glance widget for the parent overview page.
-// Shows: today's attendance, last diary entry, last CBC score.
 
-// ── Imports ───────────────────────────────────────────────────────────────────
-// AttendanceRecord and DiaryEntry live in @/lib/types/parent — they are
-// imported there by parent-data.ts but NOT re-exported from it.
-// ChildWithAssessments is also in @/lib/types/parent.
 import type {
   AttendanceRecord,
   ChildWithAssessments,
-  DiaryEntry,
 } from "@/lib/types/parent";
+import { TeacherDiaryEntry, isHomework } from "@/lib/types/diary";
 import {
-  BookOpen,
   CalendarCheck,
   Clock,
   FileText,
@@ -26,7 +20,7 @@ import {
 interface Props {
   child: ChildWithAssessments;
   attendance: AttendanceRecord[];
-  diary: DiaryEntry[];
+  diary: TeacherDiaryEntry[];
 }
 
 // ── Attendance status display config ─────────────────────────────────────────
@@ -102,18 +96,15 @@ const SCORE_CONFIG: Record<
 };
 
 export function MyChildTodayWidget({ child, attendance, diary }: Props) {
-  // ── AttendanceRecord.date is the correct column name ─────────────────────
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayAtt = attendance.find((a) => a.date.slice(0, 10) === todayStr);
   const attConfig = todayAtt ? STATUS_CONFIG[todayAtt.status] : null;
 
-  // ── DiaryEntry fields: .body (not .entry_text), .diary_date (not .date) ──
-  const lastDiary = diary[0] ?? null;
-  const lastScore = child.assessments[0] ?? null;
+  const recentDiary = diary[0] ?? null;
+  const lastScore = child.assessments?.[0] ?? null;
   const scoreConfig = lastScore?.score ? SCORE_CONFIG[lastScore.score] : null;
 
-  // Render nothing if there is genuinely no data yet for today
-  if (!todayAtt && !lastDiary && !lastScore) return null;
+  if (!todayAtt && !recentDiary && !lastScore) return null;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -166,38 +157,67 @@ export function MyChildTodayWidget({ child, attendance, diary }: Props) {
           </div>
         )}
 
-        {/* ── Latest diary ────────────────────────────────────────────────── */}
-        {/* DiaryEntry.body = the text content (NOT .entry_text)             */}
-        {/* DiaryEntry.diary_date = the date column (NOT .date)              */}
-        {lastDiary && (
-          <div className="flex items-start gap-3 px-4 py-3">
-            <BookOpen className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">
-                Latest Diary
-              </p>
-              {lastDiary.subject_name && (
-                <p className="text-xs font-bold text-slate-700 line-clamp-1">
-                  {lastDiary.subject_name}
+        {/* ── Latest Diary Section ────────────────────────────────────────── */}
+        <div className="p-4">
+          {recentDiary ? (
+            <div className="space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm font-bold text-slate-700 leading-snug">
+                  {recentDiary.title}
                 </p>
+                {recentDiary.subject_name && (
+                  <span className="shrink-0 text-[10px] font-bold bg-amber-50 text-amber-600 border border-amber-100 rounded-lg px-2 py-0.5">
+                    {recentDiary.subject_name}
+                  </span>
+                )}
+              </div>
+
+              <p className="text-xs text-slate-500 leading-relaxed line-clamp-2">
+                {recentDiary.body}
+              </p>
+
+              {isHomework(recentDiary) && recentDiary.homework && (
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+                  <p className="text-[10px] font-black uppercase tracking-wider text-amber-600 mb-1">
+                    📚 Homework
+                  </p>
+                  <p className="text-xs text-amber-800 leading-relaxed line-clamp-2">
+                    {recentDiary.homework}
+                  </p>
+                  {/* Fixed: Added a check for due_date existence before passing to Date constructor */}
+                  {recentDiary.due_date && (
+                    <p className="text-[9px] font-bold text-amber-600/70 mt-1 uppercase tracking-tighter">
+                      Due:{" "}
+                      {new Date(recentDiary.due_date).toLocaleDateString(
+                        "en-KE",
+                      )}
+                    </p>
+                  )}
+                </div>
               )}
-              <p className="text-xs text-slate-500 line-clamp-2 mt-0.5 leading-relaxed">
-                {lastDiary.body}
+
+              <p className="text-[10px] text-slate-400">
+                {new Date(
+                  recentDiary.diary_date + "T00:00:00",
+                ).toLocaleDateString("en-KE", {
+                  day: "numeric",
+                  month: "long",
+                })}
+                {" · "}
+                {recentDiary.author_name}
               </p>
             </div>
-            <p className="text-[10px] text-slate-400 shrink-0 mt-0.5">
-              {new Date(
-                lastDiary.diary_date.includes("T")
-                  ? lastDiary.diary_date
-                  : lastDiary.diary_date + "T00:00:00",
-              ).toLocaleDateString("en-KE", { day: "numeric", month: "short" })}
-            </p>
-          </div>
-        )}
+          ) : (
+            <div className="py-4 text-center">
+              <p className="text-[20px] mb-1">📔</p>
+              <p className="text-xs text-slate-400">No diary entries yet</p>
+            </div>
+          )}
+        </div>
 
         {/* ── Last CBC score ──────────────────────────────────────────────── */}
         {lastScore && scoreConfig && (
-          <div className="flex items-center gap-3 px-4 py-3">
+          <div className="flex items-center gap-3 px-4 py-3 bg-slate-50/30">
             <GraduationCap className="h-4 w-4 text-blue-500 shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">
@@ -205,9 +225,6 @@ export function MyChildTodayWidget({ child, attendance, diary }: Props) {
               </p>
               <p className="text-xs font-bold text-slate-700 line-clamp-1">
                 {lastScore.subject_name}
-              </p>
-              <p className="text-[10px] text-slate-500 mt-0.5">
-                {lastScore.strand_id}
               </p>
             </div>
             <div className="flex flex-col items-end gap-0.5 shrink-0">
