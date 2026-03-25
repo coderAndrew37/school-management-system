@@ -151,15 +151,41 @@ export async function GET(req: NextRequest) {
       { status: 403 },
     );
 
-  // Class teacher name
+  // Class teacher name — look up from assignments first (works even before a draft is saved),
+  // fall back to the teacher who generated the report if that's set
   let classTeacherName = "Class Teacher";
-  if (reportRes.data?.generated_by) {
-    const { data: t } = await supabaseAdmin
-      .from("teachers")
-      .select("full_name")
-      .eq("id", reportRes.data.generated_by)
+  {
+    // 1. Try class_teacher_assignments for this student's grade
+    const { data: studentForCT } = await supabaseAdmin
+      .from("students")
+      .select("current_grade")
+      .eq("id", studentId)
       .maybeSingle();
-    if (t) classTeacherName = t.full_name;
+    if (studentForCT?.current_grade) {
+      const { data: ctAssign } = await supabaseAdmin
+        .from("class_teacher_assignments")
+        .select("teacher_id")
+        .eq("grade", studentForCT.current_grade)
+        .eq("academic_year", academicYear)
+        .maybeSingle();
+      if (ctAssign?.teacher_id) {
+        const { data: ctTeacher } = await supabaseAdmin
+          .from("teachers")
+          .select("full_name")
+          .eq("id", ctAssign.teacher_id)
+          .maybeSingle();
+        if (ctTeacher?.full_name) classTeacherName = ctTeacher.full_name;
+      }
+    }
+    // 2. If still "Class Teacher", try report_cards.generated_by as fallback
+    if (classTeacherName === "Class Teacher" && reportRes.data?.generated_by) {
+      const { data: t } = await supabaseAdmin
+        .from("teachers")
+        .select("full_name")
+        .eq("id", reportRes.data.generated_by)
+        .maybeSingle();
+      if (t?.full_name) classTeacherName = t.full_name;
+    }
   }
 
   // Aggregate attendance
@@ -173,7 +199,15 @@ export async function GET(req: NextRequest) {
     string,
     { strand_id: string; score: string; teacher_remarks: string | null }[]
   >();
-  for (const row of (assessRes.data ?? []) as any[]) {
+  type AssessRow = {
+    student_id: string;
+    subject_name: string;
+    strand_id: string;
+    score: string;
+    teacher_remarks: string | null;
+    term: number;
+  };
+  for (const row of (assessRes.data ?? []) as unknown as AssessRow[]) {
     const list = subjectMap.get(row.subject_name) ?? [];
     // Latest score wins (deduplicate by strand_id)
     const idx = list.findIndex((x) => x.strand_id === row.strand_id);

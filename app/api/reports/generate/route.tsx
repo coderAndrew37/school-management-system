@@ -1,10 +1,4 @@
 // app/api/reports/generate/route.ts
-// POST /api/reports/generate
-// Body: { grade: string, term: number, academic_year: number }
-//
-// Returns a single PDF containing one A4 page per student — all students
-// in the specified grade, in alphabetical order. Admins and class teachers only.
-
 import { NextRequest, NextResponse } from "next/server";
 import { renderToBuffer, Document } from "@react-pdf/renderer";
 import React from "react";
@@ -13,6 +7,42 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ReportCardPage } from "@/lib/pdf/ReportCardDocument";
 import { getLogoPublicUrl, getActiveTermYear } from "@/lib/utils/settings";
 import { getStudentPhotoUrl } from "@/lib/utils/student-photo";
+
+// ── Local row types ───────────────────────────────────────────────────────────
+
+type BulkStudent = {
+  id: string;
+  full_name: string;
+  readable_id: string | null;
+  upi_number: string | null;
+  gender: string | null;
+  date_of_birth: string;
+  current_grade: string;
+  photo_url: string | null;
+};
+
+type BulkAssess = {
+  student_id: string;
+  subject_name: string;
+  strand_id: string;
+  score: string;
+  teacher_remarks: string | null;
+};
+
+type BulkAtt = {
+  student_id: string;
+  status: string;
+};
+
+type BulkRC = {
+  student_id: string;
+  class_teacher_remarks: string | null;
+  conduct_grade: string | null;
+  effort_grade: string | null;
+  generated_by: string | null;
+};
+
+// ── Score helper ──────────────────────────────────────────────────────────────
 
 const SCORE_N: Record<string, number> = { EE: 4, ME: 3, AE: 2, BE: 1 };
 
@@ -24,6 +54,8 @@ function computeOverall(scores: string[]): string {
   if (avg >= 1.5) return "AE";
   return "BE";
 }
+
+// ── Route ─────────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
@@ -38,14 +70,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .from("profiles")
       .select("role")
       .eq("id", user.id)
-      .single();
+      .single<{ role: string }>();
     if (!profile || !["admin", "superadmin", "teacher"].includes(profile.role))
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    const body = await req.json();
-    const grade = body.grade as string;
+    const body = (await req.json()) as {
+      grade?: string;
+      term?: number;
+      academic_year?: number;
+    };
+    const grade = body.grade ?? "";
     const term = Number(body.term);
-    // Use school_settings active year if caller didn't specify
     const { academicYear: defaultYear } = await getActiveTermYear();
     const academicYear = Number(body.academic_year ?? defaultYear);
 
@@ -55,8 +90,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { status: 400 },
       );
 
+    // Teachers must be the class teacher for the requested grade
     if (profile.role === "teacher") {
-      // Filter by both teacher_id AND grade — handles multi-grade teachers correctly
       const { data: assignment } = await supabaseAdmin
         .from("class_teacher_assignments")
         .select("id")
@@ -71,6 +106,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         );
     }
 
+    // ── Fetch all data in parallel ────────────────────────────────────────────
     const [studentsRes, assessRes, attRes, rcRes, settingsRes] =
       await Promise.all([
         supabaseAdmin
@@ -89,11 +125,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           .eq("academic_year", academicYear)
           .not("score", "is", null),
 
-        supabaseAdmin
-          .from("attendance")
-          .select("student_id, status")
-          .eq("academic_year", academicYear)
-          .eq("term", term),
+        supabaseAdmin.from("attendance").select("student_id, status"),
 
         supabaseAdmin
           .from("report_cards")
@@ -110,27 +142,47 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           .maybeSingle(),
       ]);
 
-    const students = (studentsRes.data ?? []) as any[];
+    const students = (studentsRes.data ?? []) as unknown as BulkStudent[];
+    const assessments = (assessRes.data ?? []) as unknown as BulkAssess[];
+    const attRows = (attRes.data ?? []) as unknown as BulkAtt[];
+    const reportCards = (rcRes.data ?? []) as unknown as BulkRC[];
+    const settings = settingsRes.data;
+
     if (students.length === 0)
       return NextResponse.json(
         { error: "No active students in this grade" },
         { status: 404 },
       );
 
-    const assessments = (assessRes.data ?? []) as any[];
-    const attRows = (attRes.data ?? []) as any[];
-    const reportCards = (rcRes.data ?? []) as any[];
-    const settings = settingsRes.data;
-
+    // ── Class teacher name — look up from assignments first ───────────────────
     let classTeacherName = "Class Teacher";
-    const firstRc = reportCards[0];
-    if (firstRc?.generated_by) {
-      const { data: t } = await supabaseAdmin
-        .from("teachers")
-        .select("full_name")
-        .eq("id", firstRc.generated_by)
+    {
+      const { data: ctAssign } = await supabaseAdmin
+        .from("class_teacher_assignments")
+        .select("teacher_id")
+        .eq("grade", grade)
+        .eq("academic_year", academicYear)
         .maybeSingle();
-      if (t) classTeacherName = t.full_name;
+      if (ctAssign?.teacher_id) {
+        const { data: ctTeacher } = await supabaseAdmin
+          .from("teachers")
+          .select("full_name")
+          .eq("id", ctAssign.teacher_id)
+          .maybeSingle<{ full_name: string }>();
+        if (ctTeacher?.full_name) classTeacherName = ctTeacher.full_name;
+      }
+      // Fallback: first report card's generated_by
+      if (classTeacherName === "Class Teacher") {
+        const firstRc = reportCards[0];
+        if (firstRc?.generated_by) {
+          const { data: t } = await supabaseAdmin
+            .from("teachers")
+            .select("full_name")
+            .eq("id", firstRc.generated_by)
+            .maybeSingle<{ full_name: string }>();
+          if (t?.full_name) classTeacherName = t.full_name;
+        }
+      }
     }
 
     const schoolProps = {
@@ -142,19 +194,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         : undefined,
     };
 
-    const pages = students.map((student: any) => {
-      const sa = attRows.filter((r: any) => r.student_id === student.id);
-      const present = sa.filter((r: any) => r.status === "Present").length;
-      const absent = sa.filter((r: any) => r.status === "Absent").length;
-      const late = sa.filter((r: any) => r.status === "Late").length;
+    // ── Build one ReportCardPage element per student ──────────────────────────
+    const pages = students.map((student) => {
+      const sa = attRows.filter((r) => r.student_id === student.id);
+      const present = sa.filter((r) => r.status === "Present").length;
+      const absent = sa.filter((r) => r.status === "Absent").length;
+      const late = sa.filter((r) => r.status === "Late").length;
 
       const subjectMap = new Map<
         string,
         { strand_id: string; score: string; teacher_remarks: string | null }[]
       >();
-      for (const a of assessments.filter(
-        (a: any) => a.student_id === student.id,
-      )) {
+      for (const a of assessments.filter((a) => a.student_id === student.id)) {
         const list = subjectMap.get(a.subject_name) ?? [];
         const idx = list.findIndex((x) => x.strand_id === a.strand_id);
         if (idx >= 0) list[idx] = a;
@@ -169,7 +220,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }),
       );
 
-      const rc = reportCards.find((r: any) => r.student_id === student.id);
+      const rc = reportCards.find((r) => r.student_id === student.id);
 
       return React.createElement(ReportCardPage, {
         key: student.id,
@@ -196,21 +247,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       });
     });
 
+    // Create the document with the array of pages as children
     const doc = React.createElement(
       Document,
       {
         title: `${grade} — Term ${term} ${academicYear} Report Cards`,
         author: schoolProps.name,
       },
-      ...pages,
+      pages,
     );
 
-    // Buffer.from converts the Node Buffer returned by renderToBuffer
-    // into a Uint8Array, which NextResponse accepts as BodyInit.
-    const buffer = Buffer.from(await renderToBuffer(doc as any));
+    // Cast the document to satisfy renderToBuffer's strict type requirements
+    const pdfBuffer = await renderToBuffer(doc as React.ReactElement<any>);
+
     const filename = `${grade.replace(/\s+/g, "_")}_Term${term}_${academicYear}_Reports.pdf`;
 
-    return new NextResponse(buffer, {
+    return new NextResponse(Buffer.from(pdfBuffer), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",

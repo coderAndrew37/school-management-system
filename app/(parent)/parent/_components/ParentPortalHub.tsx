@@ -1,22 +1,21 @@
 "use client";
 
-import { useState } from "react";
 import {
+  BarChart2,
   Bell,
   BookOpen,
   Calendar,
-  MessageSquare,
-  Image,
-  Compass,
-  BarChart2,
-  Megaphone,
   CalendarDays,
+  Compass,
   CreditCard,
+  Image,
+  Megaphone,
+  MessageSquare,
 } from "lucide-react";
+import { useState } from "react";
 
 import type { ChildPortalData } from "@/lib/data/parent";
 import type { Student } from "@/lib/types/dashboard";
-import { NotificationsPanel } from "./NotificationsPanel";
 import { AnnouncementsView } from "./AnnouncementsView";
 import { AttendancePanel } from "./AttendancePanel";
 import { CommunicationBook } from "./CommunicationBook";
@@ -24,6 +23,7 @@ import { CompetencyRadar } from "./CompetencyRadar";
 import { DiaryView } from "./DiaryView";
 import { FeeStatusPanel } from "./FeesStatusPanel";
 import { JssPathwayPanel } from "./JSSPathwayPanel";
+import { NotificationsPanel } from "./NotificationsPanel";
 import { SchoolCalendarView } from "./SchoolCalendarView";
 import { TalentGallery } from "./TalentGallery";
 
@@ -44,7 +44,6 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-// Tab → accent color for the active indicator & section header
 const TAB_ACCENT: Record<
   TabId,
   { icon: string; bg: string; border: string; text: string }
@@ -122,17 +121,24 @@ export function ParentPortalHub({ child, data, senderRole }: Props) {
 
   // ── Badges ────────────────────────────────────────────────────────────────
   const unreadNotifs = data.notifications.filter((n) => !n.is_read).length;
+
   const unreadMsgs = data.messages.filter(
     (m) => !m.is_read && m.sender_role !== senderRole,
   ).length;
-  const homeworkDue = data.diary.filter(
-    (e) =>
-      e.homework &&
-      e.due_date &&
-      new Date(e.due_date + "T00:00:00") >= new Date() &&
-      (new Date(e.due_date + "T00:00:00").getTime() - Date.now()) / 86400000 <=
-        3,
-  ).length;
+
+  // FIXED: Updated to check entry_type === "homework" and use new date logic
+  const homeworkDue = data.diary.filter((e) => {
+    const isHw = e.entry_type === "homework";
+    if (!isHw || !e.due_date) return false;
+
+    const dueDate = new Date(e.due_date + "T00:00:00");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const diffDays = (dueDate.getTime() - today.getTime()) / 86400000;
+    return dueDate >= today && diffDays <= 3;
+  }).length;
+
   const urgentAnnouncements = (data.announcements ?? []).filter((a) => {
     if (a.expires_at && new Date(a.expires_at) < new Date()) return false;
     if (a.audience === "teachers") return false;
@@ -140,9 +146,11 @@ export function ParentPortalHub({ child, data, senderRole }: Props) {
       return false;
     return a.priority === "urgent" || a.priority === "high";
   }).length;
+
   const feeArrears = (data.feePayments ?? []).filter((p) =>
     ["overdue", "partial", "pending"].includes(p.status),
   ).length;
+
   const soonEvents = (data.events ?? []).filter((e) => {
     const diff =
       (new Date(e.start_date + "T00:00:00").getTime() - Date.now()) / 86400000;

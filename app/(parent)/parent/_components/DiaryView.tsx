@@ -1,6 +1,6 @@
 "use client";
 
-import type { DiaryEntry } from "@/lib/types/parent";
+import { TeacherDiaryEntry, isHomework } from "@/lib/types/diary";
 import {
   AlertCircle,
   BookOpen,
@@ -18,15 +18,18 @@ function formatDate(dateStr: string) {
     month: "long",
   });
 }
+
 function isDueSoon(d: string | null): boolean {
   if (!d) return false;
   const diff = (new Date(d + "T00:00:00").getTime() - Date.now()) / 86400000;
   return diff >= 0 && diff <= 3;
 }
+
 function isOverdue(d: string | null): boolean {
   if (!d) return false;
   return new Date(d + "T00:00:00") < new Date();
 }
+
 function shortDate(d: string) {
   return new Date(d + "T00:00:00").toLocaleDateString("en-KE", {
     weekday: "short",
@@ -36,29 +39,24 @@ function shortDate(d: string) {
 }
 
 interface Props {
-  entries: DiaryEntry[];
+  entries: TeacherDiaryEntry[];
 }
 
 export function DiaryView({ entries }: Props) {
-  const [subjectFilter, setSubjectFilter] = useState("all");
   const [showOnlyHw, setShowOnlyHw] = useState(false);
 
-  const subjects = [
-    "all",
-    ...Array.from(
-      new Set(entries.map((e) => e.subject_name).filter(Boolean) as string[]),
-    ).sort(),
-  ];
   const filtered = entries.filter((e) => {
-    const ms = subjectFilter === "all" || e.subject_name === subjectFilter;
-    const mh = !showOnlyHw || !!e.homework;
-    return ms && mh;
+    const mh = !showOnlyHw || e.entry_type === "homework";
+    return mh;
   });
-  const urgentHw = entries.filter((e) => e.homework && isDueSoon(e.due_date));
+
+  const urgentHw = entries.filter(
+    (e) => isHomework(e) && isDueSoon(e.due_date),
+  );
 
   return (
     <div className="space-y-4">
-      {/* ── Due-soon banner — matches .alert .al-amber ─────────────────────── */}
+      {/* ── Due-soon banner ────────────────────────────────────────────────── */}
       {urgentHw.length > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3.5 space-y-2.5">
           <p className="text-xs font-black uppercase tracking-widest text-amber-700 flex items-center gap-2">
@@ -68,14 +66,18 @@ export function DiaryView({ entries }: Props) {
           {urgentHw.map((e) => (
             <div key={e.id} className="flex items-start gap-2">
               <span className="text-[10px] font-black text-amber-600 min-w-[72px] flex-shrink-0 mt-0.5">
-                {e.subject_name ?? "General"}
+                {/* ClassDiaryEntry doesn't have subject_name in the new type, 
+                    using title or a placeholder if subject is omitted */}
+                {e.title}
               </span>
-              <span className="flex-1 text-xs text-amber-800 leading-relaxed">
-                {e.homework}
+              <span className="flex-1 text-xs text-amber-800 leading-relaxed line-clamp-1">
+                {e.content}
               </span>
-              {e.due_date && (
+              {isHomework(e) && e.due_date && (
                 <span
-                  className={`flex-shrink-0 text-[10px] font-black ml-1 ${isOverdue(e.due_date) ? "text-red-700" : "text-amber-700"}`}
+                  className={`flex-shrink-0 text-[10px] font-black ml-1 ${
+                    isOverdue(e.due_date) ? "text-red-700" : "text-amber-700"
+                  }`}
                 >
                   {shortDate(e.due_date)}
                 </span>
@@ -87,22 +89,6 @@ export function DiaryView({ entries }: Props) {
 
       {/* ── Filters ────────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-0 max-w-[180px]">
-          <select
-            value={subjectFilter}
-            onChange={(e) => setSubjectFilter(e.target.value)}
-            aria-label="subject filter"
-            className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 py-2 pr-8 text-xs font-semibold text-slate-600 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 cursor-pointer shadow-sm"
-          >
-            {subjects.map((s) => (
-              <option key={s} value={s}>
-                {s === "all" ? "All subjects" : s}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-        </div>
-
         <button
           onClick={() => setShowOnlyHw((v) => !v)}
           className={[
@@ -130,17 +116,21 @@ export function DiaryView({ entries }: Props) {
       ) : (
         <div className="space-y-3">
           {filtered.map((entry) => {
-            const hasHw = !!entry.homework;
-            const overdue = isOverdue(entry.due_date);
-            const soon = isDueSoon(entry.due_date);
+            const isHw = entry.entry_type === "homework";
+            const isObs = entry.entry_type === "observation";
+            const overdue = isHomework(entry) && isOverdue(entry.due_date);
+            const soon = isHomework(entry) && isDueSoon(entry.due_date);
+
             return (
               <div
                 key={entry.id}
                 className={[
                   "rounded-2xl border p-4 space-y-3 transition-all shadow-sm",
-                  hasHw
+                  isHw
                     ? "border-amber-200 bg-amber-50"
-                    : "border-slate-200 bg-white",
+                    : isObs
+                      ? "border-purple-200 bg-purple-50"
+                      : "border-slate-200 bg-white",
                 ].join(" ")}
               >
                 {/* Header */}
@@ -148,12 +138,14 @@ export function DiaryView({ entries }: Props) {
                   <div
                     className={[
                       "flex-shrink-0 h-9 w-9 rounded-xl flex items-center justify-center border",
-                      hasHw
+                      isHw
                         ? "border-amber-200 bg-amber-100"
-                        : "border-slate-200 bg-slate-100",
+                        : isObs
+                          ? "border-purple-200 bg-purple-100"
+                          : "border-slate-200 bg-slate-100",
                     ].join(" ")}
                   >
-                    {hasHw ? (
+                    {isHw ? (
                       <PenLine className="h-4 w-4 text-amber-700" />
                     ) : (
                       <BookOpen className="h-4 w-4 text-slate-500" />
@@ -164,26 +156,33 @@ export function DiaryView({ entries }: Props) {
                       <p className="text-sm font-black text-slate-800 leading-snug">
                         {entry.title}
                       </p>
-                      {entry.subject_name && (
-                        <span className="text-[10px] font-bold border border-cyan-200 bg-cyan-100 text-cyan-700 px-2 py-0.5 rounded-full">
-                          {entry.subject_name}
-                        </span>
-                      )}
+                      <span
+                        className={[
+                          "text-[10px] font-bold px-2 py-0.5 rounded-full border",
+                          isHw
+                            ? "border-amber-200 bg-amber-100 text-amber-700"
+                            : isObs
+                              ? "border-purple-200 bg-purple-100 text-purple-700"
+                              : "border-blue-200 bg-blue-100 text-blue-700",
+                        ].join(" ")}
+                      >
+                        {entry.entry_type}
+                      </span>
                     </div>
                     <p className="text-[10px] font-semibold text-slate-400 flex items-center gap-1.5">
                       <Clock className="h-3 w-3" />
-                      {formatDate(entry.diary_date)} · {entry.author_name}
+                      {formatDate(entry.created_at)}
                     </p>
                   </div>
                 </div>
 
-                {/* Body */}
+                {/* Content */}
                 <p className="text-sm text-slate-600 leading-relaxed">
-                  {entry.body}
+                  {entry.content}
                 </p>
 
-                {/* Homework block */}
-                {hasHw && (
+                {/* Homework specific footer info */}
+                {isHomework(entry) && entry.due_date && (
                   <div
                     className={[
                       "rounded-xl border px-3.5 py-3 space-y-1.5",
@@ -196,21 +195,24 @@ export function DiaryView({ entries }: Props) {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p
-                        className={`text-[10px] font-black uppercase tracking-widest ${overdue ? "text-red-700" : "text-amber-700"}`}
+                        className={`text-[10px] font-black uppercase tracking-widest ${
+                          overdue ? "text-red-700" : "text-amber-700"
+                        }`}
                       >
-                        {overdue ? "⚠ Overdue" : "📚 Homework"}
+                        {overdue ? "⚠ Overdue" : "📚 Homework Details"}
                       </p>
-                      {entry.due_date && (
-                        <span
-                          className={`text-[10px] font-bold ${overdue ? "text-red-700" : soon ? "text-amber-700" : "text-slate-500"}`}
-                        >
-                          Due {shortDate(entry.due_date)}
-                        </span>
-                      )}
+                      <span
+                        className={`text-[10px] font-bold ${
+                          overdue
+                            ? "text-red-700"
+                            : soon
+                              ? "text-amber-700"
+                              : "text-slate-500"
+                        }`}
+                      >
+                        Due {shortDate(entry.due_date)}
+                      </span>
                     </div>
-                    <p className="text-sm text-slate-700 leading-relaxed">
-                      {entry.homework}
-                    </p>
                   </div>
                 )}
               </div>
