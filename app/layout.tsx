@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Toaster } from "sonner";
 import { DM_Sans, DM_Mono } from "next/font/google";
 import "./globals.css";
+import AuthRefreshHandler from "./_components/AutoRefresh";
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -28,6 +29,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${dmSans.variable} ${dmMono.variable}`}>
       <body className="antialiased">
+        <AuthRefreshHandler />
         {children}
         <Toaster
           position="top-right"
