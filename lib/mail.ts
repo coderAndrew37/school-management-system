@@ -608,7 +608,7 @@ export async function resolveAudienceRecipients(
     case "all_teachers": {
       const { data, error } = await supabase
         .from("teachers")
-        .select("id, full_name, email")
+        .select("id, full_name, email,phone_number")
         .returns<RecipientRow[]>();
       if (error) {
         console.error("resolveAudienceRecipients teachers error:", error);
@@ -620,7 +620,7 @@ export async function resolveAudienceRecipients(
     case "all_parents": {
       const { data, error } = await supabase
         .from("parents")
-        .select("id, full_name, email")
+        .select("id, full_name, email, phone_number")
         .returns<RecipientRow[]>();
       if (error) {
         console.error("resolveAudienceRecipients parents error:", error);
@@ -636,7 +636,7 @@ export async function resolveAudienceRecipients(
         .from("student_parents")
         .select(
           `
-          parents ( id, full_name, email ),
+          parents ( id, full_name, email, phone_number ),
           students!inner ( current_grade )
         `,
         )
@@ -664,11 +664,11 @@ export async function resolveAudienceRecipients(
       const [teachersRes, parentsRes] = await Promise.all([
         supabase
           .from("teachers")
-          .select("id, full_name, email")
+          .select("id, full_name, email, phone_number")
           .returns<RecipientRow[]>(),
         supabase
           .from("parents")
-          .select("id, full_name, email")
+          .select("id, full_name, email, phone_number")
           .returns<RecipientRow[]>(),
       ]);
 

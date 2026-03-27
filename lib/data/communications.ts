@@ -12,12 +12,14 @@ type TeacherRow = {
   id: string;
   full_name: string;
   email: string;
+  phone_number: string | null;
 };
 
 type ParentRow = {
   id: string;
   full_name: string;
   email: string;
+  phone_number: string | null;
 };
 
 type StudentGradeRow = {
@@ -32,7 +34,7 @@ type LogRow = {
   body_preview: string;
   recipient_count: number;
   status: string;
-  channel: string; // <--- Add this line
+  channel: string;
   scheduled_at: string | null;
   sent_at: string | null;
   created_at: string;
@@ -42,11 +44,21 @@ type LogRow = {
 // ── Mappers ───────────────────────────────────────────────────────────────────
 
 function mapTeacher(row: TeacherRow): SingleRecipient {
-  return { id: row.id, full_name: row.full_name, email: row.email };
+  return {
+    id: row.id,
+    full_name: row.full_name,
+    email: row.email,
+    phone_number: row.phone_number,
+  };
 }
 
 function mapParent(row: ParentRow): SingleRecipient {
-  return { id: row.id, full_name: row.full_name, email: row.email };
+  return {
+    id: row.id,
+    full_name: row.full_name,
+    email: row.email,
+    phone_number: row.phone_number,
+  };
 }
 
 function mapLogEntry(row: LogRow): CommunicationLogEntry {
@@ -58,7 +70,7 @@ function mapLogEntry(row: LogRow): CommunicationLogEntry {
     body_preview: row.body_preview,
     recipient_count: row.recipient_count,
     status: row.status as CommunicationLogEntry["status"],
-    channel: row.channel as SendChannel, // <--- Add this line
+    channel: row.channel as SendChannel,
     scheduled_at: row.scheduled_at,
     sent_at: row.sent_at,
     created_at: row.created_at,
@@ -68,23 +80,19 @@ function mapLogEntry(row: LogRow): CommunicationLogEntry {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/**
- * Fetches all teachers, parents, and distinct grades for the composer
- * audience selectors.
- */
 export async function fetchCommunicationRecipients(): Promise<RecipientsPayload> {
   const supabase = await createSupabaseServerClient();
 
   const [teachersResult, parentsResult, gradesResult] = await Promise.all([
     supabase
       .from("teachers")
-      .select("id, full_name, email")
+      .select("id, full_name, email, phone_number")
       .order("full_name", { ascending: true })
       .returns<TeacherRow[]>(),
 
     supabase
       .from("parents")
-      .select("id, full_name, email")
+      .select("id, full_name, email, phone_number")
       .order("full_name", { ascending: true })
       .returns<ParentRow[]>(),
 
@@ -113,10 +121,6 @@ export async function fetchCommunicationRecipients(): Promise<RecipientsPayload>
   };
 }
 
-/**
- * Fetches the sent communications log, most recent first.
- * Joins profiles to show who sent each message.
- */
 export async function fetchCommunicationsLog(): Promise<
   CommunicationLogEntry[]
 > {
@@ -125,13 +129,10 @@ export async function fetchCommunicationsLog(): Promise<
   const { data, error } = await supabase
     .from("communications_log")
     .select(
-      `
-      id, audience_type, audience_label, subject,
-      body_preview, recipient_count, status,
-      channel,
-      scheduled_at, sent_at, created_at,
-      profiles ( full_name )
-    `,
+      `id, audience_type, audience_label, subject,
+       body_preview, recipient_count, status,
+       channel, scheduled_at, sent_at, created_at,
+       profiles ( full_name )`,
     )
     .order("created_at", { ascending: false })
     .limit(100)

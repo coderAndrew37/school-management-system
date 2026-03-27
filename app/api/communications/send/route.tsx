@@ -1,5 +1,3 @@
-// app/api/communications/send/route.ts
-
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type {
@@ -26,6 +24,8 @@ function buildAudienceLabel(req: SendEmailRequest): string {
       return `Parents of ${audience.grade ?? "Unknown Grade"}`;
     case "all_staff_and_parents":
       return "All Staff & Parents";
+    default:
+      return "General Audience";
   }
 }
 
@@ -45,14 +45,22 @@ function buildSenderLabel(audienceType: AudienceType): string {
 export async function POST(
   req: NextRequest,
 ): Promise<NextResponse<SendEmailResponse>> {
+  const logPrefix = `[${new Date().toISOString()}] [COMM_API]`;
+  console.log(`${logPrefix} 🚀 Initialization: Starting send process...`);
+
   const supabase = await createSupabaseServerClient();
 
-  // Auth guard
+  // 1. Auth Guard Debugging
   const {
     data: { user },
     error: authError,
   } = await supabase.auth.getUser();
-  if (authError || !user)
+
+  if (authError || !user) {
+    console.error(
+      `${logPrefix} ❌ Auth Error:`,
+      authError?.message || "No user found",
+    );
     return NextResponse.json(
       {
         success: false,
@@ -62,23 +70,44 @@ export async function POST(
       },
       { status: 401 },
     );
+  }
+  console.log(
+    `${logPrefix} ✅ Authenticated as: ${user.email} (ID: ${user.id})`,
+  );
 
-  const { data: profileData } = await supabase
+  // 2. Role Check Debugging
+  const { data: profileData, error: profileError } = await supabase
     .from("profiles")
     .select("role")
     .eq("id", user.id)
     .single<{ role: string }>();
 
-  if (!["admin", "superadmin"].includes(profileData?.role ?? ""))
+  if (
+    profileError ||
+    !["admin", "superadmin"].includes(profileData?.role ?? "")
+  ) {
+    console.warn(
+      `${logPrefix} ⚠️ Forbidden: User role is "${profileData?.role || "unknown"}"`,
+    );
     return NextResponse.json(
       { success: false, recipientCount: 0, messageIds: [], error: "Forbidden" },
       { status: 403 },
     );
+  }
+  console.log(`${logPrefix} ✅ Role Verified: ${profileData.role}`);
 
+  // 3. Payload Parsing Debugging
   let payload: SendEmailRequest;
   try {
     payload = (await req.json()) as SendEmailRequest;
-  } catch {
+    console.log(`${logPrefix} 📥 Payload Extracted:`, {
+      channel: payload.channel,
+      audienceType: payload.audience.type,
+      subject: payload.subject,
+      bodyLength: payload.body?.length,
+    });
+  } catch (err) {
+    console.error(`${logPrefix} ❌ Payload Parse Failure`);
     return NextResponse.json(
       {
         success: false,
@@ -99,7 +128,9 @@ export async function POST(
     scheduledAt,
   } = payload;
 
-  if (!body.trim())
+  // 4. Validation Checks
+  if (!body.trim()) {
+    console.warn(`${logPrefix} ⚠️ Validation Failed: Empty message body`);
     return NextResponse.json(
       {
         success: false,
@@ -109,8 +140,10 @@ export async function POST(
       },
       { status: 400 },
     );
+  }
 
-  if (channel === "email" && !subject.trim())
+  if (channel === "email" && !subject.trim()) {
+    console.warn(`${logPrefix} ⚠️ Validation Failed: Missing email subject`);
     return NextResponse.json(
       {
         success: false,
@@ -120,22 +153,21 @@ export async function POST(
       },
       { status: 400 },
     );
+  }
 
-  // SMS body limit
-  if (channel === "sms" && body.length > 459)
-    return NextResponse.json(
-      {
-        success: false,
-        recipientCount: 0,
-        messageIds: [],
-        error: "SMS message too long (max 459 chars / 3 parts)",
-      },
-      { status: 400 },
-    );
-
+  // 5. Recipient Resolution Debugging
+  console.log(
+    `${logPrefix} 🔍 Resolving recipients for audience type: ${audience.type}`,
+  );
   const recipients = await resolveAudienceRecipients(audience);
+  console.log(
+    `${logPrefix} 👥 Database Query Result: Found ${recipients.length} potential recipients`,
+  );
 
-  if (recipients.length === 0)
+  if (recipients.length === 0) {
+    console.error(
+      `${logPrefix} ❌ Stop: No recipients returned from resolveAudienceRecipients`,
+    );
     return NextResponse.json(
       {
         success: false,
@@ -145,24 +177,34 @@ export async function POST(
       },
       { status: 400 },
     );
+  }
 
   const audienceLabel = buildAudienceLabel(payload);
   const senderLabel = buildSenderLabel(audience.type);
 
-  // ── Scheduled ────────────────────────────────────────────────────────────────
+  // 6. Scheduling Logic Debugging
   if (scheduledAt) {
-    await supabase.from("communications_log").insert({
-      sent_by: user.id,
-      audience_type: audience.type,
-      audience_label: audienceLabel,
-      channel,
-      subject: channel === "sms" ? "(SMS)" : subject,
-      body_preview: body.slice(0, 120).replace(/\n/g, " "),
-      recipient_count: recipients.length,
-      status: "scheduled",
-      scheduled_at: scheduledAt,
-      sent_at: null,
-    });
+    console.log(
+      `${logPrefix} ⏰ Action: Scheduling message for ${scheduledAt}`,
+    );
+    const { error: logError } = await supabase
+      .from("communications_log")
+      .insert({
+        sent_by: user.id,
+        audience_type: audience.type,
+        audience_label: audienceLabel,
+        channel,
+        subject: channel === "sms" ? "(SMS)" : subject,
+        body_preview: body.slice(0, 120).replace(/\n/g, " "),
+        recipient_count: recipients.length,
+        status: "scheduled",
+        scheduled_at: scheduledAt,
+        sent_at: null,
+      });
+
+    if (logError)
+      console.error(`${logPrefix} ❌ DB Log Error (Scheduling):`, logError);
+
     return NextResponse.json({
       success: true,
       recipientCount: recipients.length,
@@ -170,25 +212,34 @@ export async function POST(
     });
   }
 
-  // ── Immediate send ────────────────────────────────────────────────────────────
-
+  // 7. Execution Logic Debugging
   let recipientCount = 0;
   let messageIds: string[] = [];
   let sendSuccess = false;
 
   if (channel === "sms") {
-    // Build recipient list with valid phone numbers
+    console.log(`${logPrefix} 📱 Processing SMS channel...`);
+
+    // Check if the recipient objects actually have the 'phone_number' property
     const smsRecipients = recipients
-      .filter((r) => r.phone_number)
+      .filter((r) => {
+        const hasPhone = Boolean(r.phone_number);
+        if (!hasPhone)
+          console.warn(
+            `${logPrefix} ⏭️ Skipping ${r.full_name || "unknown"}: Missing phone_number`,
+          );
+        return hasPhone;
+      })
       .map((r) => ({ phone: r.phone_number!, name: r.full_name }));
 
-    const noPhonesCount = recipients.length - smsRecipients.length;
-    if (noPhonesCount > 0)
-      console.warn(
-        `[communications/send] ${noPhonesCount} recipients have no phone number — skipped`,
-      );
+    console.log(
+      `${logPrefix} 📱 Filtered SMS list: ${smsRecipients.length} valid numbers out of ${recipients.length}`,
+    );
 
     if (smsRecipients.length === 0) {
+      console.error(
+        `${logPrefix} ❌ Stop: 0 recipients left after phone_number filtering`,
+      );
       return NextResponse.json(
         {
           success: false,
@@ -200,19 +251,22 @@ export async function POST(
       );
     }
 
+    console.log(`${logPrefix} 📡 Dispatching to Africa's Talking...`);
     const result = await sendBulkSms(smsRecipients, body);
+
     recipientCount = result.sent;
     messageIds = result.results
       .filter((r) => r.messageId)
       .map((r) => r.messageId!);
-    sendSuccess = result.failed === 0;
+    sendSuccess = result.sent > 0 && result.failed === 0;
 
-    console.log("[communications/send] SMS result:", {
+    console.log(`${logPrefix} 📊 SMS Provider Response:`, {
       sent: result.sent,
       failed: result.failed,
+      resultsCount: result.results.length,
     });
   } else {
-    // Email via Resend
+    console.log(`${logPrefix} 📧 Processing Email channel via Resend...`);
     const result = await broadcastEmail({
       recipients,
       subject,
@@ -223,34 +277,47 @@ export async function POST(
     recipientCount = result.recipientCount;
     messageIds = result.messageIds;
     sendSuccess = result.success;
+    console.log(
+      `${logPrefix} 📊 Email Provider Response: success=${sendSuccess}, count=${recipientCount}`,
+    );
   }
 
-  // Log to DB
-  await supabase.from("communications_log").insert({
-    sent_by: user.id,
-    audience_type: audience.type,
-    audience_label: audienceLabel,
-    channel,
-    subject: channel === "sms" ? "(SMS)" : subject,
-    body_preview: body.slice(0, 120).replace(/\n/g, " "),
-    recipient_count: recipientCount,
-    status: sendSuccess ? "sent" : "failed",
-    scheduled_at: null,
-    sent_at: new Date().toISOString(),
-  });
+  // 8. Final DB Logging Debugging
+  console.log(`${logPrefix} 📝 Logging final transaction status to DB...`);
+  const { error: finalLogError } = await supabase
+    .from("communications_log")
+    .insert({
+      sent_by: user.id,
+      audience_type: audience.type,
+      audience_label: audienceLabel,
+      channel,
+      subject: channel === "sms" ? "(SMS)" : subject,
+      body_preview: body.slice(0, 120).replace(/\n/g, " "),
+      recipient_count: recipientCount,
+      status: sendSuccess ? "sent" : "failed",
+      scheduled_at: null,
+      sent_at: new Date().toISOString(),
+    });
+
+  if (finalLogError)
+    console.error(`${logPrefix} ❌ DB Log Error (Final):`, finalLogError);
 
   if (!sendSuccess && recipientCount === 0) {
+    console.error(`${logPrefix} ❌ Failure: Total failure in delivery.`);
     return NextResponse.json(
       {
         success: false,
         recipientCount: 0,
         messageIds: [],
-        error: "All sends failed. Check AT/Resend credentials.",
+        error: "All sends failed. Check provider credentials or logs.",
       },
       { status: 500 },
     );
   }
 
+  console.log(
+    `${logPrefix} ✨ Execution complete. Success: ${sendSuccess}, Total Sent: ${recipientCount}`,
+  );
   return NextResponse.json({
     success: sendSuccess,
     recipientCount,

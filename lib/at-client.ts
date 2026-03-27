@@ -32,6 +32,7 @@ const sms = at.SMS;
  * @param to      - Phone number string or array e.g. "+254712345678"
  * @param message - Text content to send
  */
+// at-client.ts refinement for demo
 export const sendSMS = async (
   to: string | string[],
   message: string,
@@ -41,16 +42,12 @@ export const sendSMS = async (
     message,
   };
 
-  // Only set 'from' when a sender ID is configured —
-  // passing undefined causes 400/401 errors in sandbox
+  // Switch to the shared ID for demoing
+  // If AT_SENDER_ID is missing in .env, AT defaults to "AFRICASTKNG"
   if (process.env.AT_SENDER_ID) {
     options.from = process.env.AT_SENDER_ID;
   }
 
-  // sms.send() returns the AT SDK's own SMSMessageData type which doesn't
-  // overlap with our ATResponse interface. Cast through unknown first.
   const response = (await sms.send(options)) as unknown as ATResponse;
-
-  console.log("[AT-Client] SMS sent successfully");
   return response;
 };
