@@ -15,6 +15,7 @@ import {
   Bell,
   Settings,
   ClipboardList,
+  FileSpreadsheet,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -134,5 +135,24 @@ export const ADMIN_LINKS: NavLink[] = [
     href: "/admin/settings",
     icon: Settings,
     group: "System",
+  },
+
+  {
+    label: "Grade 3 MLP",
+    href: "/admin/exams/grade-3",
+    icon: FileSpreadsheet,
+    group: "KNEC Exports",
+  },
+  {
+    label: "KPSEA Grade 6",
+    href: "/admin/exams/grade-6",
+    icon: FileSpreadsheet,
+    group: "KNEC Exports",
+  },
+  {
+    label: "KESSCE Grade 9",
+    href: "/admin/exams/grade-9",
+    icon: FileSpreadsheet,
+    group: "KNEC Exports",
   },
 ];
