@@ -16,6 +16,8 @@ import {
   Settings,
   ClipboardList,
   FileSpreadsheet,
+  ArrowLeftRight,
+  BookOpen,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -154,5 +156,19 @@ export const ADMIN_LINKS: NavLink[] = [
     href: "/admin/exams/grade-9",
     icon: FileSpreadsheet,
     group: "KNEC Exports",
+  },
+  {
+    label: "CSL Logbook",
+    href: "/admin/csl",
+    icon: BookOpen,
+    group: "KNEC Exports",
+  },
+
+  // Student Management
+  {
+    label: "Transfer Center",
+    href: "/admin/transfers",
+    icon: ArrowLeftRight,
+    group: "Student Management",
   },
 ];
