@@ -1,24 +1,20 @@
 "use server";
 
-// lib/actions/bulk-admit.ts
-// Bulk student admission — processes multiple rows from CSV or multi-row form.
-// Each row: studentName, dateOfBirth, gender, currentGrade, parentName, parentEmail, parentPhone
-
-import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/actions/auth";
 import { sendWelcomeEmail } from "@/lib/mail";
 import { z } from "zod";
 import { supabaseAdmin } from "../supabase/admin";
+import { normalizeKenyanPhone } from "../utils/phone";
 
 const rowSchema = z.object({
-  studentName: z.string().min(2).max(100),
-  dateOfBirth: z.string().min(1),
+  studentName: z.string().min(2, "Name too short").max(100),
+  dateOfBirth: z.string().min(1, "DOB required"),
   gender: z.enum(["Male", "Female"]),
   currentGrade: z.string().min(1).max(30),
-  parentName: z.string().min(2).max(100),
-  parentEmail: z.string().email(),
-  parentPhone: z.string().min(9).max(15),
+  parentName: z.string().min(2, "Parent name too short").max(100),
+  parentEmail: z.string().email("Invalid email"),
+  parentPhone: z.string().min(9, "Phone too short").max(15),
 });
 
 export type BulkAdmitRow = z.infer<typeof rowSchema>;
@@ -28,6 +24,7 @@ export interface BulkAdmitResult {
   studentName: string;
   success: boolean;
   message: string;
+  studentId?: string;
 }
 
 export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
@@ -36,6 +33,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
   failCount: number;
 }> {
   const session = await getSession();
+
   if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
     return {
       results: rows.map((r, i) => ({
@@ -58,9 +56,9 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
     if (!parsed.success) {
       results.push({
         index: i,
-        studentName: row.studentName,
+        studentName: row.studentName || `Row ${i + 1}`,
         success: false,
-        message: parsed.error.issues.map((e) => e.message).join("; "),
+        message: parsed.error.issues.map((e) => e.message).join(", "),
       });
       continue;
     }
@@ -76,52 +74,48 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
     } = parsed.data;
 
     try {
-      // ── 1. Upsert parent auth user ─────────────────────────────────────────
+      const email = parentEmail.toLowerCase();
+      const phone = normalizeKenyanPhone(parentPhone);
+
+      // ── 1. Parent Handling ─────────────────────────────────────────────────
+      let parentId: string;
+      let isNewParent = false;
+
       const { data: existingParent } = await supabaseAdmin
         .from("parents")
         .select("id")
-        .eq("email", parentEmail)
+        .eq("email", email)
         .maybeSingle();
-
-      let parentId: string;
-      let isNewParent = false;
 
       if (existingParent) {
         parentId = existingParent.id;
       } else {
-        // Create auth user for parent
         const { data: authData, error: authErr } =
           await supabaseAdmin.auth.admin.createUser({
-            email: parentEmail,
+            email,
+            phone,
             email_confirm: true,
             user_metadata: { full_name: parentName, role: "parent" },
           });
-        if (authErr) throw new Error(`Auth: ${authErr.message}`);
 
+        if (authErr) throw new Error(`Auth: ${authErr.message}`);
         parentId = authData.user.id;
         isNewParent = true;
-
-        // Insert parent record
-        const { error: pErr } = await supabaseAdmin.from("parents").insert({
-          id: parentId,
-          full_name: parentName,
-          email: parentEmail,
-          phone_number: parentPhone,
-          last_invite_sent: new Date().toISOString(),
-        });
-        if (pErr) {
-          await supabaseAdmin.auth.admin.deleteUser(parentId);
-          throw new Error(`Parent record: ${pErr.message}`);
-        }
-
-        // Update profile role
-        await supabaseAdmin
-          .from("profiles")
-          .update({ role: "parent" })
-          .eq("id", parentId);
       }
 
-      // ── 2. Insert student ──────────────────────────────────────────────────
+      // UPSERT the parent record. This fixes the "NA" phone number issue and
+      // solves the "Duplicate Key" error by updating the record if the trigger
+      // created it first.
+      const { error: pErr } = await supabaseAdmin.from("parents").upsert({
+        id: parentId,
+        full_name: parentName,
+        email: email,
+        phone_number: phone,
+      });
+
+      if (pErr) throw new Error(`Parent Record: ${pErr.message}`);
+
+      // ── 2. Student Creation ────────────────────────────────────────────────
       const { data: student, error: sErr } = await supabaseAdmin
         .from("students")
         .insert({
@@ -132,9 +126,10 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
         })
         .select("id")
         .single();
+
       if (sErr || !student) throw new Error(`Student: ${sErr?.message}`);
 
-      // ── 3. Link student ↔ parent ───────────────────────────────────────────
+      // ── 3. Linking ─────────────────────────────────────────────────────────
       const { error: linkErr } = await supabaseAdmin
         .from("student_parents")
         .insert({
@@ -143,42 +138,30 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
           relationship_type: "guardian",
           is_primary_contact: true,
         });
+
       if (linkErr) {
         await supabaseAdmin.from("students").delete().eq("id", student.id);
-        throw new Error(`Link: ${linkErr.message}`);
+        throw new Error(`Linking: ${linkErr.message}`);
       }
 
-      // ── 4. Send invite email if new parent ────────────────────────────────
+      // ── 4. Welcome Email ───────────────────────────────────────────────────
       if (isNewParent) {
-        try {
-          const { data: linkData } =
-            await supabaseAdmin.auth.admin.generateLink({
-              type: "recovery",
-              email: parentEmail,
-              options: {
-                redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
-              },
-            });
+        const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
+          type: "recovery",
+          email,
+          options: {
+            redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
+          },
+        });
 
-          // FIX: Check for linkData and the string existence of action_link
-          const actionLink = linkData?.properties?.action_link;
-
-          if (actionLink) {
-            await sendWelcomeEmail({
-              parentEmail,
-              parentName,
-              studentName,
-              grade: currentGrade,
-              setupLink: actionLink,
-            });
-          } else {
-            console.warn(
-              `[bulkAdmit] No action link generated for ${parentEmail}`,
-            );
-          }
-        } catch (mailErr) {
-          console.error("[bulkAdmit mail]", mailErr);
-          // Non-fatal, student is still admitted
+        if (linkData?.properties?.action_link) {
+          await sendWelcomeEmail({
+            parentEmail: email,
+            parentName,
+            studentName,
+            grade: currentGrade,
+            setupLink: linkData.properties.action_link,
+          });
         }
       }
 
@@ -186,12 +169,13 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
         index: i,
         studentName,
         success: true,
-        message: "Admitted successfully",
+        message: "Success",
+        studentId: student.id,
       });
     } catch (err: any) {
       results.push({
         index: i,
-        studentName: row.studentName,
+        studentName: studentName || "Unknown",
         success: false,
         message: err.message,
       });
@@ -199,7 +183,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
   }
 
   revalidatePath("/admin/students");
-  revalidatePath("/admin");
+  revalidatePath("/admin/dashboard");
 
   const successCount = results.filter((r) => r.success).length;
   return { results, successCount, failCount: rows.length - successCount };

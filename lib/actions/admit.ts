@@ -4,12 +4,11 @@
 
 import { sendWelcomeEmail } from "@/lib/mail";
 import { revalidatePath } from "next/cache";
-import { supabaseAdmin } from "../supabase/admin";
 import {
   admissionSchema,
   type AdmissionActionResult,
 } from "../schemas/admission";
-import { z } from "zod";
+import { supabaseAdmin } from "../supabase/admin";
 import { getAuthConfirmUrl } from "../utils/site-url";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -60,6 +59,7 @@ export async function searchParentsAction(
 
     return { success: true, data: results };
   } catch (err: any) {
+    console.error("[SearchParents] Error:", err.message);
     return { success: false, data: [], message: err.message };
   }
 }
@@ -84,8 +84,17 @@ export async function admitStudentAction(
     parentPhone: formData.get("parentPhone") || null,
   };
 
+  console.log(
+    "[AdmitStudent] Starting admission for student:",
+    raw.studentName,
+  );
+
   const parsed = admissionSchema.safeParse(raw);
   if (!parsed.success) {
+    console.warn(
+      "[AdmitStudent] Validation failed:",
+      parsed.error.issues[0]?.message,
+    );
     return {
       success: false,
       message: parsed.error.issues[0]?.message ?? "Validation failed.",
@@ -94,29 +103,25 @@ export async function admitStudentAction(
 
   const d = parsed.data;
 
-  // ── Manual conditional validation ────────────────────────────────────────────
-  // When creating a new parent, name/email/phone are all required.
+  // ── Manual conditional validation for new parents ────────────────────────────
   if (!existingParentId) {
-    if (!d.parentName?.trim())
-      return { success: false, message: "Parent full name is required." };
-    if (!d.parentEmail?.trim())
-      return { success: false, message: "Parent email is required." };
-    if (!d.parentPhone?.trim())
-      return { success: false, message: "Parent phone number is required." };
+    if (
+      !d.parentName?.trim() ||
+      !d.parentEmail?.trim() ||
+      !d.parentPhone?.trim()
+    ) {
+      return {
+        success: false,
+        message: "Parent name, email, and phone are required.",
+      };
+    }
 
-    // Kenyan phone validation
+    // Updated regex to support 07... and 01... prefixes
     const phoneOk = /^(\+?254|0)[17]\d{8}$/.test(
       d.parentPhone.replace(/\s/g, ""),
     );
     if (!phoneOk)
-      return {
-        success: false,
-        message: "Enter a valid Kenyan phone number (e.g. 0712345678).",
-      };
-
-    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.parentEmail);
-    if (!emailOk)
-      return { success: false, message: "Enter a valid email address." };
+      return { success: false, message: "Enter a valid Kenyan phone number." };
   }
 
   try {
@@ -124,73 +129,85 @@ export async function admitStudentAction(
 
     // ── FLOW A: Link to existing parent ───────────────────────────────────────
     if (existingParentId) {
+      console.log(
+        "[AdmitStudent] Linking to existing parent:",
+        existingParentId,
+      );
       const { data: existing, error } = await supabaseAdmin
         .from("parents")
-        .select("id, full_name, email")
+        .select("id")
         .eq("id", existingParentId)
         .maybeSingle();
 
       if (error || !existing) {
-        return {
-          success: false,
-          message: "Selected parent could not be verified. Please try again.",
-        };
+        return { success: false, message: "Selected parent not found." };
       }
-
-      // Check this student isn't already linked to the same parent
-      const { data: existingLink } = await supabaseAdmin
-        .from("student_parents")
-        .select("id")
-        .eq("parent_id", existingParentId)
-        .limit(1);
-
       parentId = existing.id;
     } else {
       // ── FLOW B: Create new parent ─────────────────────────────────────────
 
-      const { data: existingByEmail } = await supabaseAdmin
+      // 1. Pre-check email/phone to avoid 422 Auth errors
+      console.log("[AdmitStudent] Checking for duplicate email/phone...");
+      const { data: existingParent } = await supabaseAdmin
         .from("parents")
-        .select("id")
-        .eq("email", d.parentEmail!)
+        .select("id, email, phone_number")
+        .or(`email.eq.${d.parentEmail},phone_number.eq.${d.parentPhone}`)
         .maybeSingle();
 
-      if (existingByEmail) {
+      if (existingParent) {
+        const conflict =
+          existingParent.email === d.parentEmail ? "email" : "phone number";
         return {
           success: false,
-          message: `A parent with "${d.parentEmail}" already exists. Search and select them above instead.`,
+          message: `A parent with this ${conflict} already exists.`,
         };
       }
 
-      const { data: newAuthUser, error: authError } =
-        await supabaseAdmin.auth.admin.createUser({
-          email: d.parentEmail!,
-          phone: d.parentPhone!,
-          email_confirm: true,
-          user_metadata: { full_name: d.parentName, role: "parent" },
-        });
+      // ── Phone Normalization (The "Swiss Army Knife" for Kenya) ──
+      const rawPhone = d.parentPhone!.replace(/\s/g, "");
+      let formattedPhone: string;
 
-      if (authError)
-        throw new Error(`Auth creation failed: ${authError.message}`);
-
-      parentId = newAuthUser.user.id;
-
-      const { error: parentError } = await supabaseAdmin
-        .from("parents")
-        .insert({
-          id: parentId,
-          full_name: d.parentName!,
-          email: d.parentEmail!,
-          phone_number: d.parentPhone!,
-          invite_accepted: false,
-        });
-
-      if (parentError) {
-        await supabaseAdmin.auth.admin.deleteUser(parentId);
-        throw new Error(
-          `Parent profile creation failed: ${parentError.message}`,
-        );
+      if (rawPhone.startsWith("+254")) {
+        formattedPhone = rawPhone;
+      } else if (rawPhone.startsWith("254")) {
+        formattedPhone = `+${rawPhone}`;
+      } else if (rawPhone.startsWith("0")) {
+        // Handles 07... and 01...
+        formattedPhone = `+254${rawPhone.slice(1)}`;
+      } else {
+        // Handles cases where user starts with 7... or 1...
+        formattedPhone = `+254${rawPhone}`;
       }
 
+      // 2. Create Auth User
+      // NOTE: This call triggers handle_new_user in DB (Atomic Trigger)
+      console.log(
+        "[AdmitStudent] Creating Auth user with phone:",
+        formattedPhone,
+      );
+      const { data: authUser, error: authError } =
+        await supabaseAdmin.auth.admin.createUser({
+          email: d.parentEmail!,
+          phone: formattedPhone,
+          email_confirm: true,
+          user_metadata: {
+            full_name: d.parentName,
+            role: "parent",
+          },
+        });
+
+      if (authError) {
+        console.error("[AdmitStudent] Auth Creation Error:", authError);
+        throw new Error(`Auth creation failed: ${authError.message}`);
+      }
+
+      parentId = authUser.user.id;
+      console.log(
+        "[AdmitStudent] Auth user and DB records created via trigger:",
+        parentId,
+      );
+
+      // 3. Generate Setup Link
       const { data: linkData, error: linkError } =
         await supabaseAdmin.auth.admin.generateLink({
           type: "magiclink",
@@ -198,24 +215,27 @@ export async function admitStudentAction(
           options: { redirectTo: getAuthConfirmUrl() },
         });
 
-      if (linkError)
-        throw new Error(`Setup link generation failed: ${linkError.message}`);
-
-      try {
-        await sendWelcomeEmail({
-          parentEmail: d.parentEmail!,
-          parentName: d.parentName!,
-          studentName: d.studentName,
-          grade: d.currentGrade,
-          setupLink: linkData.properties.action_link,
-        });
-      } catch (mailErr) {
-        console.error("Mail delivery failed:", mailErr);
-        // Non-fatal
+      if (linkError) {
+        console.error("[AdmitStudent] Setup link error:", linkError);
+      } else {
+        // 4. Send Welcome Email (Non-fatal)
+        try {
+          await sendWelcomeEmail({
+            parentEmail: d.parentEmail!,
+            parentName: d.parentName!,
+            studentName: d.studentName,
+            grade: d.currentGrade,
+            setupLink: linkData.properties.action_link,
+          });
+          console.log("[AdmitStudent] Welcome email sent.");
+        } catch (mailErr) {
+          console.error("[AdmitStudent] Mail delivery failed:", mailErr);
+        }
       }
     }
 
     // ── INSERT STUDENT ────────────────────────────────────────────────────────
+    console.log("[AdmitStudent] Registering student...");
     const { data: newStudent, error: studentError } = await supabaseAdmin
       .from("students")
       .insert({
@@ -228,22 +248,26 @@ export async function admitStudentAction(
       .single();
 
     if (studentError || !newStudent) {
+      console.error("[AdmitStudent] Student Table Error:", studentError);
       throw new Error(
-        `Student registration failed: ${studentError?.message ?? "unknown error"}`,
+        `Student registration failed: ${studentError?.message ?? "DB Error"}`,
       );
     }
 
     // ── LINK via join table ───────────────────────────────────────────────────
+    console.log("[AdmitStudent] Linking student to parent...");
     const { error: linkErr } = await supabaseAdmin
       .from("student_parents")
       .insert({
         student_id: newStudent.id,
         parent_id: parentId,
-        relationship_type: d.relationshipType ?? "guardian",
+        relationship_type: d.relationshipType as any,
         is_primary_contact: true,
       });
 
     if (linkErr) {
+      console.error("[AdmitStudent] Link Table Error:", linkErr);
+      // Rollback student if linking fails
       await supabaseAdmin.from("students").delete().eq("id", newStudent.id);
       throw new Error(`Student-parent link failed: ${linkErr.message}`);
     }
@@ -251,13 +275,14 @@ export async function admitStudentAction(
     revalidatePath("/admin/students");
     revalidatePath("/admin/dashboard");
 
+    console.log("[AdmitStudent] Process complete.");
     return {
       success: true,
       message: "Student admitted successfully.",
       studentId: newStudent.id,
     };
   } catch (err: any) {
-    console.error("Admission Error:", err.message);
+    console.error("[AdmitStudent] Global Catch Block:", err);
     return {
       success: false,
       message: err.message || "An unexpected error occurred.",
@@ -272,10 +297,12 @@ export async function resendInviteAction(parentId: string) {
     const { data: parent, error: pError } = await supabaseAdmin
       .from("parents")
       .select(
-        `email, full_name,
+        `
+        email, full_name,
         student_parents (
           students ( full_name, current_grade )
-        )`,
+        )
+      `,
       )
       .eq("id", parentId)
       .single();
@@ -303,13 +330,12 @@ export async function resendInviteAction(parentId: string) {
 
     return { success: true, message: "A new secure invite has been sent." };
   } catch (error: any) {
+    console.error("[ResendInvite] Error:", error.message);
     return { success: false, message: error.message };
   }
 }
 
 // ── Upload student passport photo ─────────────────────────────────────────────
-// Called separately after admission so the photo upload doesn't block the
-// admission flow if the network is slow. Also used for updating photos later.
 
 export async function uploadStudentPhotoAction(
   studentId: string,
@@ -321,9 +347,6 @@ export async function uploadStudentPhotoAction(
 
   if (file.size > 2 * 1024 * 1024)
     return { success: false, message: "Photo must be under 2 MB." };
-
-  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
-    return { success: false, message: "Photo must be JPEG, PNG, or WEBP." };
 
   const ext =
     file.type === "image/png"
@@ -339,11 +362,8 @@ export async function uploadStudentPhotoAction(
     .upload(path, buffer, { contentType: file.type, upsert: true });
 
   if (uploadError) {
-    console.error("Photo upload error:", uploadError.message);
-    return {
-      success: false,
-      message: "Photo upload failed. Check storage bucket.",
-    };
+    console.error("[UploadPhoto] Storage error:", uploadError.message);
+    return { success: false, message: "Photo upload failed." };
   }
 
   const { error: updateError } = await supabaseAdmin
@@ -352,9 +372,10 @@ export async function uploadStudentPhotoAction(
     .eq("id", studentId);
 
   if (updateError) {
+    console.error("[UploadPhoto] DB Update error:", updateError.message);
     return {
       success: false,
-      message: "Photo uploaded but could not save path to student record.",
+      message: "Could not update student record with photo.",
     };
   }
 

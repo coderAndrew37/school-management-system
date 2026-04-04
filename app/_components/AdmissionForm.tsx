@@ -5,37 +5,37 @@
 // Flow A: search + select existing parent → link new student to their account.
 // Flow B: fill in new parent details → create auth user + send invite.
 
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { toast } from "sonner";
-import { useTransition, useState, useCallback, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import {
+  admitStudentAction,
+  searchParentsAction,
+  uploadStudentPhotoAction,
+  type ParentSearchResult,
+} from "@/lib/actions/admit";
 import {
   admissionSchema,
   type AdmissionFormValues,
 } from "@/lib/schemas/admission";
+import { zodResolver } from "@hookform/resolvers/zod";
 import {
-  UserRoundPlus,
   CalendarDays,
-  Phone,
-  GraduationCap,
-  Users,
-  Loader2,
-  Mail,
-  User,
-  Search,
-  X,
+  Camera,
   CheckCircle2,
   ChevronDown,
-  Camera,
+  GraduationCap,
   ImageOff,
+  Loader2,
+  Mail,
+  Phone,
+  Search,
+  User,
+  UserRoundPlus,
+  Users,
+  X,
 } from "lucide-react";
-import {
-  admitStudentAction,
-  uploadStudentPhotoAction,
-  searchParentsAction,
-  type ParentSearchResult,
-} from "@/lib/actions/admit";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -737,8 +737,8 @@ export default function AdmissionForm() {
                       <input
                         id="parentPhone"
                         type="tel"
-                        placeholder="0712 345 678"
-                        className={`${inputBase} pl-10`}
+                        placeholder="0712 345 678" // Matches the visual expectation with the flag
+                        className={`${inputBase} pl-12`} // Increased padding-left for the flag spacing
                         {...register("parentPhone")}
                         disabled={isPending}
                       />

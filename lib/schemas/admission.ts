@@ -48,17 +48,22 @@ const studentFields = {
 // z.string().uuid() vs z.null() causes silent fallthrough. We use a single flat
 // schema and validate parent fields conditionally in the server action instead.
 
+// lib/schemas/admission.ts
+
 export const admissionSchema = z.object({
   ...studentFields,
 
-  // When set to a UUID: link to existing parent (skip parent field validation).
-  // When null/undefined: create a new parent using the fields below.
-  existingParentId: z.string().uuid().nullable().optional(),
+  // Optional if linking to existing parent, but required for Flow B
+  parentName: z.string().min(2, "Parent name is required").optional(),
+  parentEmail: z.string().email("Invalid email address").optional(),
 
-  // Parent fields — required only when existingParentId is null
-  parentName: z.string().max(100).optional().nullable(),
-  parentEmail: z.string().email().optional().nullable().or(z.literal("")),
-  parentPhone: z.string().max(20).optional().nullable(),
+  parentPhone: z
+    .string()
+    .regex(
+      /^(?:254|\+254|0)?(7|1)(?:(?:[0-9][0-9])|(?:0[0-8]))[0-9]{6}$/,
+      "Enter a valid Kenyan phone number (e.g., 0712345678)",
+    )
+    .optional(),
 });
 
 export type AdmissionFormValues = {

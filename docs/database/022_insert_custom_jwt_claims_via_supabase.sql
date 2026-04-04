@@ -1,20 +1,33 @@
--- 1. Create a function to set the role in the JWT
-create or replace function public.handle_update_user_role()
-returns trigger as $$
-begin
-  update auth.users
-  set raw_app_metadata_content = 
-    jsonb_set(
-      coalesce(raw_app_metadata_content, '{}'::jsonb),
-      '{role}',
-      to_jsonb(new.role)
-    )
-  where id = new.id;
-  return new;
-end;
-$$ language plpgsql security definer;
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+  -- 1. Insert into Profiles
+  INSERT INTO public.profiles (id, full_name, role, roles)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email),
+    'parent'::public.user_role,
+    ARRAY['parent'::public.user_role]
+  );
 
--- 2. Trigger this function whenever a profile is created or updated
-create trigger on_profile_update
-  after insert or update of role on public.profiles
-  for each row execute function public.handle_update_user_role();
+  -- 2. Insert into Parents
+  INSERT INTO public.parents (id, full_name, email, phone_number)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', 'Parent'),
+    NEW.email,
+    COALESCE(NEW.phone, 'N/A')
+  );
+
+  -- 3. FIX: Set the metadata DIRECTLY on the NEW record 
+  -- This avoids the UPDATE auth.users deadlock entirely.
+  NEW.raw_app_meta_data := 
+    jsonb_set(
+      COALESCE(NEW.raw_app_meta_data, '{}'::jsonb),
+      '{role}',
+      '"parent"'
+    );
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
