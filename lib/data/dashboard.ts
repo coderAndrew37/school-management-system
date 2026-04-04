@@ -108,9 +108,10 @@ export async function fetchTeachers(): Promise<Teacher[]> {
   const { data, error } = await supabase
     .from("teachers")
     .select(
-      "id, full_name, tsc_number, email, phone_number, status, last_invite_sent, created_at",
+      "id, full_name, tsc_number, email, phone_number, status, last_invite_sent, created_at, avatar_url", // Added avatar_url
     )
     .order("full_name", { ascending: true });
+
   if (error) {
     console.error("fetchTeachers error:", error);
     return [];

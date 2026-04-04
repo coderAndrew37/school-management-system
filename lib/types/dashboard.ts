@@ -11,6 +11,8 @@ export interface Teacher {
   status: TeacherStatus;
   last_invite_sent: string | null;
   created_at: string;
+  invite_accepted: boolean;
+  avatar_url: string | null;
 }
 
 // ── Parent ────────────────────────────────────────────────────────────────────

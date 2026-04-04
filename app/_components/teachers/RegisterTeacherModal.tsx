@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, ChangeEvent } from "react"; // Added ChangeEvent
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Loader2, UserPlus, X } from "lucide-react";
+import { Loader2, UserPlus, X, Camera, Plus } from "lucide-react"; // Added Camera, Plus
+import Image from "next/image"; // Added Image
 import {
   teacherRegistrationSchema,
   TeacherFormValues,
@@ -15,6 +16,8 @@ import { KButton, KInput } from "../shared/Forms";
 export default function RegisterTeacherModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [isPending, setIsPending] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const {
     register,
@@ -25,16 +28,35 @@ export default function RegisterTeacherModal() {
     resolver: zodResolver(teacherRegistrationSchema),
   });
 
+  const handleImageChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setImageFile(file);
+      setPreviewUrl(URL.createObjectURL(file));
+    }
+  };
+
   const onSubmit = async (data: TeacherFormValues) => {
     setIsPending(true);
     const formData = new FormData();
-    Object.entries(data).forEach(([key, value]) => formData.append(key, value));
+
+    // Append standard fields
+    Object.entries(data).forEach(([key, value]) =>
+      formData.append(key, value as string),
+    );
+
+    // Append image if exists
+    if (imageFile) {
+      formData.append("image", imageFile);
+    }
 
     try {
       const result = await addTeacherAction(formData);
       if (result.success) {
         toast.success("Staff member registered successfully");
         reset();
+        setImageFile(null);
+        setPreviewUrl(null);
         setIsOpen(false);
       } else {
         toast.error(result.message);
@@ -54,13 +76,11 @@ export default function RegisterTeacherModal() {
 
       {isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/80 backdrop-blur-md"
             onClick={() => !isPending && setIsOpen(false)}
           />
 
-          {/* Modal Content */}
           <div className="relative bg-[#0F0F11] border border-white/10 w-full max-w-md rounded-2xl shadow-2xl p-8 overflow-hidden">
             <div className="flex justify-between items-start mb-6">
               <div>
@@ -79,6 +99,35 @@ export default function RegisterTeacherModal() {
             </div>
 
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+              {/* Profile Image Uploader */}
+              <div className="flex justify-center pb-2">
+                <div className="relative group h-24 w-24">
+                  <div className="h-24 w-24 rounded-full bg-white/5 border border-white/10 overflow-hidden flex items-center justify-center">
+                    {previewUrl ? (
+                      <Image
+                        src={previewUrl}
+                        alt="Preview"
+                        fill
+                        className="object-cover"
+                      />
+                    ) : (
+                      <Camera className="h-8 w-8 text-white/20" />
+                    )}
+                  </div>
+                  <label className="absolute bottom-0 right-0 h-8 w-8 bg-blue-600 rounded-full flex items-center justify-center cursor-pointer hover:bg-blue-500 transition-colors border-2 border-[#0F0F11]">
+                    <Plus className="h-4 w-4 text-white" />
+                    <input
+                      id="image"
+                      aria-label="Teacher profile image"
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleImageChange}
+                    />
+                  </label>
+                </div>
+              </div>
+
               <KInput
                 label="Full Name"
                 placeholder="e.g. David Ndungu"
