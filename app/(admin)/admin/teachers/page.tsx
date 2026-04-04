@@ -1,10 +1,9 @@
-// app/admin/teachers/page.tsx
-
 import { Users } from "lucide-react";
 import { fetchTeachers } from "@/lib/data/dashboard";
-import { TeachersTableClient } from "@/app/_components/teachers/TeachersTable";
+// Updated import to point to the index file in the teachers_table folder
 import ListPageShell from "@/app/_components/shared/ListPageShell";
 import { getActiveTermYear } from "@/lib/utils/settings";
+import TeachersIndex from "@/app/_components/teachers/teachers_table/Index";
 
 export const metadata = {
   title: "Teachers | Kibali Academy",
@@ -27,7 +26,10 @@ export default async function TeachersPage() {
       subtitle="Teaching Staff"
       title="Staff Register"
     >
-      <TeachersTableClient teachers={teachers} academicYear={academicYear} />
+      {/* Using the default export from teachers_table/index.tsx 
+          Passing the fetched data down as initialTeachers
+      */}
+      <TeachersIndex initialTeachers={teachers} academicYear={academicYear} />
     </ListPageShell>
   );
 }

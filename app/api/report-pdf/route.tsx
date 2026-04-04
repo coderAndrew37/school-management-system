@@ -11,7 +11,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ReportCardDocument } from "@/lib/pdf/ReportCardDocument";
 import { getActiveTermYear, getLogoPublicUrl } from "@/lib/utils/settings";
-import { getStudentPhotoUrl } from "@/lib/utils/student-photo";
+import { getStudentPhotoUrl } from "@/lib/utils/photo-utils";
 
 // ── Score helper ──────────────────────────────────────────────────────────────
 

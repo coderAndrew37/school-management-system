@@ -6,7 +6,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ReportCardPage } from "@/lib/pdf/ReportCardDocument";
 import { getLogoPublicUrl, getActiveTermYear } from "@/lib/utils/settings";
-import { getStudentPhotoUrl } from "@/lib/utils/student-photo";
+import { getStudentPhotoUrl } from "@/lib/utils/photo-utils";
 
 // ── Local row types ───────────────────────────────────────────────────────────
 

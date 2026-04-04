@@ -10,7 +10,7 @@ import type {
 import {
   getStudentPhotoUrl,
   getStudentInitials,
-} from "@/lib/utils/student-photo";
+} from "@/lib/utils/photo-utils";
 import {
   updateStudentAction,
   deleteStudentAction,

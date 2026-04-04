@@ -23,7 +23,7 @@ import { resendParentInviteAction } from "@/lib/actions/bulk-invite";
 import {
   getStudentInitials,
   getStudentPhotoUrl,
-} from "@/lib/utils/student-photo";
+} from "@/lib/utils/photo-utils";
 import { formatDistanceToNow } from "date-fns";
 import {
   Bell,

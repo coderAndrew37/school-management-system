@@ -1,12 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import {
-  Student,
-  Teacher,
-  DashboardStats,
-  Parent,
-} from "@/lib/types/dashboard";
 import { ALL_GRADES } from "@/lib/types/allocation";
 import { GRADE_LEVEL_MAP } from "@/lib/types/assessment";
+import { DashboardStats, Student, Teacher } from "@/lib/types/dashboard";
 
 // ── Helper: flatten the join table into the shape the rest of the
 //    app expects — student.parents = { full_name, phone_number } | null
