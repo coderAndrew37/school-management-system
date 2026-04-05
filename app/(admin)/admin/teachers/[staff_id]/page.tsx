@@ -1,11 +1,10 @@
 import { notFound } from "next/navigation";
 import { getActiveTermYear } from "@/lib/utils/settings";
 import { TeacherDetailClient } from "@/app/_components/teachers/TeacherDetailClient";
-// Updated import name here
 import {
   fetchTeacherByStaffId,
   fetchTeacherStats,
-  fetchClassTeacherGrades,
+  fetchClassTeacherAssignments, // Corrected name
   fetchTeacherAllocations,
 } from "@/lib/data/teachers";
 
@@ -27,11 +26,11 @@ export default async function TeacherDetailPage({ params }: Props) {
   const teacher = await fetchTeacherByStaffId(staff_id);
   if (!teacher) notFound();
 
-  const [allocations, stats, classGrades] = await Promise.all([
-    // Updated function call here
+  // We fetch assignments (which includes history/active status) instead of just grades
+  const [allocations, stats, classAssignments] = await Promise.all([
     fetchTeacherAllocations(teacher.id, academicYear),
     fetchTeacherStats(teacher.id, academicYear),
-    fetchClassTeacherGrades(teacher.id, academicYear),
+    fetchClassTeacherAssignments(teacher.id, academicYear), // Corrected function call
   ]);
 
   return (
@@ -39,7 +38,7 @@ export default async function TeacherDetailPage({ params }: Props) {
       teacher={teacher}
       allocations={allocations}
       stats={stats}
-      classGrades={classGrades}
+      classAssignments={classAssignments} // Updated prop name to match logic
       academicYear={academicYear}
       term={term}
     />

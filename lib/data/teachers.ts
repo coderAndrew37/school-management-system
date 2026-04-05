@@ -3,30 +3,19 @@ import {
   AllocationRow,
   Teacher,
   TeacherStats,
-  ClassTeacherGrade,
+  ClassTeacherAssignment,
 } from "@/lib/types/dashboard";
 
-// ── Fetch All Teachers (For the main table) ──────────────────────────────────
-/**
- * Fetches all teachers for the administrative list view.
- */
+// ── Fetch All Teachers ────────────────────────────────────────────────────────
 export async function fetchTeachers(): Promise<Teacher[]> {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("teachers")
     .select(
       `
-      id, 
-      staff_id, 
-      full_name, 
-      tsc_number, 
-      email, 
-      phone_number, 
-      status, 
-      last_invite_sent, 
-      created_at, 
-      avatar_url,
-      invite_accepted
+      id, staff_id, full_name, tsc_number, email, 
+      phone_number, status, last_invite_sent, 
+      created_at, avatar_url, invite_accepted
     `,
     )
     .order("full_name", { ascending: true });
@@ -38,10 +27,7 @@ export async function fetchTeachers(): Promise<Teacher[]> {
   return (data ?? []) as Teacher[];
 }
 
-// ── Fetch Single Teacher by Staff ID (For the Profile Page) ──────────────────
-/**
- * Fetches a single teacher using the public Staff ID (KIB-T-XXX).
- */
+// ── Fetch Single Teacher by Staff ID ──────────────────────────────────────────
 export async function fetchTeacherByStaffId(
   staffId: string,
 ): Promise<Teacher | null> {
@@ -59,10 +45,7 @@ export async function fetchTeacherByStaffId(
   return data as Teacher;
 }
 
-// ── Fetch Teacher Statistics (Governance Metrics) ─────────────────────────────
-/**
- * Aggregates stats for the teacher profile header.
- */
+// ── Fetch Teacher Statistics ──────────────────────────────────────────────────
 export async function fetchTeacherStats(
   teacherId: string,
   academicYear: number,
@@ -70,9 +53,10 @@ export async function fetchTeacherStats(
   const supabase = await createSupabaseServerClient();
 
   const [allocRes, assessRes, teacherRes] = await Promise.all([
+    // Join with classes to get class IDs
     supabase
       .from("teacher_subject_allocations")
-      .select("grade")
+      .select("class_id")
       .eq("teacher_id", teacherId)
       .eq("academic_year", academicYear),
     supabase
@@ -87,8 +71,7 @@ export async function fetchTeacherStats(
       .maybeSingle(),
   ]);
 
-  const allocs = allocRes.data ?? [];
-  const grades = [...new Set(allocs.map((a) => a.grade))];
+  const classIds = [...new Set((allocRes.data ?? []).map((a) => a.class_id))];
 
   const yearsAtKibali = teacherRes.data
     ? Math.floor(
@@ -98,27 +81,25 @@ export async function fetchTeacherStats(
     : 0;
 
   let totalStudents = 0;
-  if (grades.length > 0) {
+  if (classIds.length > 0) {
+    // Now querying students by class_id instead of grade string
     const { count } = await supabase
       .from("students")
       .select("id", { count: "exact", head: true })
-      .in("current_grade", grades)
+      .in("class_id", classIds)
       .eq("status", "active");
     totalStudents = count ?? 0;
   }
 
   return {
-    totalClasses: grades.length,
+    totalClasses: classIds.length,
     totalStudents,
     yearsAtKibali: Math.max(0, yearsAtKibali),
     assessedStrands: assessRes.count ?? 0,
   };
 }
 
-// ── Fetch Subject Allocations (For Profile Tabs/Drawers) ──────────────────────
-/**
- * Fetches all subjects assigned to a specific teacher for an academic year.
- */
+// ── Fetch Subject Allocations ─────────────────────────────────────────────────
 export async function fetchTeacherAllocations(
   teacherId: string,
   academicYear: number,
@@ -126,10 +107,16 @@ export async function fetchTeacherAllocations(
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("teacher_subject_allocations")
-    .select("id, grade, subjects ( name, code )")
+    .select(
+      `
+      id,
+      class_id,
+      classes ( grade, stream ),
+      subjects ( name, code )
+    `,
+    )
     .eq("teacher_id", teacherId)
-    .eq("academic_year", academicYear)
-    .order("grade");
+    .eq("academic_year", academicYear);
 
   if (error) {
     console.error("[fetchTeacherAllocations] Error:", error.message);
@@ -137,40 +124,59 @@ export async function fetchTeacherAllocations(
   }
 
   return (data ?? []).map((r: any) => {
-    // Handle cases where subjects might be an array or object depending on join
     const subject = Array.isArray(r.subjects) ? r.subjects[0] : r.subjects;
+    const cls = Array.isArray(r.classes) ? r.classes[0] : r.classes;
+
     return {
       id: r.id,
       subjectName: subject?.name ?? "—",
       subjectCode: subject?.code ?? "—",
-      grade: r.grade,
+      class_id: r.class_id,
+      grade: cls?.grade ?? "—",
+      stream: cls?.stream ?? "—",
     };
   });
 }
 
-// ── Fetch Class Teacher Assignments ──────────────────────────────────────────
-/**
- * Fetches which grades this teacher is assigned to as a Class Teacher.
- */
-export async function fetchClassTeacherGrades(
+// ── Fetch Class Teacher Assignments ───────────────────────────────────────────
+export async function fetchClassTeacherAssignments(
   teacherId: string,
   academicYear: number,
-): Promise<ClassTeacherGrade[]> {
+): Promise<ClassTeacherAssignment[]> {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("class_teacher_assignments")
-    .select("grade, academic_year")
+    .select(
+      `
+      id,
+      class_id,
+      is_active,
+      assigned_at,
+      relieved_at,
+      academic_year,
+      classes ( grade, stream )
+    `,
+    )
     .eq("teacher_id", teacherId)
     .eq("academic_year", academicYear)
-    .order("grade");
+    .order("is_active", { ascending: false });
 
   if (error) {
-    console.error("[fetchClassTeacherGrades] Error:", error.message);
+    console.error("[fetchClassTeacherAssignments] Error:", error.message);
     return [];
   }
 
-  return (data ?? []).map((r) => ({
-    grade: r.grade,
-    academicYear: r.academic_year,
-  }));
+  return (data ?? []).map((r: any) => {
+    const cls = Array.isArray(r.classes) ? r.classes[0] : r.classes;
+    return {
+      id: r.id,
+      class_id: r.class_id,
+      grade: cls?.grade ?? "—",
+      stream: cls?.stream ?? "—",
+      academicYear: r.academic_year,
+      isActive: r.is_active,
+      assignedAt: r.assigned_at,
+      relievedAt: r.relieved_at,
+    };
+  });
 }

@@ -91,7 +91,6 @@ export async function updateTeacherAction(fd: FormData): Promise<ActionResult> {
     ]);
 
     revalidatePath("/admin/teachers");
-    // This handles the specific profile page refresh
     revalidatePath(`/admin/teachers/${teacherId}`);
 
     return { success: true, message: `${fullName} updated successfully.` };
@@ -103,6 +102,10 @@ export async function updateTeacherAction(fd: FormData): Promise<ActionResult> {
 
 // ── Change Status ─────────────────────────────────────────────────────────────
 
+/**
+ * Updates teacher status and automatically relieves them of active
+ * class assignments if they are no longer 'active'.
+ */
 export async function changeTeacherStatusAction(
   teacherId: string,
   status: TeacherStatus,
@@ -110,6 +113,7 @@ export async function changeTeacherStatusAction(
   try {
     await ensureAdmin();
 
+    // 1. Update the teacher's status
     const { error } = await supabaseAdmin
       .from("teachers")
       .update({ status })
@@ -117,12 +121,27 @@ export async function changeTeacherStatusAction(
 
     if (error) throw error;
 
+    // 2. If status is NOT 'active', perform a "Soft Relieve" on active class assignments
+    if (status !== "active") {
+      await supabaseAdmin
+        .from("class_teacher_assignments")
+        .update({
+          is_active: false,
+          relieved_at: new Date().toISOString(),
+        })
+        .eq("teacher_id", teacherId)
+        .eq("is_active", true);
+    }
+
     revalidatePath("/admin/teachers");
+    revalidatePath(`/admin/teachers/${teacherId}`);
+
     return {
       success: true,
       message: `Status updated to ${status.replace("_", " ")}.`,
     };
   } catch (err: any) {
+    console.error("[changeTeacherStatusAction] Error:", err.message);
     return { success: false, message: err.message };
   }
 }
@@ -152,20 +171,20 @@ export async function resendTeacherInviteAction(
 
     if (linkErr) throw linkErr;
 
-    // Send the email via your mail utility
     await sendTeacherWelcomeEmail({
       teacherEmail: teacher.email,
       teacherName: teacher.full_name,
       setupLink: link.properties.action_link,
     });
 
-    // Update the timestamp
     await supabaseAdmin
       .from("teachers")
       .update({ last_invite_sent: new Date().toISOString() })
       .eq("id", teacherId);
 
     revalidatePath("/admin/teachers");
+    revalidatePath(`/admin/teachers/${teacherId}`);
+
     return { success: true, message: "Invite email resent." };
   } catch (err: any) {
     console.error("[resendTeacherInviteAction] Error:", err.message);
@@ -182,7 +201,7 @@ export async function deleteTeacherAction(
   try {
     await ensureAdmin();
 
-    // 1. Check for active allocations for safety
+    // 1. Check for active subject allocations for safety
     const { data: allocations } = await supabaseAdmin
       .from("teacher_subject_allocations")
       .select("id")
@@ -198,13 +217,13 @@ export async function deleteTeacherAction(
       };
     }
 
-    // 2. Cleanup secondary assignments (Class Teacher roles)
+    // 2. Cleanup Class Teacher roles (Hard delete of history allowed on full removal)
     await supabaseAdmin
       .from("class_teacher_assignments")
       .delete()
       .eq("teacher_id", teacherId);
 
-    // 3. Delete from Auth (Cascades to Public.Teachers and Public.Profiles via FK)
+    // 3. Delete from Auth (Cascades to public.teachers and public.profiles)
     const { error } = await supabaseAdmin.auth.admin.deleteUser(teacherId);
 
     if (error) throw error;

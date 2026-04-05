@@ -1,6 +1,4 @@
 "use client";
-// app/_components/teachers/TeacherDetailClient.tsx
-// Full teacher governance profile — dark/sleek aesthetic matching Kibali admin.
 
 import { assignClassTeacherAction } from "@/lib/actions/class-teacher";
 import {
@@ -9,7 +7,7 @@ import {
 } from "@/lib/actions/teachers";
 import {
   AllocationRow,
-  ClassTeacherGrade,
+  ClassTeacherAssignment,
   Teacher,
   TeacherStats,
 } from "@/lib/types/dashboard";
@@ -41,7 +39,7 @@ interface Props {
   teacher: Teacher;
   allocations: AllocationRow[];
   stats: TeacherStats;
-  classGrades: ClassTeacherGrade[];
+  classAssignments: ClassTeacherAssignment[];
   academicYear: number;
   term: number;
 }
@@ -60,19 +58,19 @@ const STATUS_CFG = {
   on_leave: {
     label: "On Leave",
     dot: "bg-amber-400",
-    badge: "bg-amber-400/10   border-amber-400/30   text-amber-400",
+    badge: "bg-amber-400/10 border-amber-400/30 text-amber-400",
     pulse: false,
   },
   resigned: {
     label: "Resigned",
     dot: "bg-rose-400",
-    badge: "bg-rose-400/10    border-rose-400/30    text-rose-400",
+    badge: "bg-rose-400/10 border-rose-400/30 text-rose-400",
     pulse: false,
   },
   terminated: {
     label: "Terminated",
     dot: "bg-slate-500",
-    badge: "bg-slate-500/10   border-slate-500/30   text-slate-400",
+    badge: "bg-slate-500/10 border-slate-500/30 text-slate-400",
     pulse: false,
   },
 };
@@ -160,9 +158,8 @@ export function TeacherDetailClient({
   teacher,
   allocations,
   stats,
-  classGrades,
+  classAssignments,
   academicYear,
-  term,
 }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("workload");
@@ -189,34 +186,30 @@ export function TeacherDetailClient({
     });
   }
 
-  // Unique grades this teacher covers (for class teacher assignment)
-  const allocGrades = [...new Set(allocations.map((a) => a.grade))].sort();
-  const classGradeSet = new Set(classGrades.map((g) => g.grade));
+  // Determine current active class teacher roles from assignments
+  const activeAssignments = classAssignments.filter((a) => a.isActive);
 
-  async function toggleClassTeacher(grade: string) {
+  // Unique grade identifiers (ID + Stream) teacher covers in subjects
+  // We use this to allow clicking a button to assign them
+  const allocGrades = Array.from(
+    new Map(allocations.map((a) => [`${a.grade}-${a.stream}`, a])).values(),
+  ).sort((a, b) => a.grade.localeCompare(b.grade));
+
+  const activeGradeKeys = new Set(
+    activeAssignments.map((a) => `${a.grade}-${a.stream}`),
+  );
+
+  async function toggleClassTeacher(classId: string, gradeStr: string) {
     start(async () => {
-      if (classGradeSet.has(grade)) {
-        // Need assignment id — refetch for now (simple approach)
-        toast.info("Removing class teacher assignment…");
-        // The action expects an assignment id; we pass grade+teacher for removal
-        const res = await assignClassTeacherAction({
-          grade,
-          teacherId: "",
-          academicYear,
-        });
-        // Pass empty teacherId → won't work; see note below — use removeClassTeacherAction
-        toast.error("Use the Class Teachers admin page to remove assignments.");
-      } else {
-        const res = await assignClassTeacherAction({
-          grade,
-          teacherId: teacher.id,
-          academicYear,
-        });
-        if (res.success) {
-          toast.success(`Assigned as class teacher for ${grade}`);
-          router.refresh();
-        } else toast.error(res.message);
-      }
+      const res = await assignClassTeacherAction({
+        classId,
+        teacherId: teacher.id,
+        academicYear,
+      });
+      if (res.success) {
+        toast.success(`Assigned as class teacher for ${gradeStr}`);
+        router.refresh();
+      } else toast.error(res.message);
     });
   }
 
@@ -245,11 +238,9 @@ export function TeacherDetailClient({
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8">
         {/* ── HERO HEADER ── */}
         <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-6 sm:p-8 overflow-hidden relative">
-          {/* Subtle amber glow */}
           <div className="pointer-events-none absolute -top-20 -right-20 w-64 h-64 rounded-full bg-amber-400/[0.04] blur-3xl" />
 
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 relative">
-            {/* Avatar */}
             <div className="relative shrink-0">
               <div className="h-24 w-24 sm:h-28 sm:w-28 rounded-2xl overflow-hidden border-2 border-white/10 bg-white/[0.04] flex items-center justify-center">
                 {photoUrl ? (
@@ -271,19 +262,22 @@ export function TeacherDetailClient({
                   </span>
                 )}
               </div>
-              <StatusBadge status={teacher.status} />
+              <div className="absolute -bottom-2 -right-2">
+                <StatusBadge status={teacher.status} />
+              </div>
             </div>
 
-            {/* Identity */}
             <div className="flex-1 min-w-0 space-y-2">
               <div className="flex items-center gap-3 flex-wrap">
                 <span className="text-[10px] font-black font-mono tracking-widest text-amber-400/70 bg-amber-400/10 border border-amber-400/20 px-2.5 py-1 rounded-lg">
                   {staffId}
                 </span>
-                {classGrades.length > 0 && (
+                {activeAssignments.length > 0 && (
                   <span className="text-[10px] font-bold text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-2.5 py-1 rounded-lg flex items-center gap-1">
                     <GraduationCap className="h-3 w-3" /> Class Teacher ·{" "}
-                    {classGrades.map((g) => g.grade).join(", ")}
+                    {activeAssignments
+                      .map((a) => `${a.grade} ${a.stream}`)
+                      .join(", ")}
                   </span>
                 )}
               </div>
@@ -308,7 +302,6 @@ export function TeacherDetailClient({
               </div>
             </div>
 
-            {/* Quick action buttons */}
             <div className="flex flex-col sm:flex-row gap-2 shrink-0">
               <a
                 href={`mailto:${teacher.email}`}
@@ -328,11 +321,8 @@ export function TeacherDetailClient({
           </div>
         </div>
 
-        {/* ── 2-COLUMN LAYOUT ── */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
-          {/* LEFT: Tabs */}
           <div className="space-y-4">
-            {/* Tab bar */}
             <div className="flex gap-1 rounded-xl border border-white/[0.07] bg-white/[0.02] p-1">
               {(
                 [
@@ -359,7 +349,6 @@ export function TeacherDetailClient({
               ))}
             </div>
 
-            {/* ── WORKLOAD TAB ── */}
             {tab === "workload" && (
               <div className="space-y-3">
                 {allocations.length === 0 ? (
@@ -381,21 +370,17 @@ export function TeacherDetailClient({
                             {a.subjectCode}
                           </span>
                           <span className="text-[10px] text-white/25 font-semibold uppercase tracking-wider">
-                            {a.grade}
+                            {a.grade} {a.stream}
                           </span>
                         </div>
                         <p className="text-sm font-bold text-white">
                           {a.subjectName}
-                        </p>
-                        <p className="text-[10px] text-white/30 mt-1">
-                          {a.grade}
                         </p>
                       </div>
                     ))}
                   </div>
                 )}
 
-                {/* Class Teacher Assignment Panel */}
                 {allocGrades.length > 0 && (
                   <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-5 space-y-3">
                     <div className="flex items-center gap-2">
@@ -405,16 +390,23 @@ export function TeacherDetailClient({
                       </p>
                     </div>
                     <p className="text-[11px] text-white/25">
-                      Designate this teacher as the class teacher for one of
-                      their allocated grades.
+                      Designate this teacher as the lead class teacher for their
+                      assigned streams.
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {allocGrades.map((g) => {
-                        const isClass = classGradeSet.has(g);
+                        const key = `${g.grade}-${g.stream}`;
+                        const isClass = activeGradeKeys.has(key);
                         return (
                           <button
-                            key={g}
-                            onClick={() => !isClass && toggleClassTeacher(g)}
+                            key={key}
+                            onClick={() =>
+                              !isClass &&
+                              toggleClassTeacher(
+                                g.class_id,
+                                `${g.grade} ${g.stream}`,
+                              )
+                            }
                             disabled={isPending}
                             className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition-all ${isClass ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-400 cursor-default" : "border-white/10 bg-white/[0.03] text-white/40 hover:border-amber-400/30 hover:text-amber-400 hover:bg-amber-400/[0.06]"}`}
                           >
@@ -423,26 +415,21 @@ export function TeacherDetailClient({
                             ) : (
                               <GraduationCap className="h-3 w-3" />
                             )}
-                            {g}
-                            {isClass && (
-                              <span className="text-[9px] opacity-70">
-                                Assigned
-                              </span>
-                            )}
+                            {g.grade} {g.stream}
                           </button>
                         );
                       })}
                     </div>
-                    {classGrades.length > 0 && (
+                    {activeAssignments.length > 0 && (
                       <p className="text-[10px] text-white/20">
-                        To remove a class teacher assignment, use the{" "}
+                        To relieve a teacher of their duties, use the{" "}
                         <Link
                           href="/admin/class-teachers"
                           className="text-amber-400/60 hover:text-amber-400 underline"
                         >
-                          Class Teachers
-                        </Link>{" "}
-                        admin page.
+                          Governance Portal
+                        </Link>
+                        .
                       </p>
                     )}
                   </div>
@@ -450,7 +437,6 @@ export function TeacherDetailClient({
               </div>
             )}
 
-            {/* ── DOCUMENTS TAB ── */}
             {tab === "documents" && (
               <div className="space-y-3">
                 <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-5 space-y-3">
@@ -484,45 +470,38 @@ export function TeacherDetailClient({
                 </div>
                 <div className="rounded-xl border border-amber-400/10 bg-amber-400/[0.03] px-4 py-3">
                   <p className="text-[11px] text-amber-400/60">
-                    Document upload support coming soon. Files will be stored
-                    securely in Supabase Storage.
+                    Files stored securely via encrypted Supabase Storage
+                    buckets.
                   </p>
                 </div>
               </div>
             )}
           </div>
 
-          {/* RIGHT: Sidebar */}
           <div className="space-y-4 lg:sticky lg:top-20">
-            {/* Stats */}
             <div className="grid grid-cols-2 gap-3">
               <StatCard
                 icon={<Users className="h-3.5 w-3.5" />}
                 label="Students"
                 value={stats.totalStudents}
-                sub="across all grades"
               />
               <StatCard
                 icon={<BookOpen className="h-3.5 w-3.5" />}
                 label="Classes"
                 value={stats.totalClasses}
-                sub={`${academicYear} allocations`}
               />
               <StatCard
                 icon={<Star className="h-3.5 w-3.5" />}
-                label="Assessments"
+                label="Strands"
                 value={stats.assessedStrands}
-                sub="strands recorded"
               />
               <StatCard
                 icon={<Award className="h-3.5 w-3.5" />}
                 label="Years"
-                value={stats.yearsAtKibali === 0 ? "<1" : stats.yearsAtKibali}
-                sub="at Kibali Academy"
+                value={stats.yearsAtKibali === 0 ? "New" : stats.yearsAtKibali}
               />
             </div>
 
-            {/* Contact info */}
             <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4 space-y-3">
               <p className="text-[10px] font-black uppercase tracking-widest text-white/25">
                 Contact
@@ -541,45 +520,14 @@ export function TeacherDetailClient({
                     <div className="h-7 w-7 rounded-lg bg-white/[0.04] flex items-center justify-center shrink-0">
                       <Phone className="h-3.5 w-3.5 text-white/30" />
                     </div>
-                    <a
-                      href={`tel:${teacher.phone_number}`}
-                      className="text-xs text-white/50 font-mono hover:text-white transition-colors"
-                    >
+                    <span className="text-xs text-white/50 font-mono">
                       {teacher.phone_number}
-                    </a>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* System info */}
-            <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4 space-y-3">
-              <p className="text-[10px] font-black uppercase tracking-widest text-white/25">
-                System
-              </p>
-              <div className="space-y-2 text-xs text-white/35">
-                <div className="flex justify-between">
-                  <span>Joined</span>
-                  <span className="text-white/55">
-                    {fmtDate(teacher.created_at)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Staff ID</span>
-                  <span className="font-mono text-amber-400/70">{staffId}</span>
-                </div>
-                {teacher.last_invite_sent && (
-                  <div className="flex justify-between">
-                    <span>Last invite</span>
-                    <span className="text-white/55">
-                      {fmtDate(teacher.last_invite_sent)}
                     </span>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Status control */}
             <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4 space-y-2">
               <p className="text-[10px] font-black uppercase tracking-widest text-white/25 mb-3">
                 Employment Status
@@ -605,7 +553,6 @@ export function TeacherDetailClient({
               )}
             </div>
 
-            {/* Resend invite */}
             <button
               onClick={handleResend}
               disabled={isPending}
@@ -613,7 +560,7 @@ export function TeacherDetailClient({
             >
               <RefreshCw
                 className={`h-3.5 w-3.5 ${isPending ? "animate-spin" : ""}`}
-              />{" "}
+              />
               Resend Portal Invite
             </button>
           </div>

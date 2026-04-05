@@ -4,7 +4,7 @@ export type TeacherStatus = "active" | "on_leave" | "resigned" | "terminated";
 
 export interface Teacher {
   id: string;
-  staff_id: string; // The human-readable KIB-T-XXXX
+  staff_id: string;
   full_name: string;
   tsc_number: string | null;
   email: string;
@@ -16,13 +16,25 @@ export interface Teacher {
   avatar_url: string | null;
 }
 
-// ── Teacher Governance (NEW) ──────────────────────────────────────────────────
+// ── Classes & Infrastructure (NEW) ───────────────────────────────────────────
+
+export interface Class {
+  id: string;
+  grade: string;
+  stream: string;
+  academic_year: number;
+  level: "lower_primary" | "upper_primary" | "junior_secondary";
+}
+
+// ── Teacher Governance ────────────────────────────────────────────────────────
 
 export interface AllocationRow {
   id: string;
   subjectName: string;
   subjectCode: string;
-  grade: string;
+  class_id: string;
+  grade: string; // We keep these for easy UI display
+  stream: string;
 }
 
 export interface TeacherStats {
@@ -32,9 +44,15 @@ export interface TeacherStats {
   assessedStrands: number;
 }
 
-export interface ClassTeacherGrade {
+export interface ClassTeacherAssignment {
+  id: string;
+  class_id: string;
   grade: string;
+  stream: string;
   academicYear: number;
+  isActive: boolean;
+  assignedAt: string;
+  relievedAt: string | null;
 }
 
 // ── Student & Parent ──────────────────────────────────────────────────────────
@@ -44,17 +62,6 @@ export type StudentStatus =
   | "transferred"
   | "graduated"
   | "withdrawn";
-
-export interface Parent {
-  id: string;
-  full_name: string;
-  email: string;
-  phone_number: string | null;
-  created_at: string;
-  invite_accepted: boolean;
-  last_invite_sent: string | null;
-  children: ParentChild[];
-}
 
 export interface StudentParentLink {
   parent_id: string;
@@ -73,21 +80,18 @@ export interface Student {
   full_name: string;
   date_of_birth: string;
   gender: "Male" | "Female" | null;
-  current_grade: string;
+  class_id: string | null; // Updated from current_grade string
+  current_grade: string; // Keeping for UI display convenience
+  current_stream: string;
   photo_url: string | null;
   status: StudentStatus;
-  parent_id: string | null;
   all_parents: StudentParentLink[];
   created_at: string;
-  parents: Pick<Parent, "id" | "full_name" | "phone_number"> | null;
-}
-
-export interface ParentChild {
-  id: string;
-  full_name: string;
-  current_grade: string;
-  photo_url: string | null;
-  status: StudentStatus;
+  parents: {
+    id: string;
+    full_name: string;
+    phone_number: string | null;
+  } | null;
 }
 
 // ── Dashboard & Charts ────────────────────────────────────────────────────────

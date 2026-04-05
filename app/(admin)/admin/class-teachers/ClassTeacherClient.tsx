@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import {
   assignClassTeacherAction,
-  removeClassTeacherAction,
+  relieveClassTeacherAction,
 } from "@/lib/actions/class-teacher";
 import {
   Users,
@@ -12,7 +12,17 @@ import {
   Save,
   ChevronRight,
   GraduationCap,
+  PlusCircle,
+  LayoutGrid,
+  AlertCircle,
 } from "lucide-react";
+import Link from "next/link";
+
+interface DbClass {
+  id: string;
+  grade: string;
+  stream: string;
+}
 
 interface Teacher {
   id: string;
@@ -23,308 +33,270 @@ interface Teacher {
 
 interface Assignment {
   id: string;
-  grade: string;
+  class_id: string;
   academic_year: number;
-  created_at: string;
-  // This now correctly reflects the Supabase join structure (array or object)
-  teachers:
-    | { id: string; full_name: string; email: string }
-    | { id: string; full_name: string; email: string }[]
-    | null;
+  classes: { grade: string; stream: string } | any;
+  teachers: { id: string; full_name: string; email: string } | any;
 }
 
 interface Props {
   teachers: Teacher[];
-  grades: string[];
-  assignments: Assignment[];
+  classes: DbClass[];
+  assignments: any[];
   studentCounts: Record<string, number>;
+  academicYear: number;
 }
 
 export function ClassTeacherClient({
   teachers,
-  grades,
+  classes,
   assignments,
   studentCounts,
+  academicYear,
 }: Props) {
   const [localAssignments, setLocalAssignments] =
     useState<Assignment[]>(assignments);
-
   const [selections, setSelections] = useState<Record<string, string>>(() => {
     const map: Record<string, string> = {};
-    for (const a of assignments) {
-      // Logic to handle both array and object formats during initialization
-      const teacherObj = Array.isArray(a.teachers) ? a.teachers[0] : a.teachers;
-      if (teacherObj) map[a.grade] = teacherObj.id;
-    }
+    assignments.forEach((a) => {
+      const tId = Array.isArray(a.teachers)
+        ? a.teachers[0]?.id
+        : a.teachers?.id;
+      if (tId) map[a.class_id] = tId;
+    });
     return map;
   });
 
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [savingGrade, setSavingGrade] = useState<string | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
 
   function showToast(msg: string, ok: boolean) {
     setToast({ msg, ok });
     setTimeout(() => setToast(null), 3500);
   }
 
-  function handleAssign(grade: string) {
-    const teacherId = selections[grade];
+  function handleAssign(classId: string) {
+    const teacherId = selections[classId];
     if (!teacherId) {
       showToast("Select a teacher first.", false);
       return;
     }
-    setSavingGrade(grade);
+
+    setSavingId(classId);
     startTransition(async () => {
       const res = await assignClassTeacherAction({
-        grade,
+        classId, // This is now a guaranteed UUID from the classes table
         teacherId,
-        academicYear: 2026,
+        academicYear,
       });
+
       if (res.success) {
-        const teacher = teachers.find((t) => t.id === teacherId)!;
-        setLocalAssignments((prev) => {
-          const without = prev.filter((a) => a.grade !== grade);
-          return [
-            ...without,
-            {
-              id: `temp-${Date.now()}`,
-              grade,
-              academic_year: 2026,
-              created_at: new Date().toISOString(),
-              teachers: {
-                id: teacher.id,
-                full_name: teacher.full_name,
-                email: teacher.email,
-              },
-            },
-          ].sort((a, b) => a.grade.localeCompare(b.grade));
-        });
         showToast(res.message, true);
+        // Using window.location.reload to ensure the complex joins from Supabase stay in sync
+        setTimeout(() => window.location.reload(), 500);
       } else {
         showToast(res.message, false);
       }
-      setSavingGrade(null);
+      setSavingId(null);
     });
   }
 
-  function handleRemove(assignment: Assignment) {
+  function handleRemove(assignmentId: string, gradeName: string) {
     startTransition(async () => {
-      const res = await removeClassTeacherAction(assignment.id);
+      const res = await relieveClassTeacherAction(assignmentId);
       if (res.success) {
-        setLocalAssignments((prev) =>
-          prev.filter((a) => a.id !== assignment.id),
-        );
-        setSelections((prev) => {
-          const n = { ...prev };
-          delete n[assignment.grade];
-          return n;
-        });
-        showToast(`Removed assignment for ${assignment.grade}.`, true);
+        showToast(`Relieved assignment for ${gradeName}.`, true);
+        setTimeout(() => window.location.reload(), 500);
       } else {
         showToast(res.message, false);
       }
     });
   }
 
-  const assignedGrades = new Set(localAssignments.map((a) => a.grade));
-  const unassignedGrades = grades.filter((g) => !assignedGrades.has(g));
+  const assignedClassIds = new Set(localAssignments.map((a) => a.class_id));
+  const unassignedClasses = classes.filter((c) => !assignedClassIds.has(c.id));
 
   return (
-    <div className="min-h-screen bg-[#f5f6fa]">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
-          <UserCheck className="h-5 w-5 text-blue-600 shrink-0" />
-          <div className="flex-1">
-            <p className="text-sm font-black text-slate-800">
-              Class Teacher Assignments
-            </p>
-            <p className="text-[10px] text-slate-400 font-semibold">
-              Academic Year 2026
-            </p>
+    <div className="min-h-screen bg-[#0f172a] text-slate-200">
+      <header className="bg-[#1e293b]/50 backdrop-blur-md border-b border-slate-800 sticky top-0 z-20">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-600/20 p-2 rounded-lg">
+              <UserCheck className="h-5 w-5 text-blue-400" />
+            </div>
+            <div>
+              <h1 className="text-sm font-bold text-white tracking-tight">
+                Class Teacher Management
+              </h1>
+              <p className="text-[10px] text-slate-400 font-medium uppercase">
+                Session {academicYear}
+              </p>
+            </div>
           </div>
-          <a
-            href="/admin"
-            className="text-xs font-semibold text-slate-500 hover:text-slate-700 flex items-center gap-1"
-          >
-            Admin <ChevronRight className="h-3 w-3" />
-          </a>
+
+          <div className="flex items-center gap-4">
+            <Link
+              href="/admin/classes"
+              className="hidden sm:flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-lg"
+            >
+              <PlusCircle className="h-3.5 w-3.5" /> Manage Classes
+            </Link>
+            <Link
+              href="/admin/dashboard"
+              className="text-xs font-bold text-slate-400 hover:text-white flex items-center gap-1"
+            >
+              Back <ChevronRight className="h-3 w-3" />
+            </Link>
+          </div>
         </div>
       </header>
 
       {toast && (
         <div
-          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-bold shadow-xl transition-all ${
-            toast.ok ? "bg-emerald-600 text-white" : "bg-rose-500 text-white"
+          className={`fixed top-20 right-4 z-50 px-5 py-3 rounded-xl text-xs font-bold shadow-2xl animate-in slide-in-from-right ${
+            toast.ok ? "bg-emerald-500 text-white" : "bg-rose-500 text-white"
           }`}
         >
           {toast.msg}
         </div>
       )}
 
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm text-center">
-            <p className="text-2xl font-black text-slate-800">
-              {grades.length}
-            </p>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">
-              Total Classes
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+        {/* Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-[#1e293b] rounded-2xl border border-slate-800 p-5">
+            <p className="text-3xl font-black text-white">{classes.length}</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mt-1">
+              Total Active Classes
             </p>
           </div>
-          <div className="bg-white rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm text-center">
-            <p className="text-2xl font-black text-emerald-700">
+          <div className="bg-[#1e293b] rounded-2xl border border-blue-500/30 p-5">
+            <p className="text-3xl font-black text-blue-400">
               {localAssignments.length}
             </p>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-500 mt-0.5">
-              Assigned
+            <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mt-1">
+              Teachers Assigned
             </p>
           </div>
           <div
-            className={`rounded-2xl border p-4 shadow-sm text-center ${unassignedGrades.length > 0 ? "bg-amber-50 border-amber-200" : "bg-white border-slate-200"}`}
+            className={`rounded-2xl border p-5 ${unassignedClasses.length > 0 ? "bg-amber-500/5 border-amber-500/20" : "bg-[#1e293b] border-slate-800"}`}
           >
             <p
-              className={`text-2xl font-black ${unassignedGrades.length > 0 ? "text-amber-700" : "text-slate-400"}`}
+              className={`text-3xl font-black ${unassignedClasses.length > 0 ? "text-amber-500" : "text-slate-400"}`}
             >
-              {unassignedGrades.length}
+              {unassignedClasses.length}
             </p>
-            <p
-              className={`text-[10px] font-bold uppercase tracking-widest mt-0.5 ${unassignedGrades.length > 0 ? "text-amber-500" : "text-slate-400"}`}
-            >
-              Unassigned
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mt-1">
+              Pending Allocation
             </p>
           </div>
         </div>
 
-        {localAssignments.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">
-              Current Assignments
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {localAssignments.map((a) => {
-                // Flatten the teacher object here for use in the TSX
-                const teacherData = Array.isArray(a.teachers)
-                  ? a.teachers[0]
-                  : a.teachers;
-
-                return (
-                  <div
-                    key={a.id}
-                    className="bg-white rounded-2xl border border-emerald-200 p-4 shadow-sm flex items-center gap-3"
+        {/* Assigned */}
+        <div className="space-y-4">
+          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 px-1">
+            Allocated Class Personnel
+          </h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {localAssignments.map((a) => (
+              <div
+                key={a.id}
+                className="bg-[#1e293b] rounded-2xl border border-slate-800 p-4 flex items-center gap-4"
+              >
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center">
+                  <GraduationCap className="h-6 w-6 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-sm font-bold text-white truncate">
+                    {a.classes?.grade} - {a.classes?.stream}
+                  </h3>
+                  <p className="text-xs font-semibold text-blue-400 truncate">
+                    {a.teachers?.full_name}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selections[a.class_id] ?? ""}
+                    onChange={(e) =>
+                      setSelections((s) => ({
+                        ...s,
+                        [a.class_id]: e.target.value,
+                      }))
+                    }
+                    aria-label="Select teacher"
+                    className="text-[11px] bg-[#0f172a] border border-slate-700 rounded-lg py-2 pl-2 pr-8 text-slate-300"
                   >
-                    <div className="h-11 w-11 rounded-xl bg-blue-600 flex items-center justify-center shrink-0">
-                      <GraduationCap className="h-5 w-5 text-white" />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-black text-slate-800">
-                        {a.grade}
-                      </p>
-                      <p className="text-xs font-bold text-emerald-700">
-                        {teacherData?.full_name ?? "—"}
-                      </p>
-                      <p className="text-[10px] text-slate-400">
-                        {studentCounts[a.grade] ?? 0} students
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <select
-                        aria-label="select class teacher for grade"
-                        value={selections[a.grade] ?? teacherData?.id ?? ""}
-                        onChange={(e) =>
-                          setSelections((s) => ({
-                            ...s,
-                            [a.grade]: e.target.value,
-                          }))
-                        }
-                        className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-300 max-w-[140px]"
-                      >
-                        <option value="">— change —</option>
-                        {teachers.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.full_name}
-                          </option>
-                        ))}
-                      </select>
-
-                      <button
-                        onClick={() => handleAssign(a.grade)}
-                        disabled={isPending && savingGrade === a.grade}
-                        className="h-8 w-8 rounded-lg bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 disabled:opacity-50 transition-colors shrink-0"
-                        title="Save"
-                      >
-                        <Save className="h-3.5 w-3.5" />
-                      </button>
-
-                      <button
-                        onClick={() => handleRemove(a)}
-                        disabled={isPending}
-                        className="h-8 w-8 rounded-lg border border-rose-200 text-rose-400 flex items-center justify-center hover:bg-rose-50 disabled:opacity-50 transition-colors shrink-0"
-                        title="Remove"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                    {teachers.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.full_name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    aria-label="Assign class to a teacher"
+                    onClick={() => handleAssign(a.class_id)}
+                    disabled={isPending && savingId === a.class_id}
+                    className="p-2.5 rounded-lg bg-blue-600/10 text-blue-400 hover:bg-blue-600 hover:text-white"
+                  >
+                    <Save className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="remove class assignment"
+                    onClick={() => handleRemove(a.id, a.classes?.grade)}
+                    disabled={isPending}
+                    className="p-2.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
-        )}
+        </div>
 
-        {unassignedGrades.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-[10px] font-black uppercase tracking-widest text-amber-500 px-1 flex items-center gap-2">
-              <span>⚠️</span> Unassigned Classes
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {unassignedGrades.map((grade) => (
+        {/* Unassigned */}
+        {unassignedClasses.length > 0 && (
+          <div className="space-y-4">
+            <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-500 flex items-center gap-2 px-1">
+              <AlertCircle className="h-3 w-3" /> Urgent: Unassigned Classes
+            </h2>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {unassignedClasses.map((c) => (
                 <div
-                  key={grade}
-                  className="bg-white rounded-2xl border border-amber-200 p-4 shadow-sm flex items-center gap-3"
+                  key={c.id}
+                  className="bg-[#1e293b] rounded-2xl border border-dashed border-amber-500/30 p-4 flex items-center gap-4"
                 >
-                  <div className="h-11 w-11 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
-                    <Users className="h-5 w-5 text-amber-600" />
+                  <div className="h-12 w-12 rounded-xl bg-amber-500/10 flex items-center justify-center">
+                    <Users className="h-6 w-6 text-amber-500" />
                   </div>
-
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-black text-slate-800">{grade}</p>
-                    <p className="text-[10px] text-slate-400">
-                      {studentCounts[grade] ?? 0} students · No class teacher
-                    </p>
+                  <div className="flex-1">
+                    <h3 className="text-sm font-bold text-white">
+                      {c.grade} - {c.stream}
+                    </h3>
                   </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2">
                     <select
                       aria-label="select grade"
-                      value={selections[grade] ?? ""}
+                      value={selections[c.id] ?? ""}
                       onChange={(e) =>
-                        setSelections((s) => ({
-                          ...s,
-                          [grade]: e.target.value,
-                        }))
+                        setSelections((s) => ({ ...s, [c.id]: e.target.value }))
                       }
-                      className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-300 max-w-[150px]"
+                      className="text-[11px] bg-[#0f172a] border border-slate-700 rounded-lg py-2 px-2 text-slate-300"
                     >
-                      <option value="">— assign teacher —</option>
+                      <option value="">Choose Teacher</option>
                       {teachers.map((t) => (
                         <option key={t.id} value={t.id}>
                           {t.full_name}
                         </option>
                       ))}
                     </select>
-
                     <button
-                      onClick={() => handleAssign(grade)}
-                      disabled={
-                        (isPending && savingGrade === grade) ||
-                        !selections[grade]
-                      }
-                      className="h-8 px-3 rounded-lg bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 hover:bg-amber-600 disabled:opacity-40 transition-colors shrink-0"
+                      onClick={() => handleAssign(c.id)}
+                      disabled={!selections[c.id] || isPending}
+                      className="bg-amber-500 hover:bg-amber-400 text-white px-3 py-2 rounded-lg text-[11px] font-bold"
                     >
-                      <Save className="h-3 w-3" />
                       Assign
                     </button>
                   </div>
@@ -333,30 +305,7 @@ export function ClassTeacherClient({
             </div>
           </div>
         )}
-
-        {grades.length === 0 && (
-          <div className="text-center py-20 bg-white rounded-2xl border border-slate-200">
-            <p className="text-4xl mb-3">🏫</p>
-            <p className="text-slate-700 font-bold">No classes found</p>
-            <p className="text-xs text-slate-400 mt-1">
-              Enrol students first to see classes here.
-            </p>
-          </div>
-        )}
-
-        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
-          <p className="text-xs font-bold text-blue-700 mb-1">
-            About class teacher assignments
-          </p>
-          <p className="text-xs text-blue-600 leading-relaxed">
-            A class teacher is responsible for marking daily attendance for
-            their whole class, aggregating subject teacher remarks into
-            end-of-term reports, and sending class-wide communications. Subject
-            teachers can still mark attendance for students in their allocated
-            subjects — the class teacher has additional whole-class access.
-          </p>
-        </div>
-      </div>
+      </main>
     </div>
   );
 }

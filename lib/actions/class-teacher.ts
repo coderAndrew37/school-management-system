@@ -4,155 +4,143 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { supabaseAdmin } from "../supabase/admin";
+import { ActionResult } from "@/lib/types/dashboard";
 
-// ── Shared types ──────────────────────────────────────────────────────────────
-
-export interface Assignment {
-  id: string;
-  teacher_id: string;
-  grade: string;
-  academic_year: number;
-}
-
-export type AssignResult =
-  | { success: true; assignment: Assignment; message: string }
-  | { success: false; error: string; message: string };
-
-export type RemoveResult =
-  | { success: true; message: string }
-  | { success: false; error: string; message: string };
-
-// ── Schemas ───────────────────────────────────────────────────────────────────
+// ── Validation ────────────────────────────────────────────────────────────────
 
 const assignSchema = z.object({
-  grade: z.string().min(1),
+  classId: z.string().uuid(),
   teacherId: z.string().uuid(),
   academicYear: z.number().int().default(2026),
 });
 
-// ── Assign a class teacher ─────────────────────────────────────────────────────
+// ── Guard ─────────────────────────────────────────────────────────────────────
 
+async function ensureAdmin() {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) throw new Error("Unauthorized");
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile || !["admin", "superadmin"].includes(profile.role)) {
+    throw new Error("Forbidden: Admin access required.");
+  }
+  return user.id;
+}
+
+// ── Assign/Swap a Class Teacher ───────────────────────────────────────────────
+
+/**
+ * Handles assigning a teacher to a class.
+ * If the class has an active teacher, they are automatically relieved first.
+ */
 export async function assignClassTeacherAction(
   data: z.infer<typeof assignSchema>,
-): Promise<AssignResult> {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user)
+): Promise<ActionResult> {
+  try {
+    const adminId = await ensureAdmin();
+    const parsed = assignSchema.parse(data);
+
+    // 1. Find the current active teacher for this class (if any)
+    const { data: currentActive } = await supabaseAdmin
+      .from("class_teacher_assignments")
+      .select("id, teacher_id")
+      .eq("class_id", parsed.classId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    // 2. Optimization: If the same teacher is already assigned, just return success
+    if (currentActive?.teacher_id === parsed.teacherId) {
+      return {
+        success: true,
+        message: "Teacher is already assigned to this class.",
+      };
+    }
+
+    // 3. Relieve the current teacher if one exists
+    if (currentActive) {
+      const { error: relieveError } = await supabaseAdmin
+        .from("class_teacher_assignments")
+        .update({
+          is_active: false,
+          relieved_at: new Date().toISOString(),
+        })
+        .eq("id", currentActive.id);
+
+      if (relieveError) throw relieveError;
+    }
+
+    // 4. Insert the new assignment
+    const { error: insertError } = await supabaseAdmin
+      .from("class_teacher_assignments")
+      .insert({
+        class_id: parsed.classId,
+        teacher_id: parsed.teacherId,
+        academic_year: parsed.academicYear,
+        assigned_by: adminId,
+        is_active: true,
+      });
+
+    if (insertError) throw insertError;
+
+    revalidatePath("/admin/teachers");
+    revalidatePath("/admin/class-teachers");
+
     return {
-      success: false,
-      error: "AUTH_ERROR",
-      message: "Not authenticated.",
+      success: true,
+      message: "Class teacher assigned successfully.",
     };
-
-  const parsed = assignSchema.safeParse(data);
-  if (!parsed.success)
+  } catch (err: any) {
+    console.error("[assignClassTeacherAction] Error:", err.message);
     return {
       success: false,
-      error: "VALIDATION_ERROR",
-      message: parsed.error.issues[0]?.message ?? "Invalid input",
-    };
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-  if (!profile || !["admin", "superadmin"].includes(profile.role))
-    return {
-      success: false,
-      error: "FORBIDDEN",
-      message: "Insufficient permissions.",
-    };
-
-  const { data: result, error } = await supabaseAdmin
-    .from("class_teacher_assignments")
-    .upsert(
-      {
-        grade: parsed.data.grade,
-        teacher_id: parsed.data.teacherId,
-        academic_year: parsed.data.academicYear,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "grade,academic_year" },
-    )
-    .select("id, teacher_id, grade, academic_year")
-    .single();
-
-  if (error) {
-    console.error("[assignClassTeacherAction]", error.message);
-    return {
-      success: false,
-      error: error.message,
-      message: `Failed to assign: ${error.message}`,
+      message: err.message || "Failed to assign teacher.",
     };
   }
-
-  revalidatePath("/admin/class-teachers");
-  revalidatePath("/teacher");
-  return {
-    success: true,
-    assignment: result as Assignment,
-    message: `Successfully assigned to ${parsed.data.grade}`,
-  };
 }
 
-// ── Remove a class teacher assignment ─────────────────────────────────────────
+// ── Relieve a Class Teacher (Soft Delete) ─────────────────────────────────────
 
-export async function removeClassTeacherAction(
+export async function relieveClassTeacherAction(
   assignmentId: string,
-): Promise<RemoveResult> {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user)
-    return {
-      success: false,
-      error: "AUTH_ERROR",
-      message: "Not authenticated.",
-    };
+): Promise<ActionResult> {
+  try {
+    await ensureAdmin();
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-  if (!profile || !["admin", "superadmin"].includes(profile.role))
-    return {
-      success: false,
-      error: "FORBIDDEN",
-      message: "Insufficient permissions.",
-    };
+    const { error } = await supabaseAdmin
+      .from("class_teacher_assignments")
+      .update({
+        is_active: false,
+        relieved_at: new Date().toISOString(),
+      })
+      .eq("id", assignmentId);
 
-  const { error } = await supabaseAdmin
-    .from("class_teacher_assignments")
-    .delete()
-    .eq("id", assignmentId);
-  if (error) {
-    console.error("[removeClassTeacherAction]", error.message);
-    return {
-      success: false,
-      error: error.message,
-      message: "Failed to remove assignment.",
-    };
+    if (error) throw error;
+
+    revalidatePath("/admin/teachers");
+    revalidatePath("/admin/class-teachers");
+
+    return { success: true, message: "Teacher relieved of duties." };
+  } catch (err: any) {
+    console.error("[relieveClassTeacherAction] Error:", err.message);
+    return { success: false, message: "Failed to relieve teacher." };
   }
-
-  revalidatePath("/admin/class-teachers");
-  revalidatePath("/teacher");
-  return { success: true, message: "Assignment removed successfully." };
 }
 
-// ── Fetch all assignments for the current teacher ─────────────────────────────
-// Returns ALL grades this teacher is class teacher for.
-// A teacher with two assignments (shortage scenario) gets both.
+// ── Fetch Current User assignments (For Teacher Portal) ──────────────────────
 
-export async function fetchMyClassTeacherAssignments(): Promise<{
-  isClassTeacher: boolean;
-  grades: string[];
-  academicYear: number | null;
-} | null> {
+/**
+ * Returns active classes for the currently logged-in teacher.
+ */
+export async function fetchMyClassTeacherAssignments() {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -161,40 +149,46 @@ export async function fetchMyClassTeacherAssignments(): Promise<{
 
   const { data, error } = await supabase
     .from("class_teacher_assignments")
-    .select("grade, academic_year")
+    .select(
+      `
+      academic_year,
+      classes (
+        grade,
+        stream
+      )
+    `,
+    )
     .eq("teacher_id", user.id)
-    .eq("academic_year", 2026)
-    .order("grade"); // deterministic order
+    .eq("is_active", true)
+    .eq("academic_year", 2026);
 
   if (error) {
-    console.error("[fetchMyClassTeacherAssignments]", error.message);
-    return { isClassTeacher: false, grades: [], academicYear: null };
+    console.error("[fetchMyClassTeacherAssignments] Error:", error.message);
+    return { isClassTeacher: false, classes: [] };
   }
 
-  if (!data || data.length === 0)
-    return { isClassTeacher: false, grades: [], academicYear: null };
+  const formattedClasses = (data ?? []).map((r: any) => ({
+    grade: r.classes?.grade,
+    stream: r.classes?.stream,
+  }));
 
   return {
-    isClassTeacher: true,
-    grades: data.map((r) => r.grade),
-    academicYear: data[0]!.academic_year,
+    isClassTeacher: formattedClasses.length > 0,
+    classes: formattedClasses,
+    academicYear: data?.[0]?.academic_year ?? 2026,
   };
 }
 
-// ── Legacy shim — single-grade callers (reports page, etc.) ──────────────────
-// Returns the FIRST assigned grade for backward compatibility.
-// New code should use fetchMyClassTeacherAssignments() instead.
+// ── Legacy Shim ──────────────────────────────────────────────────────────────
 
-export async function fetchMyClassTeacherAssignment(): Promise<{
-  isClassTeacher: boolean;
-  grade: string | null;
-  academicYear: number | null;
-} | null> {
+export async function fetchMyClassTeacherAssignment() {
   const result = await fetchMyClassTeacherAssignments();
   if (!result) return null;
+
   return {
     isClassTeacher: result.isClassTeacher,
-    grade: result.grades[0] ?? null,
+    grade: result.classes[0]?.grade ?? null,
+    stream: result.classes[0]?.stream ?? null,
     academicYear: result.academicYear,
   };
 }
