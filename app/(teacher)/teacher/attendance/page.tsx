@@ -16,20 +16,31 @@ export default async function AttendancePage() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
   if (!user) redirect("/login");
 
   const assignment = await fetchMyClassTeacherAssignments();
 
-  // Class teacher → send straight to the register
-  if (assignment?.isClassTeacher && assignment.grades.length > 0) {
-    const dest =
-      assignment.grades.length === 1
-        ? `/teacher/class/attendance?grade=${encodeURIComponent(assignment.grades[0]!)}`
-        : "/teacher/class/attendance";
-    redirect(dest);
+  // 1. Check if the teacher has any classes assigned
+  // Note: We check 'classes' instead of 'grades'
+  if (
+    assignment?.isClassTeacher &&
+    assignment.classes &&
+    assignment.classes.length > 0
+  ) {
+    // If they have exactly one class, redirect to that specific register
+    if (assignment.classes.length === 1) {
+      const classInfo = assignment.classes[0];
+      // Use the grade name for the query param
+      const dest = `/teacher/class/attendance?grade=${encodeURIComponent(classInfo.grade)}`;
+      redirect(dest);
+    }
+
+    // If they have multiple (rare in primary), send to a selection dashboard
+    redirect("/teacher/class/attendance");
   }
 
-  // Not a class teacher — explain and link back
+  // Not a class teacher — show the explanation UI
   return (
     <div className="min-h-screen bg-[#F8F7F2] flex items-center justify-center p-6">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm max-w-md w-full p-8 text-center space-y-5">

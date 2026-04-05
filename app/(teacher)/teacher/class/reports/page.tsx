@@ -1,5 +1,3 @@
-// app/teacher/class/reports/page.tsx
-
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fetchMyClassTeacherAssignments } from "@/lib/actions/class-teacher";
@@ -25,11 +23,18 @@ export default async function ClassReportsPage({ searchParams }: Props) {
   if (!user) redirect("/login");
 
   const assignment = await fetchMyClassTeacherAssignments();
-  if (!assignment?.isClassTeacher || assignment.grades.length === 0) {
+
+  // FIX: Check 'classes' property and verify it exists to satisfy TypeScript union types
+  if (
+    !assignment?.isClassTeacher ||
+    !assignment.classes ||
+    assignment.classes.length === 0
+  ) {
     redirect("/teacher");
   }
 
-  const { grades } = assignment;
+  // FIX: Extract the string array of grades from the classes objects
+  const grades = assignment.classes.map((c) => c.grade as string);
 
   const sp = await searchParams;
   const gradeParam = sp.grade;

@@ -1,4 +1,4 @@
-import type { Student, Parent } from "@/lib/types/dashboard";
+import type { Student, Parent, StudentParentLink } from "@/lib/types/dashboard";
 
 // ── CBC ────────────────────────────────────────────────────────────────────────
 
@@ -48,6 +48,20 @@ export interface StudentRow {
 // ── Domain model ──────────────────────────────────────────────────────────────
 
 export interface ChildWithAssessments extends Student {
+  parent_id: string | null;
+  /**
+   * Primary parent mapped from student_parents.
+   * Matches the 'parents' property on the base Student interface.
+   */
+  parents: {
+    id: string;
+    full_name: string;
+    phone_number: string | null;
+  } | null;
+  /**
+   * Must match StudentParentLink exactly to satisfy the Student interface extension.
+   */
+  all_parents: StudentParentLink[];
   assessments: Assessment[];
 }
 
@@ -134,51 +148,20 @@ export type GalleryCategory =
   | "Leadership"
   | "Tech";
 
-/**
- * GalleryItem — mapped from the talent_gallery DB table.
- *
- * IMPORTANT column-name notes (DB → app field):
- *   DB `tags`        → app `tags`        (text[], legacy)
- *   DB `description` → app `description` (text, legacy)
- *   DB `media_url`   → storage PATH, not a usable URL — use `signedUrl`
- *
- * Audience tiers:
- *   "student" → specific child
- *   "class"   → whole grade (target_grade is set)
- *   "school"  → all parents
- */
 export interface GalleryItem {
   id: string;
-
-  // ownership / audience
   student_id: string | null;
   target_grade: string | null;
   audience: "student" | "class" | "school";
   teacher_id: string | null;
-
-  // content
   title: string;
   caption: string | null;
-  description: string | null; // legacy column, still on the DB
+  description: string | null;
   category: string | null;
   media_type: "image" | "video";
-
-  /**
-   * media_url — raw Supabase Storage PATH e.g. "{teacher_id}/{uuid}.jpg".
-   * Never pass to <img src>. Always use signedUrl.
-   */
   media_url: string;
-
-  /**
-   * signedUrl — 1-hour signed URL hydrated server-side.
-   * Empty string if signing failed.
-   */
   signedUrl: string;
-
-  // legacy fields — present on old rows
-  tags: string[]; // DB column `tags` text[]
-
-  // context
+  tags: string[];
   term: number | null;
   academic_year: number | null;
   created_at: string;
@@ -220,12 +203,7 @@ export const GALLERY_CAT_STYLE: Record<
   },
 };
 
-export const GALLERY_CAT_DEFAULT: {
-  icon: string;
-  bg: string;
-  text: string;
-  border: string;
-} = {
+export const GALLERY_CAT_DEFAULT = {
   icon: "🖼️",
   bg: "bg-slate-500/10",
   text: "text-slate-400",
@@ -380,8 +358,6 @@ export const JSS_PATHWAY_CLUSTERS: Record<
 
 // ── Notifications ─────────────────────────────────────────────────────────────
 
-// ── Notifications ─────────────────────────────────────────────────────────────
-
 export type NotificationType =
   | "attendance_absent"
   | "attendance_late"
@@ -390,7 +366,7 @@ export type NotificationType =
   | "assessment_result"
   | "announcement"
   | "fee_reminder"
-  | "system"; // Keep system if you plan to use it later
+  | "system";
 
 export interface StudentNotification {
   id: string;
@@ -419,11 +395,6 @@ export const NOTIF_STYLE: Record<
 
 // ── Attendance ────────────────────────────────────────────────────────────────
 
-/**
- * CAPITALISED to match exact DB storage values.
- * The attendance table stores "Present" / "Absent" / "Late" / "Excused".
- * Using lowercase was causing TS2367 "no overlap" errors on every status comparison.
- */
 export type AttendanceStatus = "Present" | "Late" | "Absent" | "Excused";
 
 export interface AttendanceRecord {

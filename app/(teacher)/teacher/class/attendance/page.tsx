@@ -1,5 +1,3 @@
-// app/teacher/class/attendance/page.tsx
-
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -34,10 +32,19 @@ export default async function ClassAttendancePage({ searchParams }: Props) {
   if (!teacher) redirect("/login");
 
   const assignment = await fetchMyClassTeacherAssignments();
-  if (!assignment?.isClassTeacher || assignment.grades.length === 0)
-    redirect("/teacher/attendance");
 
-  const { grades } = assignment;
+  // FIX: Check 'classes' instead of 'grades' to match the Server Action return type
+  if (
+    !assignment?.isClassTeacher ||
+    !assignment.classes ||
+    assignment.classes.length === 0
+  ) {
+    redirect("/teacher/attendance");
+  }
+
+  // FIX: Extract the string array from the objects to maintain compatibility with existing logic
+  const grades = assignment.classes.map((c) => c.grade as string);
+
   const sp = await searchParams;
   const tabParam = sp.tab === "trends" ? "trends" : "register";
 

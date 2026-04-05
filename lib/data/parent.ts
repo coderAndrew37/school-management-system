@@ -1,5 +1,5 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { Parent } from "@/lib/types/dashboard";
+import type { Parent, StudentParentLink } from "@/lib/types/dashboard";
 import type {
   Assessment,
   AttendanceRecord,
@@ -41,7 +41,7 @@ export type ParentReportCard = {
 
 export interface ChildPortalData {
   notifications: StudentNotification[];
-  diary: TeacherDiaryEntry[]; // Updated to use the union type
+  diary: TeacherDiaryEntry[];
   attendance: AttendanceRecord[];
   messages: CommMessage[];
   competencies: TalentCompetency[];
@@ -102,23 +102,30 @@ type RawStudentRow = {
   date_of_birth: string;
   gender: "Male" | "Female" | null;
   current_grade: string;
+  current_stream: string;
   photo_url: string | null;
   status: string;
   created_at: string;
   student_parents: {
     is_primary_contact: boolean;
     relationship_type: string;
-    parents: { id: string; full_name: string; phone_number: string } | null;
+    parents: {
+      id: string;
+      full_name: string;
+      phone_number: string | null;
+      email: string;
+      invite_accepted: boolean;
+    } | null;
   }[];
   assessments: AssessmentRow[];
 };
 
 const STUDENT_WITH_ASSESSMENTS_SELECT = `
   id, readable_id, upi_number, full_name,
-  date_of_birth, gender, current_grade, photo_url, status, created_at,
+  date_of_birth, gender, current_grade, current_stream, photo_url, status, created_at,
   student_parents (
     is_primary_contact, relationship_type,
-    parents ( id, full_name, phone_number )
+    parents ( id, full_name, phone_number, email, invite_accepted )
   ),
   assessments (
     id, student_id, teacher_id, subject_name,
@@ -133,6 +140,21 @@ function getPrimaryParent(links: RawStudentRow["student_parents"]) {
 }
 
 function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
+  const primaryParent = getPrimaryParent(row.student_parents);
+
+  // Map the student_parents array to the StudentParentLink[] interface
+  const allParents: StudentParentLink[] = row.student_parents
+    .filter((link) => link.parents !== null)
+    .map((link) => ({
+      parent_id: link.parents!.id,
+      full_name: link.parents!.full_name,
+      phone_number: link.parents!.phone_number,
+      email: link.parents!.email,
+      relationship_type: link.relationship_type,
+      is_primary_contact: link.is_primary_contact,
+      invite_accepted: link.parents!.invite_accepted,
+    }));
+
   return {
     id: row.id,
     readable_id: row.readable_id,
@@ -140,17 +162,21 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
     full_name: row.full_name,
     date_of_birth: row.date_of_birth,
     gender: row.gender,
+    class_id: null, // Populated if needed, otherwise matches interface
     current_grade: row.current_grade,
-    parent_id: null,
+    current_stream: row.current_stream || "A",
+    parent_id: primaryParent?.id ?? null,
     created_at: row.created_at,
     photo_url: row.photo_url ?? null,
-    status: (row.status ?? "active") as
-      | "active"
-      | "transferred"
-      | "graduated"
-      | "withdrawn",
-    all_parents: [],
-    parents: getPrimaryParent(row.student_parents),
+    status: (row.status ?? "active") as ChildWithAssessments["status"],
+    all_parents: allParents,
+    parents: primaryParent
+      ? {
+          id: primaryParent.id,
+          full_name: primaryParent.full_name,
+          phone_number: primaryParent.phone_number,
+        }
+      : null,
     assessments: row.assessments.map(
       (r): Assessment => ({
         id: r.id,
@@ -222,13 +248,18 @@ export async function fetchMyProfile(): Promise<Parent | null> {
 
   const { data, error } = await supabase
     .from("parents")
-    .select("id, full_name, email, phone_number, created_at")
+    .select(
+      "*, children:students(id, full_name, current_grade, status, photo_url)",
+    )
     .eq("id", user.id)
     .single<Parent>();
+
   if (error) {
     const { data: byEmail, error: emailErr } = await supabase
       .from("parents")
-      .select("id, full_name, email, phone_number, created_at")
+      .select(
+        "*, children:students(id, full_name, current_grade, status, photo_url)",
+      )
       .eq("email", user.email ?? "")
       .single<Parent>();
     if (emailErr) return null;
@@ -248,9 +279,6 @@ export async function fetchMyChildren(): Promise<ChildWithAssessments[]> {
   return (data ?? []).map(mapStudentRow);
 }
 
-/**
- * Optimized fetch for the diary feed (Homework/Notices + Observations)
- */
 export async function fetchParentDiaryFeed(
   childId: string,
   childGrade: string,
@@ -287,7 +315,6 @@ export async function fetchParentDiaryFeed(
       grade: r.grade,
       title: r.title,
       content: r.content,
-      // Map required fields for consolidated types
       body: r.content,
       diary_date: r.created_at?.slice(0, 10) || "",
       due_date: r.due_date,
@@ -303,10 +330,9 @@ export async function fetchParentDiaryFeed(
     entry_type: "observation" as const,
     grade: r.grade,
     student_id: r.student_id,
-    student_name: "", // Usually resolved in the UI or profile context
+    student_name: "",
     title: r.title,
     content: r.content,
-    // Map required fields for consolidated types
     body: r.content,
     diary_date: r.created_at?.slice(0, 10) || "",
     due_date: null,
@@ -394,17 +420,13 @@ export async function fetchAllChildData(
 
     supabase
       .from("announcements")
-      .select(
-        "id, title, body, audience, target_grade, priority, pinned, published_at, expires_at, author_id, created_at, updated_at",
-      )
+      .select("*")
       .order("created_at", { ascending: false })
       .limit(50),
 
     supabase
       .from("school_events")
-      .select(
-        "id, title, description, category, start_date, end_date, start_time, end_time, location, target_grades, is_public, author_id, created_at, updated_at",
-      )
+      .select("*")
       .gte(
         "start_date",
         new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0],
@@ -414,17 +436,13 @@ export async function fetchAllChildData(
 
     supabase
       .from("fee_payments")
-      .select(
-        "id, student_id, fee_structure_id, term, academic_year, amount_due, amount_paid, status, payment_method, mpesa_code, paid_at, notes, recorded_by, created_at, updated_at, payment_date, reference_number",
-      )
+      .select("*")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false }),
 
     supabase
       .from("report_cards")
-      .select(
-        "id, term, academic_year, status, class_teacher_remarks, conduct_grade, effort_grade, published_at",
-      )
+      .select("*")
       .eq("student_id", studentId)
       .eq("status", "published")
       .order("academic_year", { ascending: false })

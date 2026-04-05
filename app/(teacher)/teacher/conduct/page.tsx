@@ -1,5 +1,3 @@
-// app/teacher/conduct/page.tsx
-
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fetchMyClassTeacherAssignments } from "@/lib/actions/class-teacher";
@@ -36,8 +34,14 @@ export default async function ConductPage() {
     fetchTeacherAssessmentAllocations(teacher.id, academicYear),
   ]);
 
-  const classGrades = assignment?.grades ?? [];
+  // FIX: Extract grades from the 'classes' array to satisfy TypeScript union types
+  const classGrades = assignment?.classes
+    ? assignment.classes.map((c) => c.grade as string)
+    : [];
+
   const allocationGrades = [...new Set(allocations.map((a) => a.grade))].sort();
+
+  // Merge both sets of grades, ensuring uniqueness
   const grades = [
     ...classGrades,
     ...allocationGrades.filter((g) => !classGrades.includes(g)),
@@ -61,6 +65,7 @@ export default async function ConductPage() {
     string,
     Awaited<ReturnType<typeof fetchClassStudents>>
   > = {};
+
   const [, records] = await Promise.all([
     Promise.all(
       grades.map(async (g) => {
