@@ -77,6 +77,12 @@ export const ADMIN_LINKS: NavLink[] = [
     group: "People",
   },
   {
+    label: "Parents",
+    href: "/admin/parents",
+    icon: Users,
+    group: "People",
+  },
+  {
     label: "Parent Invites",
     href: "/admin/invites",
     icon: MailCheck,
@@ -96,6 +102,12 @@ export const ADMIN_LINKS: NavLink[] = [
     label: "Analytics",
     href: "/admin/analytics",
     icon: BarChart3,
+    group: "Academics",
+  },
+  {
+    label: "Class Management",
+    href: "/admin/classes",
+    icon: BookUser,
     group: "Academics",
   },
   {
