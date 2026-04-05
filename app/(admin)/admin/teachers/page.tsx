@@ -1,9 +1,9 @@
 import { Users } from "lucide-react";
-import { fetchTeachers } from "@/lib/data/dashboard";
 // Updated import to point to the index file in the teachers_table folder
 import ListPageShell from "@/app/_components/shared/ListPageShell";
 import { getActiveTermYear } from "@/lib/utils/settings";
 import TeachersIndex from "@/app/_components/teachers/teachers_table/Index";
+import { fetchTeachers } from "@/lib/data/teachers";
 
 export const metadata = {
   title: "Teachers | Kibali Academy",

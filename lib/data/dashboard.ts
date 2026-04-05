@@ -1,14 +1,14 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ALL_GRADES } from "@/lib/types/allocation";
 import { GRADE_LEVEL_MAP } from "@/lib/types/assessment";
-import { DashboardStats, Student, Teacher } from "@/lib/types/dashboard";
+import { DashboardStats, Student } from "@/lib/types/dashboard";
 
-// ── Helper: flatten the join table into the shape the rest of the
-//    app expects — student.parents = { full_name, phone_number } | null
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Helper: Map Student Join Table ───────────────────────────────────────────
+/**
+ * Flattens the join table student_parents into the shape the frontend expects.
+ * Prioritizes the primary contact for the summary 'parents' field.
+ */
 function mapStudentRow(row: any): Student {
-  // student_parents is an array of join rows, each with a nested `parents` obj.
-  // We pick the primary contact first, then fall back to the first entry.
   const links: any[] = Array.isArray(row.student_parents)
     ? row.student_parents
     : [];
@@ -31,7 +31,6 @@ function mapStudentRow(row: any): Student {
   };
 }
 
-// Select fragment — joins through student_parents → parents
 const STUDENT_SELECT = `
   id, readable_id, upi_number, full_name,
   date_of_birth, gender, current_grade, photo_url, status, created_at,
@@ -42,7 +41,7 @@ const STUDENT_SELECT = `
   )
 ` as const;
 
-// ── fetchStudents ─────────────────────────────────────────────────────────────
+// ── Student Fetchers ──────────────────────────────────────────────────────────
 
 export async function fetchStudents(limit?: number): Promise<Student[]> {
   const supabase = await createSupabaseServerClient();
@@ -50,16 +49,16 @@ export async function fetchStudents(limit?: number): Promise<Student[]> {
     .from("students")
     .select(STUDENT_SELECT)
     .order("created_at", { ascending: false });
+
   if (limit) query = query.limit(limit);
+
   const { data, error } = await query;
   if (error) {
-    console.error("fetchStudents error:", error);
+    console.error("[fetchStudents] error:", error.message);
     return [];
   }
   return (data ?? []).map(mapStudentRow);
 }
-
-// ── fetchAllStudents ──────────────────────────────────────────────────────────
 
 export async function fetchAllStudents({
   search = "",
@@ -81,42 +80,25 @@ export async function fetchAllStudents({
     .from("students")
     .select(STUDENT_SELECT)
     .order(sortBy, { ascending: sortDir === "asc" });
-  if (search)
+
+  if (search) {
     query = query.or(
       `full_name.ilike.%${search}%,readable_id.ilike.%${search}%`,
     );
+  }
   if (grade) query = query.eq("current_grade", grade);
   if (gender) query = query.eq("gender", gender);
   if (status && status !== "all") query = query.eq("status", status);
+
   const { data, error } = await query;
   if (error) {
-    console.error("fetchAllStudents error:", error);
+    console.error("[fetchAllStudents] error:", error.message);
     return [];
   }
   return (data ?? []).map(mapStudentRow);
 }
 
-// ── fetchTeachers ─────────────────────────────────────────────────────────────
-
-export async function fetchTeachers(): Promise<Teacher[]> {
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("teachers")
-    .select(
-      "id, full_name, tsc_number, email, phone_number, status, last_invite_sent, created_at, avatar_url", // Added avatar_url
-    )
-    .order("full_name", { ascending: true });
-
-  if (error) {
-    console.error("fetchTeachers error:", error);
-    return [];
-  }
-  return (data ?? []) as Teacher[];
-}
-
-// fetchParents → moved to lib/data/parents.ts as fetchAllParents
-
-// ── fetchDashboardStats ───────────────────────────────────────────────────────
+// ── Dashboard Stats ───────────────────────────────────────────────────────────
 
 export async function fetchDashboardStats(): Promise<DashboardStats> {
   const supabase = await createSupabaseServerClient();
@@ -125,6 +107,7 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
     supabase.from("teachers").select("id", { count: "exact", head: true }),
     supabase.from("parents").select("id", { count: "exact", head: true }),
   ]);
+
   return {
     totalStudents: studentsCount.count ?? 0,
     totalTeachers: teachersCount.count ?? 0,
@@ -132,7 +115,7 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
   };
 }
 
-// ── Chart data types ──────────────────────────────────────────────────────────
+// ── Chart Data Types & Metadata ───────────────────────────────────────────────
 
 export interface GradeEnrollmentBar {
   grade: string;
@@ -180,9 +163,7 @@ const SCORE_META: Record<string, { label: string; color: string }> = {
   BE: { label: "Below Expectation", color: "#fb7185" },
 };
 
-// ── fetchDashboardChartData ───────────────────────────────────────────────────
-// No parent join here — this function only needs student demographic data
-// and assessment scores, so it was already correct. No changes needed.
+// ── Dashboard Analytics ───────────────────────────────────────────────────────
 
 export async function fetchDashboardChartData(
   term = 1,
@@ -214,7 +195,7 @@ export async function fetchDashboardChartData(
     score: string;
   }[];
 
-  // Grade enrollment
+  // 1. Grade Enrollment logic
   const gradeMap: Record<
     string,
     { male: number; female: number; total: number }
@@ -226,6 +207,7 @@ export async function fetchDashboardChartData(
     if (s.gender === "Male") gradeMap[g]!.male++;
     if (s.gender === "Female") gradeMap[g]!.female++;
   }
+
   const gradeEnrollment: GradeEnrollmentBar[] = ALL_GRADES.filter(
     (g) => gradeMap[g],
   ).map((g) => ({
@@ -236,10 +218,11 @@ export async function fetchDashboardChartData(
     female: gradeMap[g]!.female,
   }));
 
-  // Level summary
+  // 2. Level Summary logic
   const levelCount: Record<string, number> = {};
-  for (const row of gradeEnrollment)
+  for (const row of gradeEnrollment) {
     levelCount[row.level] = (levelCount[row.level] ?? 0) + row.count;
+  }
   const levelSummary: LevelSummary[] = Object.entries(levelCount).map(
     ([level, count]) => ({
       level,
@@ -249,12 +232,12 @@ export async function fetchDashboardChartData(
     }),
   );
 
-  // Gender split
+  // 3. Gender split
   const male = students.filter((s) => s.gender === "Male").length;
   const female = students.filter((s) => s.gender === "Female").length;
   const unknown = students.length - male - female;
 
-  // Score distribution
+  // 4. Score distribution
   const scoreCounts: Record<string, number> = { EE: 0, ME: 0, AE: 0, BE: 0 };
   for (const a of assessments) {
     if (scoreCounts[a.score] !== undefined) scoreCounts[a.score]!++;
@@ -271,7 +254,7 @@ export async function fetchDashboardChartData(
     color: SCORE_META[s]!.color,
   }));
 
-  // Assessment totals
+  // 5. Assessment totals
   const assessedStudentIds = new Set(assessments.map((a) => a.student_id));
   const assessmentTotals = {
     total: students.length,
@@ -279,7 +262,7 @@ export async function fetchDashboardChartData(
     unassessed: students.length - assessedStudentIds.size,
   };
 
-  // Recent admissions — last 6 months
+  // 6. Recent admissions (KE Locale)
   const now = new Date();
   const monthLabels = Array.from({ length: 6 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
@@ -288,12 +271,14 @@ export async function fetchDashboardChartData(
       month: d.toLocaleDateString("en-KE", { month: "short" }),
     };
   });
+
   const admissionsPerMonth: Record<string, number> = {};
   for (const s of students) {
     const d = new Date(s.created_at);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     admissionsPerMonth[key] = (admissionsPerMonth[key] ?? 0) + 1;
   }
+
   const recentAdmissions: RecentAdmission[] = monthLabels.map(
     ({ key, month }) => ({
       month,

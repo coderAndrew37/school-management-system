@@ -1,9 +1,10 @@
-// lib/types/dashboard.ts
+// ── Teacher Status & Core ─────────────────────────────────────────────────────
 
 export type TeacherStatus = "active" | "on_leave" | "resigned" | "terminated";
 
 export interface Teacher {
   id: string;
+  staff_id: string; // The human-readable KIB-T-XXXX
   full_name: string;
   tsc_number: string | null;
   email: string;
@@ -15,33 +16,34 @@ export interface Teacher {
   avatar_url: string | null;
 }
 
-// ── Parent ────────────────────────────────────────────────────────────────────
+// ── Teacher Governance (NEW) ──────────────────────────────────────────────────
 
-export interface ParentChild {
+export interface AllocationRow {
   id: string;
-  full_name: string;
-  current_grade: string;
-  photo_url: string | null;
-  status: StudentStatus;
+  subjectName: string;
+  subjectCode: string;
+  grade: string;
 }
 
-export interface ParentFeeBalance {
-  student_id: string;
-  student_name: string;
-  total_paid: number;
-  total_due: number;
-  balance: number;
+export interface TeacherStats {
+  totalClasses: number;
+  totalStudents: number;
+  yearsAtKibali: number;
+  assessedStrands: number;
 }
 
-export interface ParentNotificationSummary {
-  id: string;
-  title: string;
-  body: string;
-  type: string;
-  is_read: boolean;
-  created_at: string;
-  student_name: string;
+export interface ClassTeacherGrade {
+  grade: string;
+  academicYear: number;
 }
+
+// ── Student & Parent ──────────────────────────────────────────────────────────
+
+export type StudentStatus =
+  | "active"
+  | "transferred"
+  | "graduated"
+  | "withdrawn";
 
 export interface Parent {
   id: string;
@@ -53,14 +55,6 @@ export interface Parent {
   last_invite_sent: string | null;
   children: ParentChild[];
 }
-
-// ── Student ───────────────────────────────────────────────────────────────────
-
-export type StudentStatus =
-  | "active"
-  | "transferred"
-  | "graduated"
-  | "withdrawn";
 
 export interface StudentParentLink {
   parent_id: string;
@@ -88,10 +82,23 @@ export interface Student {
   parents: Pick<Parent, "id" | "full_name" | "phone_number"> | null;
 }
 
-// ── Dashboard stats ───────────────────────────────────────────────────────────
+export interface ParentChild {
+  id: string;
+  full_name: string;
+  current_grade: string;
+  photo_url: string | null;
+  status: StudentStatus;
+}
+
+// ── Dashboard & Charts ────────────────────────────────────────────────────────
 
 export interface DashboardStats {
   totalStudents: number;
   totalTeachers: number;
   totalParents: number;
 }
+
+// Result type for Server Actions
+export type ActionResult =
+  | { success: true; message: string }
+  | { success: false; message: string };

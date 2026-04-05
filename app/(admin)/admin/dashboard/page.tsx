@@ -8,7 +8,6 @@ import {
   fetchDashboardChartData,
   fetchDashboardStats,
   fetchStudents,
-  fetchTeachers,
 } from "@/lib/data/dashboard";
 import {
   ArrowRight,
@@ -29,6 +28,7 @@ import { StatCard } from "@/app/_components/dashboard/StatCard";
 import { StudentGrid } from "@/app/_components/dashboard/StudentGrd";
 import { TeachersTable } from "@/app/_components/dashboard/TeachersTable";
 import RegisterTeacherModal from "@/app/_components/teachers/RegisterTeacherModal";
+import { fetchTeachers } from "@/lib/data/teachers";
 
 export const metadata = {
   title: "Dashboard | Kibali Academy",
