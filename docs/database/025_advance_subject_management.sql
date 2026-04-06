@@ -10,4 +10,4 @@ ALTER COLUMN class_id SET NOT NULL;
 -- a subject to different teachers in the SAME class
 ALTER TABLE public.teacher_subject_allocations
 ADD CONSTRAINT uq_teacher_subject_class_year 
-UNIQUE (subject_id, class_id, academic_year);
+UNIQUE (subject_id, class_id, academic_year);s

@@ -10,14 +10,46 @@ export const metadata = {
 
 export const revalidate = 60;
 
-export default async function StudentsPage() {
-  const students = await fetchAllStudents();
+export default async function StudentsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const params = await searchParams;
+
+  // Extract filters with cleaner defaults
+  const search = String(params.search || "");
+  const grade = String(params.grade || "");
+  const stream = String(params.stream || ""); // New stream parameter
+  const gender = String(params.gender || "");
+  const status = String(params.status || "active");
+  const sortBy = String(params.sortBy || "created_at");
+  const sortDir = params.sortDir === "asc" ? "asc" : "desc";
+
+  // Fetch data with updated stream support
+  const students = await fetchAllStudents({
+    search,
+    grade,
+    gender,
+    status,
+    sortBy,
+    sortDir,
+    // Ensure your fetchAllStudents helper is updated to accept stream
+    // @ts-ignore (if stream property isn't added to types yet)
+    stream,
+  });
+
+  // Refactored: Derived data now accounts for unique grade + stream pairings
   const uniqueGrades = [
     ...new Set(students.map((s) => s.current_grade)),
+  ].sort();
+  const uniqueStreams = [
+    ...new Set(students.map((s) => s.current_stream)),
   ].sort();
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] font-[family-name:var(--font-body)]">
+      {/* Ambient Background Glows */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -top-60 left-1/4 w-[700px] h-[700px] rounded-full bg-amber-500/[0.04] blur-[140px]" />
         <div className="absolute top-1/2 right-0 w-96 h-96 rounded-full bg-emerald-500/[0.04] blur-[120px]" />
@@ -49,7 +81,14 @@ export default async function StudentsPage() {
           </div>
         </header>
 
-        <StudentsTableClient students={students} uniqueGrades={uniqueGrades} />
+        {/* Updated: StudentsTableClient now receives uniqueStreams 
+            to allow filtering by North/South etc. 
+        */}
+        <StudentsTableClient
+          students={students}
+          uniqueGrades={uniqueGrades}
+          uniqueStreams={uniqueStreams}
+        />
 
         <footer className="pt-4 border-t border-white/[0.05]">
           <p className="text-center text-xs text-white/20">

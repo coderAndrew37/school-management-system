@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/actions/auth";
-import { ALL_GRADES } from "@/lib/types/allocation";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -27,13 +26,15 @@ const updateStudentSchema = z.object({
   studentId: z.string().uuid(),
   fullName: z.string().min(2).max(120),
   gender: z.enum(["Male", "Female"]).optional(),
-  currentGrade: z.enum(ALL_GRADES as [string, ...string[]]),
+  currentGrade: z.string().min(1, "Grade is required"),
+  currentStream: z.string().min(1, "Stream is required"), // Added for North/South streams
   upiNumber: z.string().max(30).optional(),
 });
 
 const changeGradeSchema = z.object({
   studentId: z.string().uuid(),
-  newGrade: z.enum(ALL_GRADES as [string, ...string[]]),
+  newGrade: z.string().min(1),
+  newStream: z.string().min(1), // Added for quick stream changes
 });
 
 const linkParentSchema = z.object({
@@ -70,6 +71,7 @@ export async function updateStudentAction(
     fullName: formData.get("fullName"),
     gender: formData.get("gender") || undefined,
     currentGrade: formData.get("currentGrade"),
+    currentStream: formData.get("currentStream"),
     upiNumber: formData.get("upiNumber") || undefined,
   });
 
@@ -79,7 +81,14 @@ export async function updateStudentAction(
       message: parsed.error.issues[0]?.message ?? "Validation error",
     };
 
-  const { studentId, fullName, gender, currentGrade, upiNumber } = parsed.data;
+  const {
+    studentId,
+    fullName,
+    gender,
+    currentGrade,
+    currentStream,
+    upiNumber,
+  } = parsed.data;
   const supabase = await createSupabaseServerClient();
 
   const { error } = await supabase
@@ -88,6 +97,7 @@ export async function updateStudentAction(
       full_name: fullName,
       gender: gender ?? null,
       current_grade: currentGrade,
+      current_stream: currentStream, // Updated to handle stream
       upi_number: upiNumber ?? null,
     })
     .eq("id", studentId);
@@ -116,6 +126,7 @@ export async function changeStudentGradeAction(
   const parsed = changeGradeSchema.safeParse({
     studentId: formData.get("studentId"),
     newGrade: formData.get("newGrade"),
+    newStream: formData.get("newStream"),
   });
 
   if (!parsed.success) return { success: false, message: "Invalid data" };
@@ -123,19 +134,20 @@ export async function changeStudentGradeAction(
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("students")
-    .update({ current_grade: parsed.data.newGrade })
+    .update({
+      current_grade: parsed.data.newGrade,
+      current_stream: parsed.data.newStream,
+    })
     .eq("id", parsed.data.studentId);
 
   if (error) return { success: false, message: error.message };
 
   revalidatePath("/admin/students");
   revalidatePath("/admin/dashboard");
-  return { success: true, message: "Grade updated" };
+  return { success: true, message: "Class placement updated" };
 }
 
 // ── Delete student ────────────────────────────────────────────────────────────
-// student_parents rows cascade automatically. Assessment, attendance, diary
-// and notifications rows also cascade via ON DELETE CASCADE on student_id FKs.
 
 export async function deleteStudentAction(
   formData: FormData,
@@ -188,7 +200,6 @@ export async function linkParentToStudentAction(
     parsed.data;
   const supabase = await createSupabaseServerClient();
 
-  // Demote existing primary contact before promoting the new one
   if (isPrimaryContact) {
     await supabase
       .from("student_parents")
@@ -235,7 +246,6 @@ export async function unlinkParentFromStudentAction(
 
   const supabase = await createSupabaseServerClient();
 
-  // Guard: never leave a student with zero parents
   const { count } = await supabase
     .from("student_parents")
     .select("*", { count: "exact", head: true })
@@ -264,7 +274,6 @@ export async function unlinkParentFromStudentAction(
 }
 
 // ── Change student status ──────────────────────────────────────────────────────
-// Archives rather than deletes — preserves historical data.
 
 export async function changeStudentStatusAction(
   studentId: string,
@@ -297,7 +306,6 @@ export async function setPrimaryContactAction(
 
   const supabase = await createSupabaseServerClient();
 
-  // Demote all, then promote the chosen one
   await supabase
     .from("student_parents")
     .update({ is_primary_contact: false })
@@ -316,8 +324,6 @@ export async function setPrimaryContactAction(
 }
 
 // ── Photo upload ──────────────────────────────────────────────────────────────
-// Thin async wrapper so this "use server" file can export it.
-// Implementation lives in admit.ts.
 
 export async function uploadStudentPhotoAction(
   studentId: string,
