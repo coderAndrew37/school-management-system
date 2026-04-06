@@ -2,27 +2,8 @@
 
 // app/teacher/class/attendance/ClassAttendanceClient.tsx
 // Thin orchestrator — owns shared state, header, week nav, tab routing.
-// All rendering is delegated to RegisterTab and TrendsTab.
+// Fully refactored for Class-based (Grade + Stream) architecture.
 
-import { bulkRecordAttendanceAction } from "@/lib/actions/teacher";
-import type { ClassStudent } from "@/lib/data/assessment";
-import type {
-  Status,
-  StudentRow,
-  ParentContact,
-  AttendanceClientProps,
-} from "./attendance-types";
-import {
-  STATUSES,
-  STATUS_CFG,
-  DAY_NAMES,
-  toLocalDate,
-  getWeekDays,
-  shiftWeek,
-  formatLong,
-} from "./attendance-types";
-import { RegisterTab } from "./RegisterTab";
-import { TrendsTab } from "./TrendsTab";
 import {
   AlertTriangle,
   CalendarCheck,
@@ -32,14 +13,38 @@ import {
   Clock,
   Save,
 } from "lucide-react";
-import { useCallback, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
+
+import { bulkRecordAttendanceAction } from "@/lib/actions/teacher";
+import type {
+  AttendanceClientProps,
+  Status,
+  StudentRow,
+} from "./attendance-types";
+import {
+  DAY_NAMES,
+  formatLong,
+  getWeekDays,
+  shiftWeek,
+  toLocalDate,
+} from "./attendance-types";
+
+import { RegisterTab } from "./RegisterTab";
+import { TrendsTab } from "./TrendsTab";
 
 export function ClassAttendanceClient({
-  teacherName,
-  grade,
-  grades,
-  students,
+  classId, // UUID from classes table
+  gradeName, // e.g., "Grade 4"
+  streamName, // e.g., "North"
+  availableClasses, // Array of { id, grade, stream } for switcher
+  students, // ClassStudent[] from your assessment data layer
   studentsWithParents,
   selectedDate,
   today,
@@ -50,8 +55,15 @@ export function ClassAttendanceClient({
   activeTab: initialTab,
 }: AttendanceClientProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [isPending, startTrans] = useTransition();
 
+  // ── State ──────────────────────────────────────────────────────────────────
   const [tab, setTab] = useState<"register" | "trends">(initialTab);
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [saved, setSaved] = useState(Object.keys(preFill).length > 0);
+
+  // Rows state: mapped from ClassStudent
   const [rows, setRows] = useState<StudentRow[]>(() =>
     students.map((s) => ({
       studentId: s.id,
@@ -63,45 +75,85 @@ export function ClassAttendanceClient({
       remarksOpen: false,
     })),
   );
-  const [saved, setSaved] = useState(Object.keys(preFill).length > 0);
-  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
-  const [isPending, startTrans] = useTransition();
 
-  const isFuture = selectedDate > today;
-  const weekDays = getWeekDays(selectedDate);
-  const recorded = new Set(weekDatesRecorded);
+  // Sync rows if students/preFill props change via server navigation
+  useEffect(() => {
+    setRows(
+      students.map((s) => ({
+        studentId: s.id,
+        full_name: s.full_name,
+        readable_id: s.readable_id,
+        gender: s.gender,
+        status: (preFill[s.id]?.status as Status) ?? "Present",
+        remarks: preFill[s.id]?.remarks ?? "",
+        remarksOpen: false,
+      })),
+    );
+    setSaved(Object.keys(preFill).length > 0);
+  }, [students, preFill]);
 
-  // Disable next-week nav when next Monday is in the future
-  const nextMon = new Date(weekDays[4]! + "T00:00:00");
-  nextMon.setDate(nextMon.getDate() + 3);
-  const nextWeekDisabled = toLocalDate(nextMon) > today;
+  // ── Derived Data (Memoized) ────────────────────────────────────────────────
+  const { isFuture, weekDays, recorded, nextWeekDisabled } = useMemo(() => {
+    const days = getWeekDays(selectedDate);
+    const nextMon = new Date(days[4]! + "T00:00:00");
+    nextMon.setDate(nextMon.getDate() + 3);
+    return {
+      isFuture: selectedDate > today,
+      weekDays: days,
+      recorded: new Set(weekDatesRecorded),
+      nextWeekDisabled: toLocalDate(nextMon) > today,
+    };
+  }, [selectedDate, today, weekDatesRecorded]);
+
+  const todayCounts = useMemo(
+    () =>
+      rows.reduce<Record<Status, number>>(
+        (acc, r) => {
+          acc[r.status] = (acc[r.status] ?? 0) + 1;
+          return acc;
+        },
+        { Present: 0, Late: 0, Absent: 0, Excused: 0 },
+      ),
+    [rows],
+  );
+
+  const atRiskCount = useMemo(
+    () =>
+      students.filter((s) => {
+        const h = attendanceHistory[s.id] ?? [];
+        if (h.length < 5) return false;
+        const rate =
+          (h.filter((r) => r.status === "Present" || r.status === "Late")
+            .length /
+            h.length) *
+          100;
+        return rate < 75;
+      }).length,
+    [students, attendanceHistory],
+  );
 
   // ── Navigation ─────────────────────────────────────────────────────────────
   const navTo = useCallback(
-    (date: string, g?: string) => {
-      router.push(
-        `/teacher/class/attendance?grade=${encodeURIComponent(g ?? grade)}&date=${date}`,
-      );
+    (date: string, targetClassId?: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("classId", targetClassId ?? classId);
+      params.set("date", date);
+      router.push(`/teacher/class/attendance?${params.toString()}`);
     },
-    [grade, router],
+    [classId, router, searchParams],
   );
 
-  // ── Register mutations ─────────────────────────────────────────────────────
-  const setStatus = (id: string, status: Status) => {
+  // ── Mutations ─────────────────────────────────────────────────────────────
+  const updateRow = (id: string, updates: Partial<StudentRow>) => {
     setSaved(false);
-    setRows((p) => p.map((r) => (r.studentId === id ? { ...r, status } : r)));
-  };
-  const setRemarks = (id: string, remarks: string) =>
-    setRows((p) => p.map((r) => (r.studentId === id ? { ...r, remarks } : r)));
-  const toggleRemarks = (id: string) =>
-    setRows((p) =>
-      p.map((r) =>
-        r.studentId === id ? { ...r, remarksOpen: !r.remarksOpen } : r,
-      ),
+    setRows((prev) =>
+      prev.map((r) => (r.studentId === id ? { ...r, ...updates } : r)),
     );
+  };
+
   const markAll = (status: Status) => {
     setSaved(false);
-    setRows((p) => p.map((r) => ({ ...r, status })));
+    setRows((prev) => prev.map((r) => ({ ...r, status })));
   };
 
   const handleSave = () => {
@@ -114,10 +166,11 @@ export function ClassAttendanceClient({
           remarks: r.remarks || undefined,
         })),
       );
+
       setSaved(res.success);
       setToast({
         msg: res.success
-          ? `Register saved — ${rows.length} students.`
+          ? `Register saved for ${gradeName} ${streamName}.`
           : res.message,
         ok: res.success,
       });
@@ -125,39 +178,16 @@ export function ClassAttendanceClient({
     });
   };
 
-  // ── Derived: today's counts (passed to TrendsTab donut) ───────────────────
-  const todayCounts = rows.reduce<Record<Status, number>>(
-    (acc, r) => {
-      acc[r.status] = (acc[r.status] ?? 0) + 1;
-      return acc;
-    },
-    { Present: 0, Late: 0, Absent: 0, Excused: 0 },
-  );
-
-  // At-risk count for header badge
-  const atRiskCount = students.filter((s) => {
-    const h = attendanceHistory[s.id] ?? [];
-    if (h.length < 5) return false;
-    const rate = Math.round(
-      (h.filter((r) => r.status === "Present" || r.status === "Late").length /
-        h.length) *
-        100,
-    );
-    return rate < 75;
-  }).length;
-
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[#f5f6fa]">
-      {/* ── Sticky header ─────────────────────────────────────────────────── */}
+      {/* ── Sticky Header ─────────────────────────────────────────────────── */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
         <div className="max-w-3xl mx-auto px-4 sm:px-6">
-          {/* Top bar */}
           <div className="h-14 flex items-center gap-3">
             <CalendarCheck className="h-5 w-5 text-sky-500 shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-black text-slate-800 leading-none">
-                {grade} Register
+                {gradeName} {streamName}
               </p>
               <p className="text-[10px] text-slate-400 font-medium mt-0.5">
                 {formatLong(selectedDate)}
@@ -190,7 +220,7 @@ export function ClassAttendanceClient({
             </div>
           </div>
 
-          {/* Week strip */}
+          {/* Week Strip */}
           <div className="pb-2 flex items-center gap-2">
             <button
               onClick={() => navTo(shiftWeek(selectedDate, -1))}
@@ -249,7 +279,7 @@ export function ClassAttendanceClient({
             </button>
           </div>
 
-          {/* Tabs + grade switcher */}
+          {/* Tabs + Class Switcher */}
           <div className="pb-2 flex items-center gap-3 flex-wrap">
             <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 gap-0.5">
               {(["register", "trends"] as const).map((t) => (
@@ -264,31 +294,37 @@ export function ClassAttendanceClient({
                 </button>
               ))}
             </div>
-            {grades.length > 1 &&
-              grades.map((g) => (
-                <button
-                  key={g}
-                  onClick={() => navTo(selectedDate, g)}
-                  className={`text-xs font-bold px-2.5 py-1 rounded-xl border transition-all ${g === grade ? "bg-sky-600 text-white border-sky-600" : "bg-white text-slate-500 border-slate-200 hover:border-sky-300"}`}
-                >
-                  {g}
-                </button>
-              ))}
+            {availableClasses.length > 1 && (
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+                {availableClasses.map((cls: any) => (
+                  <button
+                    key={cls.id}
+                    onClick={() => navTo(selectedDate, cls.id)}
+                    className={`whitespace-nowrap text-[10px] font-bold px-3 py-1 rounded-full border transition-all ${
+                      cls.id === classId
+                        ? "bg-slate-800 text-white border-slate-800 shadow-sm"
+                        : "bg-white text-slate-500 border-slate-200 hover:border-sky-300"
+                    }`}
+                  >
+                    {cls.grade} {cls.stream}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </header>
 
-      {/* Toast */}
+      {/* Toast Overlay */}
       {toast && (
         <div
-          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-bold shadow-xl ${toast.ok ? "bg-emerald-600 text-white" : "bg-rose-500 text-white"}`}
+          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-bold shadow-xl animate-in fade-in slide-in-from-top-2 ${toast.ok ? "bg-emerald-600 text-white" : "bg-rose-500 text-white"}`}
         >
           {toast.msg}
         </div>
       )}
 
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 space-y-4">
-        {/* Future date warning */}
+      <main className="max-w-3xl mx-auto px-4 sm:px-6 py-4 space-y-4">
         {isFuture && tab === "register" && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700 font-semibold flex items-center gap-2">
             <Clock className="h-4 w-4 shrink-0" /> Future date — attendance
@@ -296,9 +332,9 @@ export function ClassAttendanceClient({
           </div>
         )}
 
-        {tab === "register" && (
+        {tab === "register" ? (
           <RegisterTab
-            grade={grade}
+            grade={`${gradeName} ${streamName}`}
             students={students}
             studentsWithParents={studentsWithParents}
             rows={rows}
@@ -306,17 +342,18 @@ export function ClassAttendanceClient({
             isPending={isPending}
             saved={saved}
             selectedDate={selectedDate}
-            onSetStatus={setStatus}
-            onSetRemarks={setRemarks}
-            onToggleRemarks={toggleRemarks}
+            onSetStatus={(id, status) => updateRow(id, { status })}
+            onSetRemarks={(id, remarks) => updateRow(id, { remarks })}
+            onToggleRemarks={(id) => {
+              const row = rows.find((r) => r.studentId === id);
+              updateRow(id, { remarksOpen: !row?.remarksOpen });
+            }}
             onMarkAll={markAll}
             onSave={handleSave}
           />
-        )}
-
-        {tab === "trends" && (
+        ) : (
           <TrendsTab
-            grade={grade}
+            grade={`${gradeName} ${streamName}`}
             students={students}
             studentsWithParents={studentsWithParents}
             attendanceHistory={attendanceHistory}
@@ -325,7 +362,7 @@ export function ClassAttendanceClient({
             totalStudents={rows.length}
           />
         )}
-      </div>
+      </main>
     </div>
   );
 }

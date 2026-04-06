@@ -5,6 +5,13 @@ export type SubjectLevel =
   | "upper_primary"
   | "junior_secondary";
 
+export interface Class {
+  id: string;
+  grade: string;
+  stream: string;
+  level: SubjectLevel;
+}
+
 export interface Subject {
   id: string;
   name: string;
@@ -18,7 +25,7 @@ export interface TeacherSubjectAllocation {
   id: string;
   teacher_id: string;
   subject_id: string;
-  grade: string;
+  class_id: string; // Changed from grade: string
   academic_year: number;
   created_at: string;
   // joined
@@ -35,34 +42,34 @@ export interface TeacherSubjectAllocation {
     level: SubjectLevel;
     weekly_lessons: number;
   } | null;
+  classes: Class | null; // Added joined class data
 }
 
 export interface TimetableSlot {
   id: string;
   allocation_id: string;
-  grade: string;
+  grade: string; // This remains a string label (e.g. "Grade 4-North") for the UI grid
   day_of_week: number; // 1–5
   period: number; // 1–8
   academic_year: number;
   created_at: string;
   // joined
   teacher_subject_allocations: {
-    grade: string;
-    teachers: { full_name: string } | null;
+    class_id: string;
+    teachers: { id: string; full_name: string } | null;
     subjects: { name: string; code: string } | null;
   } | null;
 }
 
 // ── UI timetable cell ─────────────────────────────────────────────────────────
-// slotId and teacherId are required for editing (swap, move, clear, conflict check)
 
 export interface TimetableCell {
-  slotId: string; // timetable_slots.id — needed for mutations
+  slotId: string;
   teacherName: string;
   subjectName: string;
   subjectCode: string;
   allocationId: string;
-  teacherId: string; // for teacher conflict detection
+  teacherId: string;
 }
 
 // Keyed by `${day}-${period}`
@@ -71,21 +78,17 @@ export type TimetableGrid = Record<string, TimetableCell | null>;
 export interface AllocationFormValues {
   teacherId: string;
   subjectId: string;
-  grade: string;
+  classId: string; // Changed from grade
   academicYear: number;
 }
 
-export const CBC_GRADES: Record<SubjectLevel, string[]> = {
-  lower_primary: ["PP1", "PP2", "Grade 1", "Grade 2", "Grade 3"],
-  upper_primary: ["Grade 4", "Grade 5", "Grade 6"],
-  junior_secondary: ["Grade 7 / JSS 1", "Grade 8 / JSS 2", "Grade 9 / JSS 3"],
+// These are now used as "Levels" rather than the final list of grades,
+// since specific grades (e.g. Grade 4 Alpha) come from the DB.
+export const CBC_LEVEL_LABELS: Record<SubjectLevel, string> = {
+  lower_primary: "Lower Primary (PP1 - Grade 3)",
+  upper_primary: "Upper Primary (Grade 4 - Grade 6)",
+  junior_secondary: "Junior Secondary (Grade 7 - Grade 9)",
 };
-
-export const ALL_GRADES = [
-  ...CBC_GRADES.lower_primary,
-  ...CBC_GRADES.upper_primary,
-  ...CBC_GRADES.junior_secondary,
-];
 
 export const DAYS = [
   "Monday",
@@ -103,9 +106,9 @@ export const PERIOD_TIMES: Record<number, string> = {
   1: "7:30–8:20",
   2: "8:20–9:10",
   3: "9:10–10:00",
-  4: "10:20–11:10", // break after period 3
+  4: "10:20–11:10",
   5: "11:10–12:00",
   6: "12:00–12:50",
-  7: "1:30–2:20", // lunch after period 6
+  7: "1:30–2:20",
   8: "2:20–3:10",
 };

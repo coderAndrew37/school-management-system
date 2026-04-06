@@ -5,7 +5,7 @@ import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/actions/auth";
 import {
-  GRADE_LEVEL_MAP,
+  resolveGradeLevel,
   NARRATIVE_CONTEXT,
   SCORE_LABELS,
 } from "@/lib/types/assessment";
@@ -75,9 +75,9 @@ export async function batchUpsertAssessmentsAction(
   }
 
   const upsertRows = validated
-    .filter((v) => v.success && (v as any).data.score !== null)
+    .filter((v) => v.success && v.data.score !== null)
     .map((v) => {
-      const d = (v as any).data;
+      const d = v.data!;
       return {
         student_id: d.studentId,
         subject_name: d.subjectName,
@@ -90,8 +90,8 @@ export async function batchUpsertAssessmentsAction(
     });
 
   const clearRows = validated
-    .filter((v) => v.success && (v as any).data.score === null)
-    .map((v) => (v as any).data);
+    .filter((v) => v.success && v.data.score === null)
+    .map((v) => v.data!);
 
   let savedCount = 0;
 
@@ -108,6 +108,7 @@ export async function batchUpsertAssessmentsAction(
     savedCount = upsertRows.length;
   }
 
+  // Clear null scores
   for (const r of clearRows) {
     await supabase.from("assessments").delete().match({
       student_id: r.studentId,
@@ -137,7 +138,7 @@ export async function generateNarrativeAction(
   const studentId = fd.get("student_id") as string;
   const studentName = fd.get("student_name") as string;
   const subjectName = fd.get("subject_name") as string;
-  const grade = fd.get("grade") as string;
+  const gradeLabel = fd.get("grade") as string; // Likely "Grade 4-North"
   const term = parseInt(fd.get("term") as string, 10);
   const academicYear = parseInt(
     (fd.get("academic_year") as string) || "2026",
@@ -168,13 +169,14 @@ export async function generateNarrativeAction(
     )
     .join("\n");
 
-  const level = GRADE_LEVEL_MAP[grade] ?? "upper_primary";
+  // Dynamically resolve level (e.g. "Grade 4-North" -> "upper_primary")
+  const level = resolveGradeLevel(gradeLabel);
   const gradeContext = NARRATIVE_CONTEXT[level];
 
   const prompt = `${gradeContext}
 
 Student: ${studentName}
-Grade: ${grade}
+Grade: ${gradeLabel}
 Subject: ${subjectName}
 Term: ${term}
 
@@ -188,11 +190,16 @@ Do not mention letter codes like EE/ME/AE/BE — describe performance naturally.
 Respond with ONLY the narrative remark text, no preamble.`;
 
   try {
+    // Note: Model name updated to a valid Gemini/Claude identifier if needed
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY || "",
+        "anthropic-version": "2023-06-01",
+      },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-3-5-sonnet-20240620",
         max_tokens: 200,
         messages: [{ role: "user", content: prompt }],
       }),
@@ -204,15 +211,8 @@ Respond with ONLY the narrative remark text, no preamble.`;
       return { success: false, message: "AI service error. Please try again." };
     }
 
-    const data = (await response.json()) as {
-      content: { type: string; text: string }[];
-    };
-
-    const narrative = data.content
-      .filter((c) => c.type === "text")
-      .map((c) => c.text)
-      .join("")
-      .trim();
+    const data = (await response.json()) as any;
+    const narrative = data.content?.[0]?.text?.trim();
 
     if (!narrative) {
       return { success: false, message: "No narrative returned." };
@@ -231,7 +231,6 @@ Respond with ONLY the narrative remark text, no preamble.`;
     );
 
     revalidatePath("/teacher/assess");
-    // FIXED: Added missing 'message' property required by NarrativeResult
     return {
       success: true,
       narrative,
@@ -277,5 +276,5 @@ export async function saveNarrativeAction(
 
   if (error) return { success: false, message: "Failed to save." };
   revalidatePath("/teacher/assess");
-  return { success: true, narrative, message: "Saved." };
+  return { success: true, narrative, message: "Saved successfully." };
 }

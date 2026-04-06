@@ -3,25 +3,23 @@
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
-import { supabaseAdmin } from "../supabase/admin";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import {
+  conductSchema,
+  type ActionState,
+  type ConductCategory,
+  type ConductData,
+  type ConductInput,
+  type ConductType,
+  type Severity,
+} from "@/lib/schemas/conduct";
 
-export interface ActionResult {
-  success: boolean;
-  message: string;
-}
+// ── Re-exports ────────────────────────────────────────────────────────────────
+// Components import types from here so they only need one import path.
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+export type { ActionState, ConductType, ConductCategory, Severity };
 
-export type ConductType = "merit" | "demerit" | "incident";
-export type ConductCategory =
-  | "academic"
-  | "behaviour"
-  | "leadership"
-  | "sport"
-  | "community"
-  | "other";
-export type Severity = "low" | "medium" | "high";
+// ── Public types ──────────────────────────────────────────────────────────────
 
 export interface ConductRecord {
   id: string;
@@ -29,6 +27,7 @@ export interface ConductRecord {
   student_name: string;
   teacher_id: string;
   grade: string;
+  stream: string;
   academic_year: number;
   term: number;
   type: ConductType;
@@ -43,95 +42,127 @@ export interface ConductRecord {
   created_at: string;
 }
 
-// ── Schema ────────────────────────────────────────────────────────────────────
+export interface SimpleActionResult {
+  success: boolean;
+  message: string;
+}
 
-const conductSchema = z.object({
-  student_id: z.string().uuid(),
-  grade: z.string().min(1),
-  academic_year: z.number().int().default(2026),
-  term: z.number().int().min(1).max(3),
-  type: z.enum(["merit", "demerit", "incident"]),
-  category: z.enum([
-    "academic",
-    "behaviour",
-    "leadership",
-    "sport",
-    "community",
-    "other",
-  ]),
-  points: z.number().int(),
-  description: z.string().min(1).max(1000),
-  action_taken: z.string().optional().nullable(),
-  severity: z.enum(["low", "medium", "high"]).optional().nullable(),
-});
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function signedPoints(type: ConductType, raw: number): number {
+  if (type === "merit") return Math.abs(raw);
+  if (type === "demerit") return -Math.abs(raw);
+  return 0;
+}
 
 // ── Create record ─────────────────────────────────────────────────────────────
+// Signature matches useActionState: (prevState, formData) => Promise<ActionState>
 
 export async function createConductRecordAction(
-  data: z.input<typeof conductSchema>,
-): Promise<ActionResult & { id?: string }> {
+  _prevState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
     error: authErr,
   } = await supabase.auth.getUser();
-  if (authErr || !user)
-    return { success: false, message: "Not authenticated." };
 
-  const parsed = conductSchema.safeParse(data);
-  if (!parsed.success)
+  if (authErr || !user) {
+    return { status: "error", message: "Not authenticated.", fieldErrors: {} };
+  }
+
+  const raw: ConductInput = {
+    student_id: formData.get("student_id") as string,
+    grade: formData.get("grade") as string,
+    stream: formData.get("stream") as string,
+    academic_year: formData.get("academic_year") as string,
+    term: formData.get("term") as string,
+    type: formData.get("type") as string,
+    category: formData.get("category") as string,
+    points: formData.get("points") as string,
+    description: formData.get("description") as string,
+    action_taken: (formData.get("action_taken") as string) || null,
+    severity: (formData.get("severity") as string) || null,
+  };
+
+  const parsed = conductSchema.safeParse(raw);
+
+  if (!parsed.success) {
     return {
-      success: false,
-      message: parsed.error.issues[0]?.message ?? "Invalid input",
+      status: "error",
+      message: "Please fix the errors below.",
+      fieldErrors: parsed.error.flatten().fieldErrors as Partial<
+        Record<keyof ConductData, string[]>
+      >,
     };
+  }
 
-  const { data: record, error } = await supabase
+  const d = parsed.data;
+
+  // Fetch the student name once so the action can echo it back for optimistic UI.
+  const { data: studentRow } = await supabase
+    .from("students")
+    .select("full_name")
+    .eq("id", d.student_id)
+    .single<{ full_name: string }>();
+
+  const studentName = studentRow?.full_name ?? "Unknown";
+
+  const { data: record, error: insertErr } = await supabase
     .from("student_conduct")
     .insert({
-      student_id: parsed.data.student_id,
+      student_id: d.student_id,
       teacher_id: user.id,
-      grade: parsed.data.grade,
-      academic_year: parsed.data.academic_year,
-      term: parsed.data.term,
-      type: parsed.data.type,
-      category: parsed.data.category,
-      points:
-        parsed.data.type === "merit"
-          ? Math.abs(parsed.data.points)
-          : parsed.data.type === "demerit"
-            ? -Math.abs(parsed.data.points)
-            : 0,
-      description: parsed.data.description,
-      action_taken: parsed.data.action_taken ?? null,
-      severity:
-        parsed.data.type === "incident"
-          ? (parsed.data.severity ?? "low")
-          : null,
+      grade: d.grade,
+      stream: d.stream,
+      academic_year: d.academic_year,
+      term: d.term,
+      type: d.type,
+      category: d.category,
+      points: signedPoints(d.type, d.points),
+      description: d.description,
+      action_taken: d.action_taken ?? null,
+      severity: d.type === "incident" ? (d.severity ?? "low") : null,
       parent_notified: false,
       is_resolved: false,
     })
     .select("id")
     .single<{ id: string }>();
 
-  if (error) {
-    console.error("[createConductRecordAction]", error.message);
-    return { success: false, message: "Failed to save record." };
+  if (insertErr || !record) {
+    console.error("[createConductRecordAction]", insertErr?.message);
+    return {
+      status: "error",
+      message: "Failed to save record. Please try again.",
+      fieldErrors: {},
+    };
   }
 
   revalidatePath("/teacher/conduct");
   revalidatePath("/parent");
-  return { success: true, message: "Record saved.", id: record?.id };
+
+  return {
+    status: "success",
+    message: `${TYPE_LABELS[d.type]} record saved.`,
+    id: record.id,
+    data: d,
+    studentName,
+  };
 }
+
+const TYPE_LABELS: Record<ConductType, string> = {
+  merit: "Merit",
+  demerit: "Demerit",
+  incident: "Incident",
+};
 
 // ── Update record ─────────────────────────────────────────────────────────────
 
 export async function updateConductRecordAction(
   id: string,
-  data: Partial<z.input<typeof conductSchema>> & {
-    action_taken?: string | null;
-    is_resolved?: boolean;
-  },
-): Promise<ActionResult> {
+  patch: Partial<Pick<ConductRecord, "action_taken" | "is_resolved">>,
+): Promise<SimpleActionResult> {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -142,15 +173,9 @@ export async function updateConductRecordAction(
 
   const { error } = await supabase
     .from("student_conduct")
-    .update({
-      ...data,
-      ...(data.type === "merit" ? { points: Math.abs(data.points ?? 0) } : {}),
-      ...(data.type === "demerit"
-        ? { points: -Math.abs(data.points ?? 0) }
-        : {}),
-    })
+    .update(patch)
     .eq("id", id)
-    .eq("teacher_id", user.id); // teachers can only edit their own
+    .eq("teacher_id", user.id);
 
   if (error) return { success: false, message: "Failed to update." };
   revalidatePath("/teacher/conduct");
@@ -161,7 +186,7 @@ export async function updateConductRecordAction(
 
 export async function deleteConductRecordAction(
   id: string,
-): Promise<ActionResult> {
+): Promise<SimpleActionResult> {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -185,7 +210,7 @@ export async function deleteConductRecordAction(
 
 export async function notifyParentConductAction(
   recordId: string,
-): Promise<ActionResult> {
+): Promise<SimpleActionResult> {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -194,22 +219,22 @@ export async function notifyParentConductAction(
   if (authErr || !user)
     return { success: false, message: "Not authenticated." };
 
-  // Get the record + student name
+  type RecordRow = {
+    id: string;
+    student_id: string;
+    type: ConductType;
+    description: string;
+    severity: Severity | null;
+    students: { full_name: string } | null;
+  };
+
   const { data: record, error: fetchErr } = await supabaseAdmin
     .from("student_conduct")
     .select(
-      "id, student_id, type, description, severity, grade, students ( full_name )",
+      "id, student_id, type, description, severity, students ( full_name )",
     )
     .eq("id", recordId)
-    .single<{
-      id: string;
-      student_id: string;
-      type: string;
-      description: string;
-      severity: string | null;
-      grade: string;
-      students: { full_name: string } | null;
-    }>();
+    .single<RecordRow>();
 
   if (fetchErr || !record)
     return { success: false, message: "Record not found." };
@@ -224,7 +249,6 @@ export async function notifyParentConductAction(
         ? `${emoji} Incident report — ${studentName}`
         : `${emoji} Demerit issued — ${studentName}`;
 
-  // Insert in-app notification (parents' bell icon)
   const { error: notifErr } = await supabaseAdmin.from("notifications").insert({
     student_id: record.student_id,
     title,
@@ -235,7 +259,6 @@ export async function notifyParentConductAction(
 
   if (notifErr) return { success: false, message: "Failed to notify parent." };
 
-  // Mark as notified
   await supabaseAdmin
     .from("student_conduct")
     .update({ parent_notified: true })
@@ -246,7 +269,10 @@ export async function notifyParentConductAction(
   return { success: true, message: "Parent notified." };
 }
 
-// ── Fetch records for teacher's grades ───────────────────────────────────────
+// ── Fetch records ─────────────────────────────────────────────────────────────
+// Queries by grade strings — matches the original action's data shape.
+// If you migrate to class_id FK on student_conduct, swap .in("grade", grades)
+// for .in("class_id", classIds) and update the caller accordingly.
 
 export async function fetchConductRecordsAction(
   grades: string[],
@@ -257,6 +283,10 @@ export async function fetchConductRecordsAction(
 
   const supabase = await createSupabaseServerClient();
 
+  type RawRow = Omit<ConductRecord, "student_name"> & {
+    students: { full_name: string } | null;
+  };
+
   const { data, error } = await supabase
     .from("student_conduct")
     .select("*, students ( full_name )")
@@ -264,17 +294,18 @@ export async function fetchConductRecordsAction(
     .eq("academic_year", academicYear)
     .eq("term", term)
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(200)
+    .returns<RawRow[]>();
 
   if (error) {
     console.error("[fetchConductRecordsAction]", error.message);
     return [];
   }
 
-  return (data ?? []).map((r) => ({
-    ...r,
-    student_name:
-      (r as unknown as { students: { full_name: string } | null }).students
-        ?.full_name ?? "Unknown",
-  })) as ConductRecord[];
+  return (data ?? []).map(
+    ({ students, ...rest }): ConductRecord => ({
+      ...rest,
+      student_name: students?.full_name ?? "Unknown",
+    }),
+  );
 }

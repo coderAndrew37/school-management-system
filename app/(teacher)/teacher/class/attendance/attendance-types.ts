@@ -40,10 +40,18 @@ export interface AttendanceStat {
   trend: "improving" | "declining" | "stable";
 }
 
+// Updated to match Class-based structure (Grade + Stream)
 export interface AttendanceClientProps {
   teacherName: string;
-  grade: string;
-  grades: string[];
+  classId: string; // UUID of the specific class
+  gradeName: string; // e.g., "Grade 4"
+  streamName: string; // e.g., "North"
+  availableClasses: {
+    // Metadata for the class switcher
+    id: string;
+    grade: string;
+    stream: string;
+  }[];
   students: ClassStudent[];
   studentsWithParents: (ClassStudent & { parents: ParentContact[] })[];
   selectedDate: string;
@@ -62,7 +70,6 @@ export const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 export const STATUS_CFG: Record<
   Status,
   {
-    icon?: string; // lucide icon name handled in consumers
     label: string;
     short: string;
     active: string;
@@ -150,6 +157,10 @@ export function getInitials(name: string) {
     .toUpperCase();
 }
 
+/**
+ * Computes individual student statistics based on historical attendance logs.
+ * Uses a simple midpoint split to determine the trend (improving/declining).
+ */
 export function computeStats(
   students: ClassStudent[],
   history: Record<string, { date: string; status: Status }[]>,
@@ -157,6 +168,7 @@ export function computeStats(
   return students.map((s) => {
     const records = history[s.id] ?? [];
     const total = records.length;
+
     if (total === 0) {
       return {
         studentId: s.id,
@@ -166,35 +178,38 @@ export function computeStats(
         excused: 0,
         total: 0,
         rate: 100,
-        trend: "stable" as const,
+        trend: "stable",
       };
     }
+
     const present = records.filter((r) => r.status === "Present").length;
     const absent = records.filter((r) => r.status === "Absent").length;
     const late = records.filter((r) => r.status === "Late").length;
     const excused = records.filter((r) => r.status === "Excused").length;
+
+    // Rate considers both Present and Late as "attended"
     const rate = Math.round(((present + late) / total) * 100);
 
+    // Trend calculation
     const half = Math.floor(total / 2);
     const older = records.slice(0, half);
     const newer = records.slice(half);
-    const or_ =
-      older.length > 0
-        ? older.filter((r) => r.status === "Present" || r.status === "Late")
-            .length / older.length
-        : 1;
-    const nr_ =
-      newer.length > 0
-        ? newer.filter((r) => r.status === "Present" || r.status === "Late")
-            .length / newer.length
-        : 1;
-    const diff = nr_ - or_;
-    const trend =
-      diff > 0.05
-        ? ("improving" as const)
-        : diff < -0.05
-          ? ("declining" as const)
-          : ("stable" as const);
+
+    const calculateRate = (subset: { status: Status }[]) => {
+      if (subset.length === 0) return 1;
+      return (
+        subset.filter((r) => r.status === "Present" || r.status === "Late")
+          .length / subset.length
+      );
+    };
+
+    const oldRate = calculateRate(older);
+    const newRate = calculateRate(newer);
+    const diff = newRate - oldRate;
+
+    let trend: "improving" | "declining" | "stable" = "stable";
+    if (diff > 0.05) trend = "improving";
+    else if (diff < -0.05) trend = "declining";
 
     return {
       studentId: s.id,

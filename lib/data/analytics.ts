@@ -2,7 +2,6 @@
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { GRADE_LEVEL_MAP } from "@/lib/types/assessment";
-import { ALL_GRADES } from "@/lib/types/allocation";
 
 // ── Score helpers ─────────────────────────────────────────────────────────────
 
@@ -200,14 +199,21 @@ export async function fetchAnalyticsOverview(
     if (s.gender === "Female") enrollMap[s.current_grade]!.female++;
   }
 
+  // Generate unique list of grades from actual data to replace ALL_GRADES
+  const uniqueGrades = Array.from(
+    new Set(students.map((s) => s.current_grade)),
+  ).sort();
+
   // ── Grade enrollment ──────────────────────────────────────────────────────
-  const gradeEnrollment = ALL_GRADES.filter((g) => enrollMap[g]).map((g) => ({
-    grade: g,
-    count: enrollMap[g]!.total,
-    male: enrollMap[g]!.male,
-    female: enrollMap[g]!.female,
-    level: GRADE_LEVEL_MAP[g] ?? "lower_primary",
-  }));
+  const gradeEnrollment = uniqueGrades
+    .filter((g) => enrollMap[g])
+    .map((g) => ({
+      grade: g,
+      count: enrollMap[g]!.total,
+      male: enrollMap[g]!.male,
+      female: enrollMap[g]!.female,
+      level: GRADE_LEVEL_MAP[g] ?? "lower_primary",
+    }));
 
   // ── Per-grade score buckets (current term) ────────────────────────────────
   const gradeScores: Record<
@@ -225,34 +231,34 @@ export async function fetchAnalyticsOverview(
   }
 
   // ── Grade snapshots ───────────────────────────────────────────────────────
-  const gradeSnapshots: GradeSnapshot[] = ALL_GRADES.filter(
-    (g) => enrollMap[g],
-  ).map((g) => {
-    const sc = gradeScores[g];
-    const ee = sc?.EE ?? 0,
-      me = sc?.ME ?? 0,
-      ae = sc?.AE ?? 0,
-      be = sc?.BE ?? 0;
-    const enrolled = enrollMap[g]!.total;
-    return {
-      grade: g,
-      level: GRADE_LEVEL_MAP[g] ?? "lower_primary",
-      studentCount: enrolled,
-      assessedCount: sc?.students.size ?? 0,
-      male: enrollMap[g]!.male,
-      female: enrollMap[g]!.female,
-      eeCount: ee,
-      meCount: me,
-      aeCount: ae,
-      beCount: be,
-      totalScores: ee + me + ae + be,
-      weightedMean: wm(ee, me, ae, be),
-      coverageRate:
-        enrolled > 0
-          ? Math.round(((sc?.students.size ?? 0) / enrolled) * 100)
-          : 0,
-    };
-  });
+  const gradeSnapshots: GradeSnapshot[] = uniqueGrades
+    .filter((g) => enrollMap[g])
+    .map((g) => {
+      const sc = gradeScores[g];
+      const ee = sc?.EE ?? 0,
+        me = sc?.ME ?? 0,
+        ae = sc?.AE ?? 0,
+        be = sc?.BE ?? 0;
+      const enrolled = enrollMap[g]!.total;
+      return {
+        grade: g,
+        level: GRADE_LEVEL_MAP[g] ?? "lower_primary",
+        studentCount: enrolled,
+        assessedCount: sc?.students.size ?? 0,
+        male: enrollMap[g]!.male,
+        female: enrollMap[g]!.female,
+        eeCount: ee,
+        meCount: me,
+        aeCount: ae,
+        beCount: be,
+        totalScores: ee + me + ae + be,
+        weightedMean: wm(ee, me, ae, be),
+        coverageRate:
+          enrolled > 0
+            ? Math.round(((sc?.students.size ?? 0) / enrolled) * 100)
+            : 0,
+      };
+    });
 
   // ── Subject × grade buckets ───────────────────────────────────────────────
   const subjectGrade: Record<
@@ -378,25 +384,25 @@ export async function fetchAnalyticsOverview(
     }
   }
 
-  const termComparison: TermComparisonRow[] = ALL_GRADES.filter(
-    (g) => enrollMap[g],
-  ).map((g) => {
-    const t1 = termMeans[g]?.[1] ?? 0;
-    const t2 = termMeans[g]?.[2] ?? 0;
-    const t3 = termMeans[g]?.[3] ?? 0;
-    // delta = improvement from first available term to latest available
-    const vals = [t1, t2, t3].filter((v) => v > 0);
-    const delta =
-      vals.length >= 2 ? +(vals[vals.length - 1]! - vals[0]!).toFixed(2) : 0;
-    return {
-      grade: g,
-      level: GRADE_LEVEL_MAP[g] ?? "lower_primary",
-      t1,
-      t2,
-      t3,
-      delta,
-    };
-  });
+  const termComparison: TermComparisonRow[] = uniqueGrades
+    .filter((g) => enrollMap[g])
+    .map((g) => {
+      const t1 = termMeans[g]?.[1] ?? 0;
+      const t2 = termMeans[g]?.[2] ?? 0;
+      const t3 = termMeans[g]?.[3] ?? 0;
+      // delta = improvement from first available term to latest available
+      const vals = [t1, t2, t3].filter((v) => v > 0);
+      const delta =
+        vals.length >= 2 ? +(vals[vals.length - 1]! - vals[0]!).toFixed(2) : 0;
+      return {
+        grade: g,
+        level: GRADE_LEVEL_MAP[g] ?? "lower_primary",
+        t1,
+        t2,
+        t3,
+        delta,
+      };
+    });
 
   // ── Attendance by grade ───────────────────────────────────────────────────
   const attMap: Record<
@@ -414,20 +420,20 @@ export async function fetchAnalyticsOverview(
     else if (row.status === "late") attMap[grade]!.late++;
   }
 
-  const attendanceByGrade: AttendanceSnapshot[] = ALL_GRADES.filter(
-    (g) => attMap[g],
-  ).map((g) => ({
-    grade: g,
-    level: GRADE_LEVEL_MAP[g] ?? "lower_primary",
-    totalRecords: attMap[g]!.total,
-    presentCount: attMap[g]!.present,
-    absentCount: attMap[g]!.absent,
-    lateCount: attMap[g]!.late,
-    rate:
-      attMap[g]!.total > 0
-        ? Math.round((attMap[g]!.present / attMap[g]!.total) * 100)
-        : 0,
-  }));
+  const attendanceByGrade: AttendanceSnapshot[] = uniqueGrades
+    .filter((g) => attMap[g])
+    .map((g) => ({
+      grade: g,
+      level: GRADE_LEVEL_MAP[g] ?? "lower_primary",
+      totalRecords: attMap[g]!.total,
+      presentCount: attMap[g]!.present,
+      absentCount: attMap[g]!.absent,
+      lateCount: attMap[g]!.late,
+      rate:
+        attMap[g]!.total > 0
+          ? Math.round((attMap[g]!.present / attMap[g]!.total) * 100)
+          : 0,
+    }));
 
   // ── Admissions trend (last 6 months) ─────────────────────────────────────
   const now = new Date();

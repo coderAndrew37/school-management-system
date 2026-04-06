@@ -1,4 +1,5 @@
 // app/teacher/class/attendance/TrendsTab.tsx
+"use client";
 
 import type { ClassStudent } from "@/lib/data/assessment";
 import { AlertTriangle, Phone, TrendingDown, TrendingUp } from "lucide-react";
@@ -13,12 +14,11 @@ import { DonutChart, Sparkline, WeeklyBarChart } from "./AttendanceCharts";
 import { ContactPopover } from "./ContactPopover";
 
 interface Props {
-  grade: string;
+  grade: string; // This should be the full string like "Grade 4 North"
   students: ClassStudent[];
   studentsWithParents: (ClassStudent & { parents: ParentContact[] })[];
   attendanceHistory: Record<string, { date: string; status: Status }[]>;
   classWeeklyTrend: WeekPoint[];
-  // Today's register counts for donut chart
   todayCounts: Record<Status, number>;
   totalStudents: number;
 }
@@ -34,18 +34,25 @@ export function TrendsTab({
 }: Props) {
   const [contactId, setContactId] = useState<string | null>(null);
 
+  // Compute individual stats for all students
   const stats = computeStats(students, attendanceHistory);
+
+  // Filter students who have enough data (at least 5 days) and are below the threshold
   const atRisk = stats
     .filter((s) => s.total >= 5 && s.rate < AT_RISK_THRESHOLD)
     .sort((a, b) => a.rate - b.rate);
 
-  const totalRecords = Object.values(attendanceHistory).flat().length;
-  const totalPresent = Object.values(attendanceHistory)
-    .flat()
-    .filter((r) => r.status === "Present" || r.status === "Late").length;
-  const classRate30d =
-    totalRecords > 0 ? Math.round((totalPresent / totalRecords) * 100) : 0;
+  // Calculate 30-day class performance
+  const allRecords = Object.values(attendanceHistory).flat();
+  const totalRecords = allRecords.length;
+  const totalAttended = allRecords.filter(
+    (r) => r.status === "Present" || r.status === "Late",
+  ).length;
 
+  const classRate30d =
+    totalRecords > 0 ? Math.round((totalAttended / totalRecords) * 100) : 0;
+
+  // Calculate Week-on-Week trend
   const safeLastWeek =
     classWeeklyTrend.length > 0
       ? classWeeklyTrend[classWeeklyTrend.length - 1]
@@ -55,22 +62,31 @@ export function TrendsTab({
       ? classWeeklyTrend[classWeeklyTrend.length - 2]
       : null;
   const weekTrendDiff =
-    safeLastWeek && safePrevWeek ? safeLastWeek.rate - safePrevWeek.rate : 0;
+    safeLastWeek && safePrevWeek
+      ? Math.round(safeLastWeek.rate - safePrevWeek.rate)
+      : 0;
 
   return (
     <div className="space-y-5">
-      {/* Overview cards */}
+      {/* ── Overview Stats ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm text-center">
           <p
-            className={`text-3xl font-black ${classRate30d >= 90 ? "text-emerald-600" : classRate30d >= 75 ? "text-amber-500" : "text-rose-600"}`}
+            className={`text-3xl font-black ${
+              classRate30d >= 90
+                ? "text-emerald-600"
+                : classRate30d >= 75
+                  ? "text-amber-500"
+                  : "text-rose-600"
+            }`}
           >
             {classRate30d}%
           </p>
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-1">
-            30-day rate
+            Class Rate (30d)
           </p>
         </div>
+
         <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm text-center">
           <div className="flex items-center justify-center gap-1">
             <p
@@ -83,9 +99,10 @@ export function TrendsTab({
             )}
           </div>
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-1">
-            At risk (&lt;75%)
+            At Risk (&lt;{AT_RISK_THRESHOLD}%)
           </p>
         </div>
+
         <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm text-center">
           <div className="flex items-center justify-center gap-1">
             {weekTrendDiff > 0 && (
@@ -102,44 +119,43 @@ export function TrendsTab({
             </p>
           </div>
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-1">
-            Week-on-week
+            vs. Last Week
           </p>
         </div>
       </div>
 
-      {/* Today's donut */}
+      {/* ── Today's Distribution ─────────────────────────────────────────── */}
       {totalStudents > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
           <p className="text-xs font-black uppercase tracking-wider text-slate-500 mb-4">
-            Today&apos;s Breakdown
+            Today&apos;s Attendance Breakdown
           </p>
           <DonutChart counts={todayCounts} total={totalStudents} />
         </div>
       )}
 
-      {/* Weekly bar chart */}
+      {/* ── Weekly Class Chart ────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <p className="text-xs font-black uppercase tracking-wider text-slate-500">
-            Class Attendance Trend
+            Term Attendance History
           </p>
-          <p className="text-[10px] text-slate-400">Last 6 weeks</p>
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+            Last 6 weeks
+          </p>
         </div>
         <WeeklyBarChart data={classWeeklyTrend} />
       </div>
 
-      {/* At-risk panel */}
+      {/* ── Critical Focus Panel (At-Risk Students) ───────────────────────── */}
       {atRisk.length > 0 && (
         <div className="bg-white rounded-2xl border border-rose-200 shadow-sm overflow-hidden">
           <div className="px-5 py-3.5 bg-rose-50 border-b border-rose-100 flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-rose-500" />
             <p className="text-sm font-black text-rose-700">
-              {atRisk.length} student{atRisk.length !== 1 ? "s" : ""} need
-              attention
+              {atRisk.length} Student{atRisk.length !== 1 ? "s" : ""} Requiring
+              Intervention
             </p>
-            <span className="ml-auto text-[10px] text-rose-400">
-              Below {AT_RISK_THRESHOLD}% attendance
-            </span>
           </div>
           <div className="divide-y divide-slate-100">
             {atRisk.map((stat) => {
@@ -150,40 +166,41 @@ export function TrendsTab({
               const parents = parentData?.parents ?? [];
               const history = attendanceHistory[stat.studentId] ?? [];
               const isOpen = contactId === stat.studentId;
+
               return (
                 <div
                   key={stat.studentId}
                   className="px-5 py-4 flex items-center gap-3"
                 >
                   <div
-                    className={`h-10 w-10 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${student.gender === "Female" ? "bg-pink-100 text-pink-700" : "bg-blue-100 text-blue-700"}`}
+                    className={`h-10 w-10 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${
+                      student.gender === "Female"
+                        ? "bg-pink-100 text-pink-700"
+                        : "bg-blue-100 text-blue-700"
+                    }`}
                   >
                     {getInitials(student.full_name)}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-bold text-slate-800">
+                      <p className="text-sm font-bold text-slate-800 truncate">
                         {student.full_name}
                       </p>
                       {stat.trend === "declining" && (
-                        <TrendingDown className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+                        <TrendingDown className="h-3.5 w-3.5 text-rose-500" />
                       )}
                     </div>
                     <div className="flex items-center gap-2 mt-1">
                       <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
                         <div
-                          className="h-full rounded-full bg-rose-400"
+                          className="h-full rounded-full bg-rose-500"
                           style={{ width: `${stat.rate}%` }}
                         />
                       </div>
-                      <span className="text-[10px] font-black text-rose-600 shrink-0">
+                      <span className="text-[10px] font-black text-rose-600">
                         {stat.rate}%
                       </span>
                     </div>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
-                      {stat.absent} absent · {stat.late} late · {stat.total}{" "}
-                      days recorded
-                    </p>
                   </div>
                   <Sparkline records={history} />
                   <div className="relative shrink-0">
@@ -191,9 +208,13 @@ export function TrendsTab({
                       onClick={() =>
                         setContactId(isOpen ? null : stat.studentId)
                       }
-                      className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl border transition-all ${isOpen ? "bg-violet-100 border-violet-200 text-violet-700" : "bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100"}`}
+                      className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl border transition-all ${
+                        isOpen
+                          ? "bg-violet-100 border-violet-200 text-violet-700"
+                          : "bg-rose-50 border-rose-200 text-rose-600"
+                      }`}
                     >
-                      <Phone className="h-3.5 w-3.5" /> Contact
+                      <Phone className="h-3.5 w-3.5" />
                     </button>
                     {isOpen && (
                       <ContactPopover
@@ -211,14 +232,14 @@ export function TrendsTab({
         </div>
       )}
 
-      {/* Full table */}
+      {/* ── Complete Class List (Sorted by Attendance Rate) ────────────────── */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
           <p className="text-xs font-black uppercase tracking-wider text-slate-500">
-            All Students
+            Attendance Ranking
           </p>
-          <p className="text-[10px] text-slate-400">
-            Sorted by attendance rate ↑
+          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+            Sorted Ascending ↑
           </p>
         </div>
         <div className="divide-y divide-slate-100">
@@ -226,59 +247,55 @@ export function TrendsTab({
             .sort((a, b) => a.rate - b.rate)
             .map((stat) => {
               const student = students.find((s) => s.id === stat.studentId)!;
-              const history = attendanceHistory[stat.studentId] ?? [];
               const isAtRisk = stat.total >= 5 && stat.rate < AT_RISK_THRESHOLD;
+              const history = attendanceHistory[stat.studentId] ?? [];
               const isOpen = contactId === stat.studentId;
               const parentData = studentsWithParents.find(
                 (s) => s.id === stat.studentId,
               );
               const parents = parentData?.parents ?? [];
+
               return (
                 <div
                   key={stat.studentId}
-                  className={`px-5 py-3 flex items-center gap-3 ${isAtRisk ? "bg-rose-50/40" : ""}`}
+                  className={`px-5 py-3 flex items-center gap-3 ${isAtRisk ? "bg-rose-50/30" : ""}`}
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <p className="text-sm font-bold text-slate-800 truncate">
                         {student.full_name}
                       </p>
-                      {isAtRisk && (
-                        <AlertTriangle className="h-3 w-3 text-rose-400 shrink-0" />
+                      {stat.trend === "improving" && (
+                        <TrendingUp className="h-3 w-3 text-emerald-500" />
                       )}
                       {stat.trend === "declining" && (
-                        <TrendingDown className="h-3 w-3 text-rose-400 shrink-0" />
-                      )}
-                      {stat.trend === "improving" && (
-                        <TrendingUp className="h-3 w-3 text-emerald-400 shrink-0" />
+                        <TrendingDown className="h-3 w-3 text-rose-500" />
                       )}
                     </div>
                     <p className="text-[10px] text-slate-400 mt-0.5">
                       {stat.total > 0
-                        ? `${stat.present}P · ${stat.absent}A · ${stat.late}L · ${stat.excused}E of ${stat.total} days`
-                        : "No records yet"}
+                        ? `${stat.present}P · ${stat.absent}A · ${stat.late}L of ${stat.total} days`
+                        : "No data recorded"}
                     </p>
                   </div>
                   <Sparkline records={history} />
-                  <div className="w-20 shrink-0 hidden sm:flex items-center gap-1.5">
-                    <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${isAtRisk ? "bg-rose-400" : "bg-emerald-400"}`}
-                        style={{ width: `${stat.rate}%` }}
-                      />
-                    </div>
+                  <div className="w-16 flex items-center justify-end">
                     <span
-                      className={`text-xs font-black shrink-0 ${isAtRisk ? "text-rose-600" : "text-emerald-600"}`}
+                      className={`text-xs font-black ${isAtRisk ? "text-rose-600" : "text-emerald-600"}`}
                     >
                       {stat.total > 0 ? `${stat.rate}%` : "—"}
                     </span>
                   </div>
-                  <div className="relative shrink-0">
+                  <div className="relative">
                     <button
                       onClick={() =>
                         setContactId(isOpen ? null : stat.studentId)
                       }
-                      className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isOpen ? "bg-violet-100 text-violet-600" : "text-slate-300 hover:bg-slate-100 hover:text-slate-500"}`}
+                      className={`h-8 w-8 rounded-xl flex items-center justify-center transition-colors ${
+                        isOpen
+                          ? "bg-violet-100 text-violet-600"
+                          : "text-slate-300 hover:bg-slate-100"
+                      }`}
                     >
                       <Phone className="h-3.5 w-3.5" />
                     </button>

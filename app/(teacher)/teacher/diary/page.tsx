@@ -1,13 +1,15 @@
 // app/teacher/diary/page.tsx
+// Server component — auth, data fetching only. No UI logic.
 
+import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   fetchTeacherAssessmentAllocations,
   fetchClassStudents,
 } from "@/lib/data/assessment";
+import { fetchTeacherDiaryEntries, fetchClassOptions } from "@/lib/data/diary";
+import { getActiveTermYear } from "@/lib/utils/settings";
 import DiaryClient from "./DiaryClient";
-import { redirect } from "next/navigation";
-import { fetchTeacherDiaryEntries } from "@/lib/data/diary";
 
 export default async function DiaryPage() {
   const supabase = await createSupabaseServerClient();
@@ -20,14 +22,22 @@ export default async function DiaryPage() {
     .from("teachers")
     .select("id, full_name")
     .eq("id", user.id)
-    .single();
-
+    .single<{ id: string; full_name: string }>();
   if (!teacher) redirect("/login");
 
-  const allocations = await fetchTeacherAssessmentAllocations(teacher.id, 2026);
+  const { academicYear } = await getActiveTermYear();
+
+  // Grades from subject allocations
+  const allocations = await fetchTeacherAssessmentAllocations(
+    teacher.id,
+    academicYear,
+  );
   const uniqueGrades = [...new Set(allocations.map((a) => a.grade))].sort();
 
-  // Fetch students per grade for the observation student picker
+  // Class options for grade display (stream-aware labels)
+  const classOptions = await fetchClassOptions(academicYear);
+
+  // Students per grade for the observation picker
   const studentsByGrade: Record<
     string,
     Awaited<ReturnType<typeof fetchClassStudents>>
@@ -38,13 +48,13 @@ export default async function DiaryPage() {
     }),
   );
 
-  // Fetch all three entry types — limit 60 to cover a busy term
   const initialEntries = await fetchTeacherDiaryEntries(uniqueGrades, 60);
 
   return (
     <DiaryClient
       teacherName={teacher.full_name}
       grades={uniqueGrades}
+      classOptions={classOptions}
       studentsByGrade={studentsByGrade}
       initialEntries={initialEntries}
     />

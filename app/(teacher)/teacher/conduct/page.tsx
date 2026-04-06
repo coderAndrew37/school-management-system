@@ -8,6 +8,7 @@ import {
 import { fetchConductRecordsAction } from "@/lib/actions/conduct";
 import { getActiveTermYear } from "@/lib/utils/settings";
 import { ConductClient } from "./ConductClient";
+import { type ClassInfo } from "./_components/ConductForm";
 
 export const metadata = { title: "Conduct & Merits | Kibali Teacher" };
 export const revalidate = 0;
@@ -23,36 +24,55 @@ export default async function ConductPage() {
     .from("teachers")
     .select("id, full_name")
     .eq("id", user.id)
-    .single<{ id: string; full_name: string }>();
+    .single();
+
   if (!teacher) redirect("/login");
 
   const { term, academicYear } = await getActiveTermYear();
 
-  // Collect grades from class teacher assignment + subject allocations
   const [assignment, allocations] = await Promise.all([
     fetchMyClassTeacherAssignments(),
     fetchTeacherAssessmentAllocations(teacher.id, academicYear),
   ]);
 
-  // FIX: Extract grades from the 'classes' array to satisfy TypeScript union types
-  const classGrades = assignment?.classes
-    ? assignment.classes.map((c) => c.grade as string)
-    : [];
+  // Use the exported ClassInfo type to ensure consistency with the form
+  const classesMap = new Map<string, ClassInfo>();
 
-  const allocationGrades = [...new Set(allocations.map((a) => a.grade))].sort();
+  /**
+   * Handle assignments from fetchMyClassTeacherAssignments
+   * Explicitly storing grade and stream for the new DB schema
+   */
+  assignment?.classes?.forEach((c: any) => {
+    if (c.id) {
+      classesMap.set(c.id, {
+        id: c.id,
+        grade: c.grade,
+        stream: c.stream || "Main",
+      });
+    }
+  });
 
-  // Merge both sets of grades, ensuring uniqueness
-  const grades = [
-    ...classGrades,
-    ...allocationGrades.filter((g) => !classGrades.includes(g)),
-  ];
+  /**
+   * Handle allocations using the TeacherAllocationSummary interface
+   * This ensures subject teachers also see their specific classes
+   */
+  allocations.forEach((a) => {
+    classesMap.set(a.classId, {
+      id: a.classId,
+      grade: a.grade,
+      stream: a.stream || "Main",
+    });
+  });
 
-  if (grades.length === 0) {
+  const classes = Array.from(classesMap.values());
+
+  // Early return with empty state if no classes are found
+  if (classes.length === 0) {
     return (
       <ConductClient
         teacherName={teacher.full_name}
-        grades={[]}
-        studentsByGrade={{}}
+        classes={[]}
+        studentsByClass={{}}
         initialRecords={[]}
         term={term}
         academicYear={academicYear}
@@ -60,26 +80,27 @@ export default async function ConductPage() {
     );
   }
 
-  // Pre-load students and conduct records in parallel
-  const studentsByGrade: Record<
+  const studentsByClass: Record<
     string,
     Awaited<ReturnType<typeof fetchClassStudents>>
   > = {};
 
-  const [, records] = await Promise.all([
-    Promise.all(
-      grades.map(async (g) => {
-        studentsByGrade[g] = await fetchClassStudents(g);
-      }),
-    ),
-    fetchConductRecordsAction(grades, academicYear, term),
-  ]);
+  const classIds = classes.map((c) => c.id);
+
+  // Parallel fetching of students for all assigned classes
+  await Promise.all(
+    classIds.map(async (id) => {
+      studentsByClass[id] = await fetchClassStudents(id);
+    }),
+  );
+
+  const records = await fetchConductRecordsAction(classIds, academicYear, term);
 
   return (
     <ConductClient
       teacherName={teacher.full_name}
-      grades={grades}
-      studentsByGrade={studentsByGrade}
+      classes={classes}
+      studentsByClass={studentsByClass}
       initialRecords={records}
       term={term}
       academicYear={academicYear}

@@ -28,13 +28,30 @@ async function fetchTeachers(): Promise<Teacher[]> {
   return (data ?? []) as Teacher[];
 }
 
+// NEW: Fetch classes for the scalable allocation approach
+async function fetchClasses() {
+  const supabase = createServerClient();
+  const { data, error } = await supabase
+    .from("classes")
+    .select("id, grade, stream, level")
+    .order("grade", { ascending: true });
+
+  if (error) {
+    console.error("Error fetching classes:", error);
+    return [];
+  }
+  return data ?? [];
+}
+
 export default async function AllocationPage() {
   const { academicYear } = await getActiveTermYear();
 
-  const [teachers, subjects, allocations] = await Promise.all([
+  // Added fetchClasses to the parallel data fetch
+  const [teachers, subjects, allocations, classes] = await Promise.all([
     fetchTeachers(),
     fetchSubjects(),
     fetchAllocations(academicYear),
+    fetchClasses(),
   ]);
 
   return (
@@ -65,9 +82,7 @@ export default async function AllocationPage() {
           </div>
 
           <nav className="flex items-center gap-2 flex-wrap">
-            {/* Subject manager inline — no separate page needed */}
             <SubjectManagerModal subjects={subjects} />
-
             <GenerateTimetableButton academicYear={academicYear} />
 
             <NavLink
@@ -93,11 +108,18 @@ export default async function AllocationPage() {
         </header>
 
         {/* Summary strip */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-4 gap-3">
+          {" "}
+          {/* Changed to 4 columns to include classes */}
           <SummaryChip label="Teachers" value={teachers.length} color="amber" />
           <SummaryChip
             label="CBC Subjects"
             value={subjects.length}
+            color="sky"
+          />
+          <SummaryChip
+            label="Active Classes"
+            value={classes.length}
             color="sky"
           />
           <SummaryChip
@@ -112,8 +134,10 @@ export default async function AllocationPage() {
           <EmptyState message="No teachers found. Add teachers to the system first." />
         ) : subjects.length === 0 ? (
           <EmptyState
-            message={`No subjects found. Click &apos;Manage Subjects&apos; above to add CBC subjects.`}
+            message={`No subjects found. Click 'Manage Subjects' above to add CBC subjects.`}
           />
+        ) : classes.length === 0 ? (
+          <EmptyState message="No classes found. Set up your grades and streams (e.g., Grade 4 Alpha) before allocating." />
         ) : (
           <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-xl p-6">
             <div className="h-px w-full bg-gradient-to-r from-transparent via-amber-400/30 to-transparent mb-6" />
@@ -121,6 +145,7 @@ export default async function AllocationPage() {
               teachers={teachers}
               subjects={subjects}
               allocations={allocations}
+              classes={classes} // Passing the fetched classes to the client component
             />
           </div>
         )}
@@ -188,7 +213,7 @@ function EmptyState({ message }: { message: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-20 rounded-2xl border border-dashed border-white/10">
       <p className="text-4xl mb-3">📋</p>
-      <p className="text-white/40 text-sm">{message}</p>
+      <p className="text-white/40 text-sm px-6 text-center">{message}</p>
     </div>
   );
 }

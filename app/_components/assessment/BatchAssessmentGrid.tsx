@@ -21,7 +21,7 @@ import {
   buildTemplateRemark,
   summariseScores,
 } from "@/lib/utils/remark-templates";
-import { getStrands, formatStrand, SCORE_COLORS } from "@/lib/types/assessment";
+import { getStrands, formatStrand } from "@/lib/types/assessment";
 import type {
   CbcScore,
   AssessmentGridState,
@@ -198,10 +198,8 @@ export function BatchAssessmentGrid({
   const startEdit = (studentId: string) => {
     const existing = narratives[studentId];
     if (existing) {
-      // Has existing remark — edit it as-is
       setDraftNarrative(existing);
     } else {
-      // No remark yet — pre-fill with template based on current scores
       const student = students.find((s) => s.id === studentId);
       const summary = summariseScores(studentId, subjectName, strands, grid);
       setDraftNarrative(
@@ -212,6 +210,7 @@ export function BatchAssessmentGrid({
     }
     setEditingNarrative(studentId);
   };
+
   const cancelEdit = () => {
     setEditingNarrative(null);
     setDraftNarrative("");
@@ -244,6 +243,7 @@ export function BatchAssessmentGrid({
       }
     });
   };
+
   const saveEdit = async (student: GridStudent) => {
     const fd = new FormData();
     fd.append("student_id", student.id);
@@ -312,10 +312,8 @@ export function BatchAssessmentGrid({
     if (!prevTermScores) return;
     setGrid((prev) => {
       const next = { ...prev };
-      // Only copy into cells that are currently empty
       for (const [key, cell] of Object.entries(prevTermScores)) {
         if (!cell.score) continue;
-        // Rekey: prevTermScores uses same key format, same subjectName
         if (!next[key]?.score) {
           next[key] = { assessmentId: null, score: cell.score, dirty: true };
         }
@@ -334,7 +332,6 @@ export function BatchAssessmentGrid({
       {/* ── Toolbar ───────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Score legend */}
           <div className="flex items-center gap-1.5 flex-wrap">
             {SCORES.map((s) => (
               <span
@@ -346,7 +343,6 @@ export function BatchAssessmentGrid({
             ))}
           </div>
 
-          {/* Copy-forward banner */}
           {hasPrevTerm && term > 1 && (
             <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
               <span className="text-[11px] text-amber-700 font-semibold">
@@ -360,7 +356,7 @@ export function BatchAssessmentGrid({
               </button>
             </div>
           )}
-          {/* Unsaved indicator */}
+
           {dirtyCount > 0 && (
             <span className="text-[11px] text-amber-600 font-semibold">
               {dirtyCount} unsaved change{dirtyCount !== 1 ? "s" : ""}
@@ -394,9 +390,7 @@ export function BatchAssessmentGrid({
           className="w-full border-collapse text-sm"
           style={{ minWidth: `${240 + strands.length * 200}px` }}
         >
-          {/* ── THEAD ───────────────────────────────────────────────────── */}
           <thead className="sticky top-0 z-20">
-            {/* Row 1: Strand names */}
             <tr className="bg-slate-50 border-b border-slate-200">
               <th
                 className="sticky left-0 z-30 bg-slate-50 px-4 py-3 text-left text-[10px] font-black uppercase tracking-widest text-slate-400 min-w-[220px] border-r border-slate-200"
@@ -430,7 +424,6 @@ export function BatchAssessmentGrid({
               </th>
             </tr>
 
-            {/* Row 2: Score label pills */}
             <tr className="bg-slate-50 border-b border-slate-200">
               {strands.flatMap((strandId) =>
                 SCORES.map((score) => (
@@ -450,7 +443,6 @@ export function BatchAssessmentGrid({
             </tr>
           </thead>
 
-          {/* ── TBODY ───────────────────────────────────────────────────── */}
           <tbody className="divide-y divide-slate-100">
             {students.length === 0 ? (
               <tr>
@@ -466,11 +458,6 @@ export function BatchAssessmentGrid({
                 const summary = getStudentSummary(student.id);
                 const rowNarrative = narratives[student.id];
                 const isEditing = editingNarrative === student.id;
-                const hasAnyScore = strands.some(
-                  (st) => grid[cellKey(student.id, subjectName, st)]?.score,
-                );
-
-                // Row stripe: alternate very slightly for readability
                 const rowBg = rowIdx % 2 === 0 ? "bg-white" : "bg-slate-50/60";
 
                 return (
@@ -478,7 +465,6 @@ export function BatchAssessmentGrid({
                     key={student.id}
                     className={`${rowBg} hover:bg-emerald-50/40 transition-colors group/row`}
                   >
-                    {/* ── Name cell ─────────────────────────────────────── */}
                     <td
                       className={`sticky left-0 z-10 ${rowBg} group-hover/row:bg-emerald-50/40 border-r border-slate-200 px-4 py-3 min-w-[220px] transition-colors`}
                     >
@@ -491,7 +477,6 @@ export function BatchAssessmentGrid({
                             {student.readable_id}
                           </p>
                         )}
-                        {/* Score summary pills */}
                         <div className="flex gap-1 mt-1 flex-wrap">
                           {(Object.entries(summary) as [CbcScore, number][])
                             .filter(([, count]) => count > 0)
@@ -507,7 +492,6 @@ export function BatchAssessmentGrid({
                       </div>
                     </td>
 
-                    {/* ── Score cells ───────────────────────────────────── */}
                     {strands.flatMap((strandId, strandIdx) =>
                       SCORES.map((score, scoreIdx) => {
                         const key = cellKey(student.id, subjectName, strandId);
@@ -557,16 +541,13 @@ export function BatchAssessmentGrid({
                       }),
                     )}
 
-                    {/* ── Remark cell ───────────────────────────────────── */}
                     <td className="border-l border-slate-200 px-3 py-3 align-top min-w-[220px]">
                       {isEditing ? (
                         <div className="space-y-2">
-                          {/* Template + AI helper buttons */}
                           <div className="flex gap-1.5">
                             <button
                               type="button"
                               onClick={() => applyTemplate(student.id)}
-                              title="Fill with score-based template"
                               className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 px-2 py-1 text-[9px] font-bold text-slate-500 transition-colors"
                             >
                               <RefreshCw className="h-2.5 w-2.5" /> Template
@@ -575,7 +556,6 @@ export function BatchAssessmentGrid({
                               type="button"
                               onClick={() => generateAiRemark(student)}
                               disabled={isGenerating}
-                              title="Generate richer remark with AI"
                               className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 hover:bg-violet-100 px-2 py-1 text-[9px] font-bold text-violet-600 transition-colors disabled:opacity-50"
                             >
                               {isGenerating ? (
@@ -611,7 +591,6 @@ export function BatchAssessmentGrid({
                           </div>
                         </div>
                       ) : rowNarrative ? (
-                        /* Has remark */
                         <div className="group/remark relative">
                           <p className="text-xs text-slate-600 leading-relaxed line-clamp-3 pr-6">
                             {rowNarrative}
@@ -619,13 +598,11 @@ export function BatchAssessmentGrid({
                           <button
                             onClick={() => startEdit(student.id)}
                             className="absolute top-0 right-0 p-1 rounded opacity-0 group-hover/remark:opacity-100 hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-all"
-                            title="Edit remark"
                           >
                             <Edit3 className="h-3 w-3" />
                           </button>
                         </div>
                       ) : (
-                        /* No remark yet */
                         <button
                           onClick={() => startEdit(student.id)}
                           className="flex items-center gap-1.5 rounded-lg border border-dashed border-slate-200 px-3 py-2 text-[10px] font-semibold text-slate-400 hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50/50 transition-all w-full"
@@ -643,7 +620,6 @@ export function BatchAssessmentGrid({
         </table>
       </div>
 
-      {/* ── Footer ───────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between pt-1">
         <p className="text-xs text-slate-400 font-medium">
           {narrativeCount}/{students.length} remarks written
@@ -704,7 +680,6 @@ function StrandMenu({
       <button
         onClick={() => setOpen((v) => !v)}
         className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-slate-200 text-slate-400 hover:text-slate-700 transition-all"
-        title="Column actions"
       >
         <ChevronDown className="h-3 w-3" />
       </button>

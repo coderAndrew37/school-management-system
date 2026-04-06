@@ -12,6 +12,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 // ── Shared result ─────────────────────────────────────────────────────────────
+
 interface ActionResult {
   success: boolean;
   message: string;
@@ -44,10 +45,16 @@ const outboundTransferSchema = z.object({
   reason: z.string().min(5).max(500),
 });
 
+// NOTE: This schema validates the QR payload that arrives from a *source school*.
+// The source school only knows the student's grade as a display string (e.g. "Grade 7").
+// It does NOT contain a class_id, because that UUID belongs to this school's
+// classes table. The mapping from source grade → local class_id is resolved by
+// the admin at approval time (see approveInboundTransferAction).
 const inboundScanSchema = z.object({
   upi: z.string().min(1),
   assessment_number: z.string().nullable(),
   full_name: z.string().min(2),
+  // Grade string from the source school — kept as-is for the audit trail.
   current_grade: z.string().min(1),
   current_school_code: z.string().min(1),
   generated_at: z.string().datetime(),
@@ -87,7 +94,7 @@ export async function saveCSLEntryAction(
       supervisor_status: "pending",
     })
     .select("id")
-    .single();
+    .single<{ id: string }>();
 
   if (error) {
     console.error("[saveCSLEntry]", error.message);
@@ -120,11 +127,12 @@ export async function reviewCSLEntryAction(
     status: formData.get("status"),
     supervisorNotes: formData.get("supervisorNotes") ?? undefined,
   });
-  if (!parsed.success)
+  if (!parsed.success) {
     return {
       success: false,
       message: parsed.error.issues[0]?.message ?? "Validation error",
     };
+  }
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
@@ -146,6 +154,8 @@ export async function reviewCSLEntryAction(
 }
 
 // ── Transfer: Initiate outbound ───────────────────────────────────────────────
+// Records the student's current class_id in the transfer audit trail so the
+// destination school (and our own history) knows exactly which class they left.
 
 export async function initiateOutboundTransferAction(
   formData: FormData,
@@ -159,16 +169,38 @@ export async function initiateOutboundTransferAction(
     destinationSchool: formData.get("destinationSchool"),
     reason: formData.get("reason"),
   });
-  if (!parsed.success)
+  if (!parsed.success) {
     return {
       success: false,
       message: parsed.error.issues[0]?.message ?? "Validation error",
     };
+  }
 
   const supabase = await createSupabaseServerClient();
 
+  // Resolve the student's current class_id so it is captured on the transfer
+  // record — the RPC uses it to set the student's status to transfer_pending
+  // and to embed a denormalised grade label in the QR payload.
+  const { data: studentRow, error: studentErr } = await supabase
+    .from("students")
+    .select("class_id")
+    .eq("id", parsed.data.studentId)
+    .single<{ class_id: string | null }>();
+
+  if (studentErr || !studentRow) {
+    return { success: false, message: "Student not found." };
+  }
+
+  if (!studentRow.class_id) {
+    return {
+      success: false,
+      message: "Student is not assigned to a class. Please assign them first.",
+    };
+  }
+
   const { data, error } = await supabase.rpc("initiate_outbound_transfer", {
     p_student_id: parsed.data.studentId,
+    p_class_id: studentRow.class_id,
     p_initiated_by: session.user.id,
     p_destination: parsed.data.destinationSchool,
     p_reason: parsed.data.reason,
@@ -189,6 +221,10 @@ export async function initiateOutboundTransferAction(
 }
 
 // ── Transfer: Record inbound from QR scan ────────────────────────────────────
+// Validates the QR payload from the source school and creates a pending
+// transfer_request. Note: current_grade in the payload is the *source school's*
+// grade string — it is stored for display/audit, not used to assign a class here.
+// Class assignment happens at approval time (see approveInboundTransferAction).
 
 export async function recordInboundScanAction(
   input: InboundScanInput,
@@ -197,37 +233,36 @@ export async function recordInboundScanAction(
   if (!session || session.profile.role !== "admin")
     return { success: false, message: "Unauthorised" };
 
-  // Validate QR payload schema
   const parsed = inboundScanSchema.safeParse(input.payload);
   if (!parsed.success)
     return { success: false, message: "Invalid QR code data." };
 
-  // Check QR is not older than 30 days
+  // Reject QR codes older than 30 days
   const generated = new Date(parsed.data.generated_at);
   const ageDays = (Date.now() - generated.getTime()) / 86400000;
-  if (ageDays > 30)
+  if (ageDays > 30) {
     return {
       success: false,
       message: "QR code has expired (older than 30 days).",
     };
+  }
 
   const supabase = await createSupabaseServerClient();
 
-  // Find or look up the student by UPI
-  const { data: studentData, error: sErr } = await supabase
+  // Look up the student by UPI — they may already exist (prior enrolment here)
+  // or be completely new. A null studentId is valid for the insert below.
+  const { data: studentRow, error: sErr } = await supabase
     .from("students")
     .select("id, full_name, status")
     .eq("upi_number", parsed.data.upi)
-    .maybeSingle();
+    .maybeSingle<{ id: string; full_name: string; status: string }>();
 
   if (sErr) {
     console.error("[recordInbound]", sErr.message);
     return { success: false, message: "Student lookup failed." };
   }
 
-  // A student known to this school: just record the request
-  // A new student: will be admitted separately via the AdmissionForm
-  const studentId = studentData?.id ?? null;
+  const studentId = studentRow?.id ?? null;
 
   const { data: reqData, error: reqErr } = await supabase
     .from("transfer_requests")
@@ -238,11 +273,14 @@ export async function recordInboundScanAction(
       source_school_code: parsed.data.current_school_code,
       source_upi: parsed.data.upi,
       source_assessment_no: parsed.data.assessment_number,
+      // Preserve the source grade string verbatim for the admin's reference and
+      // for the audit trail — it is NOT used to derive a local class_id.
+      source_grade: parsed.data.current_grade,
       scanned_qr_payload: input.payload,
       initiated_by: session.user.id,
     })
     .select("id")
-    .single();
+    .single<{ id: string }>();
 
   if (reqErr) {
     console.error("[recordInbound insert]", reqErr.message);
@@ -258,20 +296,37 @@ export async function recordInboundScanAction(
 }
 
 // ── Transfer: Approve inbound ─────────────────────────────────────────────────
+// The admin selects the local class the student should be placed into.
+// This class_id is passed to the RPC which:
+//   1. Sets student.class_id = p_class_id
+//   2. Sets student.status = "active"
+//   3. Marks the transfer_request as approved
+//   4. Restores any SBA history for that student
 
 export async function approveInboundTransferAction(
   transferId: string,
   studentId: string,
+  classId: string, // ← local classes.id selected by admin at approval time
 ): Promise<ActionResult> {
   const session = await getSession();
   if (!session || session.profile.role !== "admin")
     return { success: false, message: "Unauthorised" };
+
+  // Validate that the supplied classId is a real UUID before hitting the DB.
+  const classIdParsed = z.string().uuid("Invalid class ID.").safeParse(classId);
+  if (!classIdParsed.success) {
+    return {
+      success: false,
+      message: classIdParsed.error.issues[0]?.message ?? "Invalid class ID.",
+    };
+  }
 
   const supabase = await createSupabaseServerClient();
 
   const { error } = await supabase.rpc("approve_inbound_transfer", {
     p_transfer_id: transferId,
     p_student_id: studentId,
+    p_class_id: classIdParsed.data, // ← new param; RPC sets student.class_id
     p_approved_by: session.user.id,
   });
 

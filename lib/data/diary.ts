@@ -1,89 +1,156 @@
+// lib/data/diary.ts
+// Server-side data fetching for the diary page.
+// Maps raw Supabase rows to the typed TeacherDiaryEntry union.
+
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import {
-  TeacherDiaryEntry,
+import type {
   ClassDiaryEntry,
   ObservationEntry,
-} from "../types/diary";
+  TeacherDiaryEntry,
+} from "@/lib/types/diary";
 
-/**
- * Fetch all diary entries (Homework, Notices, Observations) for a teacher.
- * Filters by the grades the teacher is allocated to.
- */
+// ── Raw DB row shapes (no `any`) ──────────────────────────────────────────────
+
+interface ClassRow {
+  id: string;
+  entry_type: string;
+  grade: string | null;
+  title: string;
+  content: string | null;
+  due_date: string | null;
+  is_completed: boolean | null;
+  created_at: string;
+}
+
+interface ObsRow {
+  id: string;
+  entry_type: string;
+  grade: string | null;
+  student_id: string;
+  title: string;
+  content: string | null;
+  is_completed: boolean | null;
+  created_at: string;
+  students: { full_name: string } | null;
+}
+
+// ── Mapper helpers ────────────────────────────────────────────────────────────
+
+function toClassEntry(r: ClassRow): ClassDiaryEntry {
+  return {
+    id: r.id,
+    grade: r.grade ?? "",
+    entry_type: r.entry_type as "homework" | "notice",
+    title: r.title,
+    content: r.content,
+    diary_date: r.created_at.slice(0, 10),
+    created_at: r.created_at,
+    student_id: null,
+    due_date: r.due_date ?? null,
+    is_completed: r.is_completed ?? false,
+  };
+}
+
+function toObsEntry(r: ObsRow): ObservationEntry {
+  return {
+    id: r.id,
+    grade: r.grade ?? "",
+    entry_type: "observation",
+    title: r.title,
+    content: r.content,
+    diary_date: r.created_at.slice(0, 10),
+    created_at: r.created_at,
+    student_id: r.student_id,
+    student_name: r.students?.full_name ?? "Unknown",
+    due_date: null,
+    is_completed: false,
+  };
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
 export async function fetchTeacherDiaryEntries(
   grades: string[],
   limit = 60,
 ): Promise<TeacherDiaryEntry[]> {
   if (grades.length === 0) return [];
   const supabase = await createSupabaseServerClient();
+  const half = Math.ceil(limit / 2);
 
-  // 1. Fetch Class-wide entries
-  const { data: classEntries, error: classError } = await supabase
-    .from("student_diary")
-    .select(
-      "id, entry_type, grade, title, content, due_date, is_completed, created_at",
-    )
-    .in("grade", grades)
-    .in("entry_type", ["homework", "notice"])
-    .is("student_id", null)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  const [classRes, obsRes] = await Promise.all([
+    supabase
+      .from("student_diary")
+      .select(
+        "id, entry_type, grade, title, content, due_date, is_completed, created_at",
+      )
+      .in("grade", grades)
+      .in("entry_type", ["homework", "notice"])
+      .is("student_id", null)
+      .order("created_at", { ascending: false })
+      .limit(limit)
+      .returns<ClassRow[]>(),
 
-  if (classError)
-    console.error("[fetchTeacherDiary] class error:", classError.message);
+    supabase
+      .from("student_diary")
+      .select(
+        "id, entry_type, grade, student_id, title, content, is_completed, created_at, students!inner ( full_name )",
+      )
+      .in("grade", grades)
+      .eq("entry_type", "observation")
+      .order("created_at", { ascending: false })
+      .limit(half)
+      .returns<ObsRow[]>(),
+  ]);
 
-  // 2. Fetch Student-specific observations
-  const { data: obsEntries, error: obsError } = await supabase
-    .from("student_diary")
-    .select(
-      `
-      id, entry_type, grade, student_id, title, content, is_completed, created_at,
-      students!inner ( full_name )
-    `,
-    )
-    .in("grade", grades)
-    .eq("entry_type", "observation")
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  if (classRes.error)
+    console.error("[fetchTeacherDiary] class:", classRes.error.message);
+  if (obsRes.error)
+    console.error("[fetchTeacherDiary] obs:", obsRes.error.message);
 
-  if (obsError)
-    console.error("[fetchTeacherDiary] obs error:", obsError.message);
+  const entries: TeacherDiaryEntry[] = [
+    ...(classRes.data ?? []).map(toClassEntry),
+    ...(obsRes.data ?? []).map(toObsEntry),
+  ];
 
-  // 3. Map to ClassDiaryEntry
-  const mappedClass: ClassDiaryEntry[] = (classEntries ?? []).map((r: any) => ({
-    id: r.id,
-    grade: r.grade,
-    entry_type: r.entry_type as "homework" | "notice",
-    title: r.title,
-    content: r.content,
-    // Add missing required properties
-    body: r.content,
-    diary_date: r.created_at?.slice(0, 10) || "",
-    created_at: r.created_at,
-    student_id: null,
-    due_date: r.due_date,
-    is_completed: !!r.is_completed,
-    homework: r.entry_type === "homework" ? r.content : null,
-  }));
-
-  // 4. Map to ObservationEntry
-  const mappedObs: ObservationEntry[] = (obsEntries ?? []).map((r: any) => ({
-    id: r.id,
-    grade: r.grade,
-    entry_type: "observation" as const,
-    title: r.title,
-    content: r.content,
-    // Add missing required properties
-    body: r.content,
-    diary_date: r.created_at?.slice(0, 10) || "",
-    created_at: r.created_at,
-    student_id: r.student_id,
-    student_name: r.students?.full_name ?? "Unknown Student",
-    due_date: null,
-    is_completed: false,
-  }));
-
-  return [...mappedClass, ...mappedObs].sort(
+  return entries.sort(
     (a, b) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
+}
+
+// ── Fetch available grades from the classes table ─────────────────────────────
+// Used by the diary page to validate that a grade exists before posting.
+
+export interface ClassOption {
+  id: string;
+  grade: string;
+  stream: string;
+  academicYear: number;
+  label: string; // e.g. "Grade 5" or "Grade 5 — East"
+}
+
+export async function fetchClassOptions(
+  academicYear: number,
+): Promise<ClassOption[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("classes")
+    .select("id, grade, stream, academic_year")
+    .eq("academic_year", academicYear)
+    .order("grade")
+    .returns<
+      { id: string; grade: string; stream: string; academic_year: number }[]
+    >();
+
+  if (error) {
+    console.error("[fetchClassOptions]", error.message);
+    return [];
+  }
+  return (data ?? []).map((c) => ({
+    id: c.id,
+    grade: c.grade,
+    stream: c.stream,
+    academicYear: c.academic_year,
+    label: c.stream !== "Main" ? `${c.grade} — ${c.stream}` : c.grade,
+  }));
 }

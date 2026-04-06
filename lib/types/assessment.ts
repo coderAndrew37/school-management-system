@@ -1,3 +1,5 @@
+// lib/types/assessment.ts
+
 export type CbcScore = "EE" | "ME" | "AE" | "BE";
 
 export const SCORE_LABELS: Record<CbcScore, string> = {
@@ -37,7 +39,7 @@ export const SCORE_COLORS: Record<
   },
 };
 
-// ── Lower Primary Strands (PP1, PP2, Grade 1–3) ───────────────────────────────
+// ── Strands Configuration ───────────────────────────────────────────────────
 
 const LOWER_PRIMARY_STRANDS: Record<string, string[]> = {
   "Literacy Activities": [
@@ -81,8 +83,6 @@ const LOWER_PRIMARY_STRANDS: Record<string, string[]> = {
   "Physical Education": ["athletics", "games-sport", "health-fitness"],
 };
 
-// ── Upper Primary Strands (Grade 4–6) ────────────────────────────────────────
-
 const UPPER_PRIMARY_STRANDS: Record<string, string[]> = {
   English: ["listening-speaking", "reading", "writing", "grammar-language-use"],
   Kiswahili: ["kusikiliza-kuongea", "kusoma", "kuandika", "sarufi-matumizi"],
@@ -125,8 +125,6 @@ const UPPER_PRIMARY_STRANDS: Record<string, string[]> = {
     "social-responsibility",
   ],
 };
-
-// ── Junior Secondary Strands (Grade 7–9 / JSS 1–3) ───────────────────────────
 
 const JUNIOR_SECONDARY_STRANDS: Record<string, string[]> = {
   "English & Literature": [
@@ -193,6 +191,7 @@ const JUNIOR_SECONDARY_STRANDS: Record<string, string[]> = {
 
 export type GradeLevel = "lower_primary" | "upper_primary" | "junior_secondary";
 
+// This map remains for internal logic to determine the CBC band
 export const GRADE_LEVEL_MAP: Record<string, GradeLevel> = {
   PP1: "lower_primary",
   PP2: "lower_primary",
@@ -213,17 +212,26 @@ const STRANDS_BY_LEVEL: Record<GradeLevel, Record<string, string[]>> = {
   junior_secondary: JUNIOR_SECONDARY_STRANDS,
 };
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** * Resolves a GradeLevel from a potentially complex grade label.
+ * Handles both "Grade 4" and "Grade 4-North"
+ */
+export function resolveGradeLevel(gradeLabel: string): GradeLevel {
+  // If label is "Grade 4-North", this splits it and takes "Grade 4"
+  const baseGrade = gradeLabel.split("-")[0].trim();
+  return GRADE_LEVEL_MAP[baseGrade] ?? "upper_primary";
+}
+
 /** Get strands for a subject at a given grade */
-export function getStrands(grade: string, subjectName: string): string[] {
-  const level = GRADE_LEVEL_MAP[grade];
-  if (!level) return ["general-performance"];
+export function getStrands(gradeLabel: string, subjectName: string): string[] {
+  const level = resolveGradeLevel(gradeLabel);
   return STRANDS_BY_LEVEL[level][subjectName] ?? ["general-performance"];
 }
 
 /** Get all subjects for a given grade level */
-export function getSubjectsForLevel(grade: string): string[] {
-  const level = GRADE_LEVEL_MAP[grade];
-  if (!level) return [];
+export function getSubjectsForLevel(gradeLabel: string): string[] {
+  const level = resolveGradeLevel(gradeLabel);
   return Object.keys(STRANDS_BY_LEVEL[level]);
 }
 
@@ -235,48 +243,39 @@ export function formatStrand(strandId: string): string {
     .join(" ");
 }
 
-// ── Narrative context per grade band ─────────────────────────────────────────
-// Used to craft age-appropriate AI narrative remarks
+// ── Narrative Contexts ────────────────────────────────────────────────────────
 
 export const NARRATIVE_CONTEXT: Record<GradeLevel, string> = {
   lower_primary: `
-You are writing a CBC report card narrative remark for a young learner (Pre-Primary or Grade 1–3, age 4–9).
-Use warm, encouraging, simple language that parents and young children can understand.
-Focus on observed behaviours and competencies rather than letter grades.
-Keep the tone positive, supportive, and celebratory of growth.
-Remarks should be 2–3 sentences (40–60 words).
-  `.trim(),
+Warm, encouraging, simple language for ages 4–9. 
+Focus on behaviours and competencies. Positive and supportive. 
+2–3 sentences (40–60 words).`.trim(),
 
   upper_primary: `
-You are writing a CBC report card narrative remark for an upper primary learner (Grade 4–6, age 10–12).
-Use clear, constructive language acknowledging specific strengths and areas for development.
-Ground the remark in competencies observed in class activities and assignments.
-Keep the tone encouraging but honest, 2–3 sentences (50–70 words).
-  `.trim(),
+Clear, constructive language for ages 10–12. 
+Acknowledge specific strengths and growth areas. 
+2–3 sentences (50–70 words).`.trim(),
 
   junior_secondary: `
-You are writing a CBC report card narrative remark for a junior secondary learner (Grade 7–9 / JSS, age 13–15).
-Use professional language that addresses the learner's academic competencies, critical thinking, and character.
-Balance strengths with specific, actionable growth areas.
-Keep the tone respectful and forward-looking, 3 sentences (60–80 words).
-  `.trim(),
+Professional language for ages 13–15. 
+Addresses academic competencies, critical thinking, and character. 
+3 sentences (60–80 words).`.trim(),
 };
 
-// ── Assessment grid cell type ─────────────────────────────────────────────────
+// ── Assessment Grid Types ─────────────────────────────────────────────────────
 
 export interface AssessmentCell {
-  assessmentId: string | null; // null = not yet saved to DB
+  assessmentId: string | null;
   score: CbcScore | null;
-  dirty: boolean; // changed since last save
+  dirty: boolean;
 }
 
-// Key: `${studentId}:${subjectName}:${strandId}`
 export type AssessmentGridState = Record<string, AssessmentCell>;
 
 export interface GridStudent {
   id: string;
   full_name: string;
   readable_id: string | null;
-  current_grade: string;
-  narrative?: string | null; // cached narrative remark
+  class_id: string; // Updated from current_grade to class_id
+  narrative?: string | null;
 }

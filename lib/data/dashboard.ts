@@ -1,5 +1,6 @@
+// lib/data/dashboard.ts
+
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { ALL_GRADES } from "@/lib/types/allocation";
 import { GRADE_LEVEL_MAP } from "@/lib/types/assessment";
 import { DashboardStats, Student } from "@/lib/types/dashboard";
 
@@ -195,22 +196,26 @@ export async function fetchDashboardChartData(
     score: string;
   }[];
 
-  // 1. Grade Enrollment logic
+  // 1. Dynamic Grade Enrollment logic
   const gradeMap: Record<
     string,
     { male: number; female: number; total: number }
   > = {};
+
   for (const s of students) {
-    const g = s.current_grade;
+    const g = s.current_grade || "Unknown";
     if (!gradeMap[g]) gradeMap[g] = { male: 0, female: 0, total: 0 };
     gradeMap[g]!.total++;
     if (s.gender === "Male") gradeMap[g]!.male++;
     if (s.gender === "Female") gradeMap[g]!.female++;
   }
 
-  const gradeEnrollment: GradeEnrollmentBar[] = ALL_GRADES.filter(
-    (g) => gradeMap[g],
-  ).map((g) => ({
+  // Sort grades naturally (PP1, PP2, Grade 1, Grade 2...)
+  const sortedActiveGrades = Object.keys(gradeMap).sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
+  );
+
+  const gradeEnrollment: GradeEnrollmentBar[] = sortedActiveGrades.map((g) => ({
     grade: g,
     count: gradeMap[g]!.total,
     level: GRADE_LEVEL_MAP[g] ?? "lower_primary",

@@ -1,4 +1,3 @@
-// app/teacher/class/attendance/RegisterTab.tsx
 "use client";
 
 import type { ClassStudent } from "@/lib/data/assessment";
@@ -25,6 +24,7 @@ const STATUS_ICONS: Record<Status, React.ReactNode> = {
 };
 
 interface Props {
+  // Updated to match full class string (e.g., "Grade 4 North")
   grade: string;
   students: ClassStudent[];
   studentsWithParents: (ClassStudent & { parents: ParentContact[] })[];
@@ -64,17 +64,19 @@ export function RegisterTab({
     },
     { Present: 0, Late: 0, Absent: 0, Excused: 0 },
   );
+
   const rate =
     rows.length > 0
       ? Math.round(((counts.Present + counts.Late) / rows.length) * 100)
       : 0;
+
   const absentRows = rows.filter(
     (r) => r.status === "Absent" || r.status === "Late",
   );
 
   return (
     <>
-      {/* Stats */}
+      {/* ── Stats Overview ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-5 gap-2">
         <div className="col-span-1 bg-white rounded-2xl border border-slate-200 p-3 text-center shadow-sm">
           <p className="text-xl font-black text-slate-800">{rate}%</p>
@@ -97,7 +99,7 @@ export function RegisterTab({
         ))}
       </div>
 
-      {/* Quick mark */}
+      {/* ── Quick Mark Controls ───────────────────────────────────────────── */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
           Mark all:
@@ -114,11 +116,11 @@ export function RegisterTab({
           </button>
         ))}
         <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-400">
-          <Users className="h-3.5 w-3.5" /> {rows.length}
+          <Users className="h-3.5 w-3.5" /> {rows.length} students
         </span>
       </div>
 
-      {/* Roll list */}
+      {/* ── Student Roll List ─────────────────────────────────────────────── */}
       <div className="space-y-2">
         {rows.map((row, idx) => {
           const parentData = studentsWithParents.find(
@@ -126,6 +128,7 @@ export function RegisterTab({
           );
           const parents = parentData?.parents ?? [];
           const isOpen = contactId === row.studentId;
+
           return (
             <div
               key={row.studentId}
@@ -142,7 +145,11 @@ export function RegisterTab({
                   {idx + 1}
                 </span>
                 <div
-                  className={`h-9 w-9 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${row.gender === "Female" ? "bg-pink-100 text-pink-700" : "bg-blue-100 text-blue-700"}`}
+                  className={`h-9 w-9 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${
+                    row.gender === "Female"
+                      ? "bg-pink-100 text-pink-700"
+                      : "bg-blue-100 text-blue-700"
+                  }`}
                 >
                   {getInitials(row.full_name)}
                 </div>
@@ -192,7 +199,11 @@ export function RegisterTab({
                       onClick={() =>
                         setContactId(isOpen ? null : row.studentId)
                       }
-                      className={`h-8 w-8 rounded-xl flex items-center justify-center transition-colors ${isOpen ? "bg-violet-100 text-violet-600" : "text-slate-300 hover:bg-slate-100 hover:text-slate-500"}`}
+                      className={`h-8 w-8 rounded-xl flex items-center justify-center transition-colors ${
+                        isOpen
+                          ? "bg-violet-100 text-violet-600"
+                          : "text-slate-300 hover:bg-slate-100 hover:text-slate-500"
+                      }`}
                     >
                       <Phone className="h-3.5 w-3.5" />
                     </button>
@@ -225,7 +236,7 @@ export function RegisterTab({
         })}
       </div>
 
-      {/* Absent summary */}
+      {/* ── Follow-up Summary ─────────────────────────────────────────────── */}
       {absentRows.length > 0 && (
         <div className="bg-white rounded-2xl border border-rose-200 p-4 shadow-sm space-y-2">
           <p className="text-xs font-black uppercase tracking-wider text-rose-500">
@@ -237,7 +248,11 @@ export function RegisterTab({
               className="flex items-center gap-2 flex-wrap"
             >
               <span
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${r.status === "Absent" ? "bg-rose-50 text-rose-600 border-rose-100" : "bg-amber-50 text-amber-600 border-amber-100"}`}
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                  r.status === "Absent"
+                    ? "bg-rose-50 text-rose-600 border-rose-100"
+                    : "bg-amber-50 text-amber-600 border-amber-100"
+                }`}
               >
                 {r.status}
               </span>
@@ -252,12 +267,12 @@ export function RegisterTab({
             </div>
           ))}
           <p className="text-[10px] text-slate-400 pt-1">
-            Parent notifications sent automatically on save.
+            Parent notifications are queued and sent upon clicking "Save".
           </p>
         </div>
       )}
 
-      {/* Save footer */}
+      {/* ── Action Footer ─────────────────────────────────────────────────── */}
       <div className="pb-6">
         <button
           onClick={onSave}
@@ -268,7 +283,7 @@ export function RegisterTab({
           {isPending ? "Saving…" : `Save ${grade} Register`}
         </button>
         <p className="text-center text-[10px] text-slate-400 mt-2">
-          Parents of absent students will be notified automatically
+          Automated SMS/Email alerts will be sent to parents of absent students.
         </p>
       </div>
     </>
