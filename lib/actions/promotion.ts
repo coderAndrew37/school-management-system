@@ -1,16 +1,10 @@
 "use server";
-// lib/actions/promotion.ts
-// CBC grade promotion — end-of-year bulk advancement.
-// Rules:
-//   PP1 → PP2 → Grade 1 → … → Grade 9 (terminal)
-//   Admin + superadmin only; requires explicit UI confirmation
-//   Promotes in reverse grade order to avoid double-promotion
-//   Grade 9 graduates are marked but NOT deleted
 
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/actions/auth";
-import { ALL_GRADES } from "@/lib/types/allocation";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface PromotionResult {
   success: boolean;
@@ -18,6 +12,7 @@ export interface PromotionResult {
   promoted?: number;
   fromGrade?: string;
   toGrade?: string;
+  errors?: string[];
 }
 
 export interface GradeCount {
@@ -26,13 +21,24 @@ export interface GradeCount {
   next: string | null;
 }
 
-// ── Grade progression map ─────────────────────────────────────────────────────
+// ── CBC Standard Progression ──────────────────────────────────────────────────
 
-const NEXT_GRADE: Record<string, string | null> = {};
-for (let i = 0; i < ALL_GRADES.length; i++) {
-  NEXT_GRADE[ALL_GRADES[i]!] = ALL_GRADES[i + 1] ?? null;
-}
+export const CBC_ORDER = [
+  "PP1", "PP2", 
+  "Grade 1", "Grade 2", "Grade 3", 
+  "Grade 4", "Grade 5", "Grade 6", 
+  "Grade 7", "Grade 8", "Grade 9"
+];
 
+const getNextGrade = (current: string): string | null => {
+  const idx = CBC_ORDER.indexOf(current);
+  if (idx === -1 || idx === CBC_ORDER.length - 1) return null;
+  return CBC_ORDER[idx + 1];
+};
+
+/**
+ * Security middleware
+ */
 async function requireAdmin() {
   const session = await getSession();
   if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
@@ -54,129 +60,179 @@ export async function fetchGradesForPromotion(): Promise<GradeCount[]> {
   if (error || !data) return [];
 
   const countMap: Record<string, number> = {};
-  for (const row of data as { current_grade: string }[]) {
+  data.forEach((row) => {
     countMap[row.current_grade] = (countMap[row.current_grade] ?? 0) + 1;
-  }
+  });
 
-  return ALL_GRADES.filter((g) => countMap[g]).map((g) => ({
+  return CBC_ORDER.filter((g) => countMap[g] !== undefined).map((g) => ({
     grade: g,
-    count: countMap[g]!,
-    next: NEXT_GRADE[g] ?? null,
+    count: countMap[g],
+    next: getNextGrade(g),
   }));
 }
 
-// ── Promote a single grade ────────────────────────────────────────────────────
+// ── Promote ALL grades (Bulk End-of-Year) ─────────────────────────────────────
+
+export async function promoteAllGradesAction(targetYear: number): Promise<PromotionResult[]> {
+  await requireAdmin();
+  const supabase = await createSupabaseServerClient();
+
+  // 1. Validate that target classes exist for the new year to avoid orphaned streams
+  const { data: targetClasses } = await supabase
+    .from("classes")
+    .select("grade, stream")
+    .eq("academic_year", targetYear);
+
+  if (!targetClasses || targetClasses.length === 0) {
+    return [{ 
+      success: false, 
+      message: `Aborted: No classes found for the ${targetYear} academic year. Create classes first.` 
+    }];
+  }
+
+  // 2. Fetch active students
+  const { data: students } = await supabase
+    .from("students")
+    .select("id, current_grade, stream")
+    .eq("status", "active");
+
+  if (!students || students.length === 0) {
+    return [{ success: false, message: "No active students found to promote." }];
+  }
+
+  // 3. Group students by grade to handle the reverse-order processing
+  const results: PromotionResult[] = [];
+  const reversedGrades = [...CBC_ORDER].reverse();
+
+  for (const fromGrade of reversedGrades) {
+    const toGrade = getNextGrade(fromGrade);
+    if (!toGrade) continue; // Skip Grade 9 (handled by graduation action)
+
+    const studentsInGrade = students.filter(s => s.current_grade === fromGrade);
+    if (studentsInGrade.length === 0) continue;
+
+    let promotedInThisGrade = 0;
+    const gradeErrors: string[] = [];
+
+    // 4. Process each student to ensure their stream exists in the next grade
+    for (const student of studentsInGrade) {
+      const streamExists = targetClasses.some(
+        c => c.grade === toGrade && c.stream === student.stream
+      );
+
+      if (streamExists) {
+        const { error } = await supabase
+          .from("students")
+          .update({ current_grade: toGrade })
+          .eq("id", student.id);
+        
+        if (!error) promotedInThisGrade++;
+        else gradeErrors.push(`Failed to update student ID ${student.id}`);
+      } else {
+        gradeErrors.push(`Stream "${student.stream}" missing in ${toGrade} for year ${targetYear}.`);
+      }
+    }
+
+    results.push({
+      success: gradeErrors.length === 0,
+      message: promotedInThisGrade > 0 
+        ? `Promoted ${promotedInThisGrade} students: ${fromGrade} → ${toGrade}`
+        : `Skipped ${fromGrade}: No valid target streams found.`,
+      promoted: promotedInThisGrade,
+      fromGrade,
+      toGrade,
+      errors: gradeErrors.length > 0 ? Array.from(new Set(gradeErrors)) : undefined
+    });
+  }
+
+  refreshCache();
+  return results;
+}
+
+// ── Promote Single Grade ──────────────────────────────────────────────────────
 
 export async function promoteGradeAction(
-  fromGrade: string,
+  fromGrade: string, 
+  targetYear: number
 ): Promise<PromotionResult> {
   await requireAdmin();
-
-  if (!ALL_GRADES.includes(fromGrade))
-    return { success: false, message: "Invalid grade specified." };
-
-  const toGrade = NEXT_GRADE[fromGrade];
+  const toGrade = getNextGrade(fromGrade);
+  
   if (!toGrade) {
-    return {
-      success: false,
-      message: `${fromGrade} is the final grade — students here are ready to graduate.`,
-    };
+    return { success: false, message: "Cannot promote terminal grade. Use Graduation." };
   }
 
   const supabase = await createSupabaseServerClient();
 
-  const { count } = await supabase
+  // Verify target streams exist for this specific grade
+  const { data: targetClasses } = await supabase
+    .from("classes")
+    .select("stream")
+    .eq("grade", toGrade)
+    .eq("academic_year", targetYear);
+
+  const { data: students } = await supabase
     .from("students")
-    .select("id", { count: "exact", head: true })
+    .select("id, stream")
     .eq("current_grade", fromGrade)
     .eq("status", "active");
 
-  if (!count || count === 0)
-    return {
-      success: false,
-      message: `No active students found in ${fromGrade}.`,
-    };
-
-  const { error } = await supabase
-    .from("students")
-    .update({ current_grade: toGrade })
-    .eq("current_grade", fromGrade)
-    .eq("status", "active");
-
-  if (error) {
-    console.error("[promoteGrade]", error.message);
-    return { success: false, message: `Failed to promote: ${error.message}` };
+  if (!students || students.length === 0) {
+    return { success: false, message: `No active students in ${fromGrade}.` };
   }
 
-  revalidatePath("/admin/dashboard");
-  revalidatePath("/admin/students");
-  revalidatePath("/admin/promotion");
+  let count = 0;
+  for (const student of students) {
+    if (targetClasses?.some(tc => tc.stream === student.stream)) {
+      const { error } = await supabase
+        .from("students")
+        .update({ current_grade: toGrade })
+        .eq("id", student.id);
+      if (!error) count++;
+    }
+  }
 
+  refreshCache();
   return {
     success: true,
-    message: `${count} student${count !== 1 ? "s" : ""} promoted: ${fromGrade} → ${toGrade}.`,
+    message: `Promoted ${count} students from ${fromGrade} to ${toGrade} (${targetYear}).`,
     promoted: count,
     fromGrade,
-    toGrade,
+    toGrade
   };
 }
 
-// ── Promote ALL grades (end-of-year) ─────────────────────────────────────────
-// Processes in reverse order — Grade 8 → 9 before Grade 7 → 8 — so no
-// student is promoted twice in one operation.
+// ── Graduate Terminal Grade ───────────────────────────────────────────────────
 
-export async function promoteAllGradesAction(): Promise<PromotionResult[]> {
+export async function graduateGradeAction(grade: string): Promise<PromotionResult> {
   await requireAdmin();
+  if (getNextGrade(grade) !== null) {
+    return { success: false, message: "Only Grade 9 can be graduated." };
+  }
+
   const supabase = await createSupabaseServerClient();
 
-  const { data } = await supabase
+  const { count, error } = await supabase
     .from("students")
-    .select("current_grade")
-    .eq("status", "active");
+    .update({ status: "graduated" })
+    .eq("current_grade", grade)
+    .eq("status", "active")
+    .select("id");
 
-  if (!data)
-    return [{ success: false, message: "Could not fetch student data." }];
+  if (error) return { success: false, message: error.message };
 
-  const countMap: Record<string, number> = {};
-  for (const row of data as { current_grade: string }[]) {
-    countMap[row.current_grade] = (countMap[row.current_grade] ?? 0) + 1;
-  }
+  refreshCache();
+  return { 
+    success: true, 
+    message: `${count ?? 0} students from ${grade} marked as graduated.`,
+    promoted: count ?? 0
+  };
+}
 
-  const gradesToPromote = [...ALL_GRADES]
-    .reverse()
-    .filter((g) => countMap[g] && NEXT_GRADE[g] !== null);
+// ── Cache Invalidation ────────────────────────────────────────────────────────
 
-  const results: PromotionResult[] = [];
-
-  for (const fromGrade of gradesToPromote) {
-    const toGrade = NEXT_GRADE[fromGrade]!;
-    const { error } = await supabase
-      .from("students")
-      .update({ current_grade: toGrade })
-      .eq("current_grade", fromGrade)
-      .eq("status", "active");
-
-    results.push(
-      error
-        ? {
-            success: false,
-            message: `Failed to promote ${fromGrade}: ${error.message}`,
-            fromGrade,
-            toGrade,
-          }
-        : {
-            success: true,
-            message: `${countMap[fromGrade]} student${countMap[fromGrade]! !== 1 ? "s" : ""} promoted: ${fromGrade} → ${toGrade}`,
-            promoted: countMap[fromGrade],
-            fromGrade,
-            toGrade,
-          },
-    );
-  }
-
+function refreshCache() {
   revalidatePath("/admin/dashboard");
   revalidatePath("/admin/students");
   revalidatePath("/admin/promotion");
-
-  return results;
 }
