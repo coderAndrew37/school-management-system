@@ -212,10 +212,11 @@ export function GovernanceHub(props: GovernanceHubProps) {
         )}
         {activeTab === "fees" && (
           <FeesPanel
-            feeStructures={props.feeStructures}
-            payments={props.payments}
-            students={props.students}
-          />
+    feeStructures={props.feeStructures}
+    payments={props.payments}
+    students={props.students}
+    classes={props.availableClasses} // Add this line
+  />
         )}
       </div>
     </div>

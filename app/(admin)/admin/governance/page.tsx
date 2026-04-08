@@ -18,6 +18,7 @@ import {
   fetchStudentSummaries,
   fetchGovernanceStats,
   fetchAttendanceOverview,
+  fetchAllClasses, // Added fetcher
 } from "@/lib/data/governance";
 import { GovernanceHub } from "@/app/_components/governance/GovernanceHub";
 
@@ -41,6 +42,7 @@ export default async function GovernancePage() {
     students,
     stats,
     attendanceOverview,
+    availableClasses, // Destructured new data
   ] = await Promise.all([
     fetchAnnouncements(),
     fetchAllEvents(),
@@ -50,6 +52,7 @@ export default async function GovernancePage() {
     fetchStudentSummaries(),
     fetchGovernanceStats(),
     fetchAttendanceOverview(),
+    fetchAllClasses(), // Called fetcher
   ]);
 
   return (
@@ -173,6 +176,7 @@ export default async function GovernancePage() {
           payments={payments}
           students={students}
           attendanceOverview={attendanceOverview}
+          availableClasses={availableClasses} // Prop passed successfully
         />
 
         <footer className="pt-4 border-t border-white/[0.05]">

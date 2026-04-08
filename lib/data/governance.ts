@@ -13,17 +13,24 @@ import type {
   StudentSummary,
   AttendanceOverview,
   AttendanceGradeSummary,
+  AttendanceRecord,
 } from "@/lib/types/governance";
+import { Class } from "../types/allocation";
+
+// ── Types for Internal Data Fetching ─────────────────────────────────────────
+
+interface ClassWithCount {
+  id: string;
+  grade: string;
+  stream: string;
+  students: { count: number }[];
+}
 
 // ── Announcements ─────────────────────────────────────────────────────────────
 
 export async function fetchAnnouncements(): Promise<Announcement[]> {
   const supabase = await createSupabaseServerClient();
 
-  // Fetch announcements without the profiles join — author_id references
-  // auth.users directly, and PostgREST cannot auto-join to public.profiles
-  // until migration 008 (governance_profile_fks) has been applied.
-  // We resolve display names with a second query so this works in all states.
   const { data, error } = await supabase
     .from("announcements")
     .select("*")
@@ -37,12 +44,10 @@ export async function fetchAnnouncements(): Promise<Announcement[]> {
 
   const rows = (data ?? []) as Omit<Announcement, "profiles">[];
 
-  // Collect unique author_ids that are non-null
   const authorIds = [
     ...new Set(rows.map((r) => r.author_id).filter(Boolean)),
   ] as string[];
 
-  // Resolve display names from profiles (best-effort — empty map if it fails)
   const nameMap: Record<string, string> = {};
   if (authorIds.length > 0) {
     const { data: profiles } = await supabase
@@ -122,7 +127,8 @@ export async function fetchFeePayments(
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("fee_payments")
-    .select("*, students(full_name, readable_id, current_grade)")
+    // Aliasing class_id:current_grade for type safety
+    .select("*, students(full_name, readable_id, class_id:current_grade)")
     .eq("academic_year", academicYear)
     .order("created_at", { ascending: false });
 
@@ -137,9 +143,10 @@ export async function fetchFeePayments(
 
 export async function fetchStudentSummaries(): Promise<StudentSummary[]> {
   const supabase = await createSupabaseServerClient();
+  // Fixed: Aliased current_grade to class_id to match StudentSummary interface
   const { data, error } = await supabase
     .from("students")
-    .select("id, full_name, readable_id, current_grade")
+    .select("id, full_name, readable_id, class_id:current_grade")
     .order("current_grade")
     .order("full_name");
 
@@ -156,109 +163,99 @@ export async function fetchAttendanceOverview(
   targetDate?: string,
 ): Promise<AttendanceOverview> {
   const supabase = await createSupabaseServerClient();
-
   const date = targetDate ?? new Date().toISOString().slice(0, 10);
+  
+  const fourteenDaysAgo = new Date();
+  fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 13);
+  const startDateStr = fourteenDaysAgo.toISOString().slice(0, 10);
 
-  // Fetch today's attendance records
-  const [recordsRes, studentsRes] = await Promise.all([
+  const [recordsRes, classesRes, trendRes] = await Promise.all([
     supabase
       .from("attendance_records")
-      .select("student_id, grade, status")
+      .select("student_id, class_id, status")
       .eq("date", date)
       .eq("session", "full_day"),
-    supabase.from("students").select("id, current_grade"),
+    
+    supabase
+      .from("classes")
+      .select(`
+        id, 
+        grade, 
+        stream,
+        students:students(count)
+      `)
+      .eq("academic_year", 2026),
+
+    supabase
+      .from("attendance_records")
+      .select("date, status")
+      .gte("date", startDateStr)
+      .lte("date", date)
+      .eq("session", "full_day"),
   ]);
 
-  const records = (recordsRes.data ?? []) as {
-    student_id: string;
-    grade: string;
-    status: string;
-  }[];
-  const students = (studentsRes.data ?? []) as {
-    id: string;
-    current_grade: string;
-  }[];
+  const records = (recordsRes.data ?? []) as Pick<AttendanceRecord, "student_id" | "class_id" | "status">[];
+  const classRows = (classesRes.data ?? []) as unknown as ClassWithCount[];
+  const trendData = (trendRes.data ?? []) as Pick<AttendanceRecord, "date" | "status">[];
 
-  // Build grade-level enrollment map
-  const gradeEnrollment: Record<string, number> = {};
-  for (const s of students) {
-    gradeEnrollment[s.current_grade] =
-      (gradeEnrollment[s.current_grade] ?? 0) + 1;
-  }
-
-  // Aggregate totals
   const present = records.filter((r) => r.status === "present").length;
   const late = records.filter((r) => r.status === "late").length;
   const absent = records.filter((r) => r.status === "absent").length;
   const excused = records.filter((r) => r.status === "excused").length;
-
-  // Per-grade breakdown
-  const byGradeMap: Record<
-    string,
-    { present: number; late: number; absent: number; excused: number }
-  > = {};
-  for (const r of records) {
-    if (!byGradeMap[r.grade])
-      byGradeMap[r.grade] = { present: 0, late: 0, absent: 0, excused: 0 };
-    if (r.status === "present") byGradeMap[r.grade]!.present++;
-    else if (r.status === "late") byGradeMap[r.grade]!.late++;
-    else if (r.status === "absent") byGradeMap[r.grade]!.absent++;
-    else if (r.status === "excused") byGradeMap[r.grade]!.excused++;
-  }
-
-  const byGrade: AttendanceGradeSummary[] = Object.entries(gradeEnrollment)
-    .map(([grade, total]) => {
-      const g = byGradeMap[grade] ?? {
-        present: 0,
-        late: 0,
-        absent: 0,
-        excused: 0,
-      };
-      const marked = g.present + g.late + g.absent + g.excused;
-      const rate =
-        marked > 0 ? Math.round(((g.present + g.late) / marked) * 100) : 0;
-      return { grade, total, marked, ...g, rate };
-    })
-    .sort((a, b) => a.grade.localeCompare(b.grade));
-
-  // Last 14 days trend
-  const recentDays: AttendanceOverview["recentDays"] = [];
-  for (let i = 13; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const dayStr = d.toISOString().slice(0, 10);
-    const { data: dayRecs } = await supabase
-      .from("attendance_records")
-      .select("status")
-      .eq("date", dayStr)
-      .eq("session", "full_day");
-
-    const recs = (dayRecs ?? []) as { status: string }[];
-    const total = recs.length;
-    const attend = recs.filter(
-      (r) => r.status === "present" || r.status === "late",
-    ).length;
-    recentDays.push({
-      date: dayStr,
-      rate: total > 0 ? Math.round((attend / total) * 100) : 0,
-      marked: total,
-    });
-  }
-
   const totalMarked = records.length;
-  const presentRate =
-    totalMarked > 0 ? Math.round(((present + late) / totalMarked) * 100) : 0;
+  
+  const totalStudents = classRows.reduce((acc, c) => acc + (c.students?.[0]?.count ?? 0), 0);
+  const presentRate = totalMarked > 0 ? Math.round(((present + late) / totalMarked) * 100) : 0;
+
+  const byClass: AttendanceGradeSummary[] = classRows.map((c) => {
+    const classRecords = records.filter((r) => r.class_id === c.id);
+    
+    const stats = {
+      present: classRecords.filter((r) => r.status === "present").length,
+      late: classRecords.filter((r) => r.status === "late").length,
+      absent: classRecords.filter((r) => r.status === "absent").length,
+      excused: classRecords.filter((r) => r.status === "excused").length,
+    };
+    
+    const cMarked = classRecords.length;
+    const cTotal = c.students?.[0]?.count ?? 0;
+    
+    return {
+      class_id: c.id,
+      label: `${c.grade} ${c.stream}`, 
+      total: cTotal,
+      marked: cMarked,
+      ...stats,
+      rate: cMarked > 0 ? Math.round(((stats.present + stats.late) / cMarked) * 100) : 0,
+    };
+  }).sort((a, b) => a.label.localeCompare(b.label));
+
+  const recentDays = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (13 - i));
+    const dayStr = d.toISOString().slice(0, 10);
+    
+    const dayRecs = trendData.filter((r) => r.date === dayStr);
+    const dayTotal = dayRecs.length;
+    const dayAttend = dayRecs.filter((r) => r.status === "present" || r.status === "late").length;
+
+    return {
+      date: dayStr,
+      rate: dayTotal > 0 ? Math.round((dayAttend / dayTotal) * 100) : 0,
+      marked: dayTotal,
+    };
+  });
 
   return {
     date,
-    totalStudents: students.length,
+    totalStudents,
     totalMarked,
     present,
     late,
     absent,
     excused,
     presentRate,
-    byGrade,
+    byClass,
     recentDays,
   };
 }
@@ -290,16 +287,9 @@ export async function fetchGovernanceStats(): Promise<GovernanceStats> {
         .eq("session", "full_day"),
     ]);
 
-  const inventory = (invRes.data ?? []) as {
-    quantity: number;
-    minimum_stock: number;
-  }[];
-  const payments = (paymentsRes.data ?? []) as {
-    amount_due: number;
-    amount_paid: number;
-    status: string;
-  }[];
-  const attend = (attendRes.data ?? []) as { status: string }[];
+  const inventory = (invRes.data ?? []) as Pick<InventoryItem, "quantity" | "minimum_stock">[];
+  const payments = (paymentsRes.data ?? []) as Pick<FeePayment, "amount_due" | "amount_paid" | "status">[];
+  const attend = (attendRes.data ?? []) as Pick<AttendanceRecord, "status">[];
 
   const lowStockItems = inventory.filter(
     (i) => i.quantity <= i.minimum_stock,
@@ -313,7 +303,7 @@ export async function fetchGovernanceStats(): Promise<GovernanceStats> {
   );
   const outstandingFees = payments
     .filter((p) => ["pending", "partial", "overdue"].includes(p.status))
-    .reduce((s, p) => s + Math.max(0, p.amount_due - p.amount_paid), 0);
+    .reduce((s, p) => s + Math.max(0, p.amount_due - (p.amount_paid ?? 0)), 0);
 
   const presentToday = attend.filter(
     (a) => a.status === "present" || a.status === "late",
@@ -334,4 +324,21 @@ export async function fetchGovernanceStats(): Promise<GovernanceStats> {
     absentToday,
     attendanceRate,
   };
+}
+
+export async function fetchAllClasses(): Promise<Class[]> {
+  const supabase = await createSupabaseServerClient();
+  
+  const { data, error } = await supabase
+    .from("classes")
+    .select("id, grade, stream")
+    .order("grade", { ascending: true })
+    .order("stream", { ascending: true });
+
+  if (error) {
+    console.error("[fetchAllClasses]", error.message);
+    return [];
+  }
+
+  return (data ?? []) as Class[];
 }
