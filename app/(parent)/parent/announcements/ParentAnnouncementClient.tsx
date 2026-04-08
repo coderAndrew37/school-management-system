@@ -1,18 +1,14 @@
 "use client";
 
 import { Announcement, SchoolEvent } from "@/lib/types/governance";
-// app/parent/announcements/_components/ParentAnnouncementsClient.tsx
-// Read-only announcements + events calendar for parents.
-
 import {
-  Megaphone,
-  CalendarDays,
   AlertTriangle,
-  Info,
   Bell,
+  CalendarDays,
   ChevronLeft,
+  Info,
+  Megaphone,
 } from "lucide-react";
-import Link from "next/link";
 import { useState } from "react";
 
 interface Props {
@@ -66,7 +62,6 @@ function MonthCalendar({
   const cells: (number | null)[] = Array(startDay).fill(null);
   for (let d = 1; d <= last.getDate(); d++) cells.push(d);
 
-  // Map day → events
   const byDay = new Map<number, SchoolEvent[]>();
   for (const ev of events) {
     const evDate = new Date(ev.start_date + "T00:00:00");
@@ -103,15 +98,17 @@ function MonthCalendar({
           return (
             <div
               key={i}
-              className={`bg-white aspect-square flex flex-col items-center justify-start pt-1 relative ${evs.length > 0 ? "cursor-pointer" : ""}`}
+              className={`bg-white aspect-square flex flex-col items-center justify-start pt-1 relative ${
+                evs.length > 0 ? "cursor-pointer" : ""
+              }`}
             >
               <span
                 className={`text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center ${
                   isToday
                     ? "bg-indigo-600 text-white"
                     : evs.length > 0
-                      ? "text-indigo-700 bg-indigo-50"
-                      : "text-slate-600"
+                    ? "text-indigo-700 bg-indigo-50"
+                    : "text-slate-600"
                 }`}
               >
                 {day}
@@ -142,7 +139,7 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
   const [calMonth, setCalMonth] = useState(now.getMonth());
 
   const activeAnn = announcements.filter(
-    (a) => !a.expires_at || new Date(a.expires_at) > now,
+    (a) => !a.expires_at || new Date(a.expires_at) > now
   );
   const upcomingEvs = events.filter((e) => isUpcoming(e.start_date));
   const thisMonthEvs = events.filter((e) => {
@@ -151,18 +148,8 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
   });
 
   const MONTH_NAMES = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
   ];
 
   function prevMonth() {
@@ -180,7 +167,6 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
 
   return (
     <div className="min-h-screen bg-[#f5f6fa]">
-      {/* Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
           <Bell className="h-5 w-5 text-indigo-500 shrink-0" />
@@ -193,7 +179,6 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
         </div>
       </header>
 
-      {/* Tabs */}
       <div className="bg-white border-b border-slate-200">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 flex">
           {(
@@ -225,7 +210,11 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
               {label}
               {count > 0 && (
                 <span
-                  className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${tab === key ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"}`}
+                  className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${
+                    tab === key
+                      ? "bg-indigo-100 text-indigo-700"
+                      : "bg-slate-100 text-slate-500"
+                  }`}
                 >
                   {count}
                 </span>
@@ -236,7 +225,6 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 sm:px-6 py-5 space-y-4">
-        {/* ── NOTICES ───────────────────────────────────────────────────────── */}
         {tab === "notices" && (
           <>
             {activeAnn.length === 0 ? (
@@ -252,9 +240,7 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
                 <div
                   key={a.id}
                   className={`bg-white rounded-2xl border shadow-sm overflow-hidden ${
-                    a.priority === "urgent"
-                      ? "border-rose-200"
-                      : "border-slate-200"
+                    a.priority === "urgent" ? "border-rose-200" : "border-slate-200"
                   }`}
                 >
                   {a.priority === "urgent" && (
@@ -269,9 +255,7 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
                     <div className="flex items-start gap-3">
                       <div
                         className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
-                          a.priority === "urgent"
-                            ? "bg-rose-50"
-                            : "bg-indigo-50"
+                          a.priority === "urgent" ? "bg-rose-50" : "bg-indigo-50"
                         }`}
                       >
                         {a.priority === "urgent" ? (
@@ -284,9 +268,9 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
                         <p className="text-sm font-black text-slate-800">
                           {a.title}
                         </p>
-                        {a.target_grade && (
+                        {a.classes?.stream && (
                           <span className="inline-block text-[9px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded-lg mt-0.5 mb-1">
-                            {a.target_grade}
+                            {a.classes.stream}
                           </span>
                         )}
                         <p className="text-sm text-slate-600 leading-relaxed mt-1">
@@ -304,10 +288,8 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
           </>
         )}
 
-        {/* ── CALENDAR ──────────────────────────────────────────────────────── */}
         {tab === "calendar" && (
           <>
-            {/* Month navigator */}
             <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <button
@@ -331,7 +313,6 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
               <MonthCalendar year={calYear} month={calMonth} events={events} />
             </div>
 
-            {/* This month's events */}
             {thisMonthEvs.length > 0 && (
               <div className="space-y-2">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">
@@ -350,7 +331,7 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
                         </p>
                         <p className="text-[9px] text-indigo-400 font-bold">
                           {new Date(
-                            e.start_date + "T00:00:00",
+                            e.start_date + "T00:00:00"
                           ).toLocaleDateString("en-KE", { month: "short" })}
                         </p>
                       </div>
@@ -365,8 +346,8 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
                                 badge === "Today"
                                   ? "bg-rose-100 text-rose-600"
                                   : badge === "Tomorrow"
-                                    ? "bg-amber-100 text-amber-600"
-                                    : "bg-indigo-50 text-indigo-600"
+                                  ? "bg-amber-100 text-amber-600"
+                                  : "bg-indigo-50 text-indigo-600"
                               }`}
                             >
                               {badge}
@@ -383,8 +364,6 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
                           {e.end_date &&
                             e.end_date !== e.start_date &&
                             ` – ${formatShort(e.end_date)}`}
-                          {e.target_grades &&
-                            ` · ${e.target_grades.join(", ")}`}
                         </p>
                       </div>
                     </div>
@@ -393,7 +372,6 @@ export function ParentAnnouncementsClient({ announcements, events }: Props) {
               </div>
             )}
 
-            {/* Upcoming (beyond this month) */}
             {upcomingEvs.filter((e) => {
               const d = new Date(e.start_date + "T00:00:00");
               return !(

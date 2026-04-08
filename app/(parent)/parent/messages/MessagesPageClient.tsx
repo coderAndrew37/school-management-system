@@ -6,13 +6,13 @@ import type {
   MessageCategory,
 } from "@/lib/types/parent";
 import { CATEGORY_STYLE } from "@/lib/types/parent";
-import { MessageSquare, Send, ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, MessageSquare } from "lucide-react";
 import { useState } from "react";
 
 interface Props {
   messages: CommMessage[];
   child: ChildWithAssessments;
-  children: ChildWithAssessments[];
+  allChildren: ChildWithAssessments[];
   parentId: string;
 }
 
@@ -57,8 +57,7 @@ function groupByThread(msgs: CommMessage[]): CommMessage[][] {
 export function MessagesPageClient({
   messages,
   child,
-  children,
-  parentId,
+  allChildren,
 }: Props) {
   const [expandedThread, setExpandedThread] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<MessageCategory | "all">(
@@ -105,9 +104,9 @@ export function MessagesPageClient({
               {child.full_name}
             </p>
           </div>
-          {children.length > 1 && (
+          {allChildren.length > 1 && (
             <div className="flex gap-1.5">
-              {children.map((c) => (
+              {allChildren.map((c) => (
                 <a
                   key={c.id}
                   href={`/parent/messages?child=${c.id}`}

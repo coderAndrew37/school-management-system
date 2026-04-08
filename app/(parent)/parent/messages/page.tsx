@@ -23,13 +23,14 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   const childData = await fetchAllChildData(
     activeChild.id,
     activeChild.current_grade,
+    activeChild.grade_label
   );
 
   return (
     <MessagesPageClient
       messages={childData.messages}
       child={activeChild}
-      children={children}
+      allChildren={children}
       parentId={session.user.id}
     />
   );

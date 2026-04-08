@@ -13,7 +13,7 @@ import {
 interface Props {
   feePayments: FeePayment[];
   child: ChildWithAssessments;
-  children: ChildWithAssessments[];
+  allChildren: ChildWithAssessments[];
 }
 
 function formatKES(n: number) {
@@ -67,7 +67,7 @@ function StatusBadge({ status }: { status: PaymentStatus }) {
   );
 }
 
-export function FeesPageClient({ feePayments, child, children }: Props) {
+export function FeesPageClient({ feePayments, child, allChildren }: Props) {
   // Logic updated for new amount_due / amount_paid structure
   const totalPaid = feePayments.reduce((s, f) => s + (f.amount_paid || 0), 0);
   const totalDue = feePayments.reduce((s, f) => s + (f.amount_due || 0), 0);
@@ -96,9 +96,9 @@ export function FeesPageClient({ feePayments, child, children }: Props) {
               {child.full_name}
             </p>
           </div>
-          {children.length > 1 && (
+          {allChildren.length > 1 && (
             <div className="flex gap-1.5">
-              {children.map((c) => (
+              {allChildren.map((c) => (
                 <a
                   key={c.id}
                   href={`/parent/fees?child=${c.id}`}

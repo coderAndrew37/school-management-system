@@ -24,13 +24,14 @@ export default async function FeesPage({ searchParams }: PageProps) {
   const childData = await fetchAllChildData(
     activeChild.id,
     activeChild.current_grade,
+    activeChild.grade_label
   );
 
   return (
     <FeesPageClient
       feePayments={childData.feePayments}
       child={activeChild}
-      children={children}
+      allChildren={children}
     />
   );
 }

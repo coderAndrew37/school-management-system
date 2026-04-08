@@ -2,13 +2,13 @@
 
 // app/parent/reports/ParentReportsClient.tsx
 
-import Link from "next/link";
-import { FileText, Download, Printer, ChevronRight } from "lucide-react";
 import type { ParentReportCard } from "@/lib/data/parent";
 import type { ChildWithAssessments } from "@/lib/types/parent";
+import { Download, FileText, Printer } from "lucide-react";
+import Link from "next/link";
 
 interface Props {
-  children: ChildWithAssessments[];
+  allChildren: ChildWithAssessments[];
   activeChildId: string;
   activeChildName: string;
   activeChildGrade: string;
@@ -72,7 +72,7 @@ function ChildTab({
 }
 
 export function ParentReportsClient({
-  children,
+  allChildren,
   activeChildId,
   activeChildName,
   activeChildGrade,
@@ -106,9 +106,9 @@ export function ParentReportsClient({
           </div>
 
           {/* Child switcher */}
-          {children.length > 1 && (
+          {allChildren.length > 1 && (
             <div className="flex gap-2 flex-wrap">
-              {children.map((child) => (
+              {allChildren.map((child) => (
                 <ChildTab
                   key={child.id}
                   child={child}
@@ -129,7 +129,7 @@ export function ParentReportsClient({
             </div>
             <p className="text-slate-700 font-bold">No reports yet</p>
             <p className="text-sm text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
-              Report cards will appear here once your child's class teacher
+              Report cards will appear here once your child&apos;s class teacher
               publishes them at the end of each term.
             </p>
           </div>
@@ -154,7 +154,7 @@ export function ParentReportsClient({
                       </p>
                       {current.class_teacher_remarks && (
                         <p className="text-xs text-slate-500 mt-1 line-clamp-2 italic">
-                          "{current.class_teacher_remarks}"
+                          &quot;{current.class_teacher_remarks}&quot;
                         </p>
                       )}
                     </div>
@@ -285,7 +285,7 @@ export function ParentReportsClient({
                               </div>
                               {card.class_teacher_remarks && (
                                 <p className="text-[11px] text-slate-500 mt-1 italic line-clamp-1">
-                                  "{card.class_teacher_remarks}"
+                                  &quot;{card.class_teacher_remarks}&quot;
                                 </p>
                               )}
                             </div>
@@ -334,7 +334,7 @@ export function ParentReportsClient({
             <span className="font-bold text-slate-700">View</span> opens the
             report card in a new tab — you can print directly from there.{" "}
             <span className="font-bold text-slate-700">Save</span> downloads a
-            PDF copy to your device. If a term's report is missing, it may not
+            PDF copy to your device. If a term&apos;s report is missing, it may not
             have been published yet by the class teacher.
           </p>
         </div>

@@ -24,13 +24,14 @@ export default async function PathwayPage({ searchParams }: PageProps) {
   const childData = await fetchAllChildData(
     activeChild.id,
     activeChild.current_grade,
+    activeChild.grade_label
   );
 
   return (
     <PathwayPageClient
       pathway={childData.pathway}
       child={activeChild}
-      children={children}
+      allChildren={children}
     />
   );
 }

@@ -88,29 +88,28 @@ const METHOD_LABEL: Partial<Record<PaymentMethod, string>> = {
 interface Props {
   payments: FeePayment[];
   childName: string;
-  childGrade: string;
 }
 
-export function FeeStatusPanel({ payments, childName, childGrade }: Props) {
+export function FeeStatusPanel({ payments, childName }: Props) {
   const sorted = [...payments].sort(
     (a, b) => b.academic_year - a.academic_year || b.term - a.term,
   );
 
-  const totalDue = payments.reduce((s, p) => s + (p.amount_due || 0), 0);
-  const totalPaid = payments.reduce((s, p) => s + (p.amount_paid || 0), 0);
+  const totalDue = payments.reduce((s, p) => s + (Number(p.amount_due) || 0), 0);
+  const totalPaid = payments.reduce((s, p) => s + (Number(p.amount_paid) || 0), 0);
   const totalBalance = totalDue - totalPaid;
 
   const hasArrears = payments.some(
     (p) =>
       ["overdue", "partial"].includes(p.status) &&
-      p.amount_due - p.amount_paid > 0,
+      (Number(p.amount_due) - Number(p.amount_paid)) > 0,
   );
 
   if (payments.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 py-16 text-center">
         <CreditCard className="h-8 w-8 text-slate-300 mb-3" />
-        <p className="font-bold text-slate-500">No fee records yet</p>
+        <p className="font-bold text-slate-500">No fee records for {childName}</p>
         <p className="text-xs text-slate-400 mt-1">
           Fee invoices will appear here once recorded by the school
         </p>
@@ -162,7 +161,7 @@ export function FeeStatusPanel({ payments, childName, childGrade }: Props) {
               Outstanding Balance
             </p>
             <p className="text-[11px] text-red-600 mt-0.5">
-              Please contact the school office to arrange payment. Thank you.
+              Please contact the school office to arrange payment for {childName}.
             </p>
           </div>
         </div>
@@ -175,6 +174,11 @@ export function FeeStatusPanel({ payments, childName, childGrade }: Props) {
           const paid = Number(p.amount_paid) || 0;
           const currentBalance = due - paid;
           const pct = due > 0 ? Math.min(100, (paid / due) * 100) : 0;
+
+          // Resolve class info from the joined students.classes data
+          const recordClass = p.students?.classes 
+            ? `${p.students.classes.grade} ${p.students.classes.stream}` 
+            : "General Fees";
 
           return (
             <div
@@ -194,7 +198,7 @@ export function FeeStatusPanel({ payments, childName, childGrade }: Props) {
                       Term {p.term} · {p.academic_year}
                     </p>
                     <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-tight">
-                      {childGrade}
+                      {recordClass}
                     </p>
                   </div>
                 </div>
@@ -260,7 +264,7 @@ export function FeeStatusPanel({ payments, childName, childGrade }: Props) {
 
                 {p.notes && (
                   <p className="text-[11px] text-slate-500 leading-relaxed border-t border-black/5 pt-2 italic">
-                    "{p.notes}"
+                    &quot;{p.notes}&quot;
                   </p>
                 )}
               </div>

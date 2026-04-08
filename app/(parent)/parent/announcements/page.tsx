@@ -14,10 +14,16 @@ export default async function ParentAnnouncementsPage() {
   const children = await fetchMyChildren();
   if (children.length === 0) redirect("/parent");
 
-  // Announcements are not per-child — fetch from first child's data
+  /** * REFACTOR NOTE: 
+   * We now use 'class_id' (the UUID) instead of 'current_grade' (text).
+   * This aligns with the new schema constraints in public.classes.
+   */
+  if (!children[0]!.class_id) redirect("/parent");
+
   const childData = await fetchAllChildData(
     children[0]!.id,
-    children[0]!.current_grade,
+    children[0]!.class_id,
+    children[0]!.grade_label,
   );
 
   return (

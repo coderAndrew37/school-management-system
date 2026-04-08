@@ -23,13 +23,15 @@ export default async function AttendancePage({ searchParams }: PageProps) {
   const childData = await fetchAllChildData(
     activeChild.id,
     activeChild.current_grade,
+    activeChild.grade_label,
   );
 
   return (
     <AttendancePageClient
       attendance={childData.attendance}
       child={activeChild}
-      children={children}
-    />
+    >
+      {children}
+    </AttendancePageClient>
   );
 }

@@ -21,5 +21,5 @@ export default async function AcademicsPage({ searchParams }: PageProps) {
 
   const activeChild = children.find((c) => c.id === childParam) ?? children[0]!;
 
-  return <AcademicsPageClient child={activeChild} children={children} />;
+  return <AcademicsPageClient child={activeChild} allChildren={children} />;
 }

@@ -60,44 +60,40 @@ const CATEGORY: Record<
 };
 
 const FULL_MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
 ];
 const SHORT_DAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
 interface Props {
   events: SchoolEvent[];
-  childGrade: string;
+  childClassId: string; // Refactored from childGrade
+  childGradeLabel: string; // Keep for display purposes
 }
 
-export function SchoolCalendarView({ events, childGrade }: Props) {
+export function SchoolCalendarView({ events, childClassId, childGradeLabel }: Props) {
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
 
+  // ── Logic: Filtering ──────────────────────────────────────────────────────
   const visible = events.filter((e) => {
     if (!e.is_public) return false;
+    
+    // Check if the event is restricted to specific classes
     if (
-      e.target_grades &&
-      e.target_grades.length > 0 &&
-      !e.target_grades.includes(childGrade)
+      e.target_class_ids &&
+      e.target_class_ids.length > 0 &&
+      !e.target_class_ids.includes(childClassId)
     )
       return false;
+      
     return true;
   });
 
   const cutoff = new Date(today);
   cutoff.setDate(cutoff.getDate() + 90);
+  
   const upcoming = visible
     .filter((e) => {
       const d = new Date(e.start_date + "T00:00:00");
@@ -108,6 +104,7 @@ export function SchoolCalendarView({ events, childGrade }: Props) {
 
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
   const startOffset = (new Date(viewYear, viewMonth, 1).getDay() + 6) % 7;
+  
   const eventDates = new Set(
     visible
       .filter((e) => {
@@ -123,6 +120,7 @@ export function SchoolCalendarView({ events, childGrade }: Props) {
       setViewYear((y) => y - 1);
     } else setViewMonth((m) => m - 1);
   };
+  
   const nextMonth = () => {
     if (viewMonth === 11) {
       setViewMonth(0);
@@ -153,8 +151,8 @@ export function SchoolCalendarView({ events, childGrade }: Props) {
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
+        
         <div className="p-3">
-          {/* Day headers */}
           <div className="grid grid-cols-7 mb-1">
             {SHORT_DAYS.map((d, i) => (
               <div
@@ -165,7 +163,7 @@ export function SchoolCalendarView({ events, childGrade }: Props) {
               </div>
             ))}
           </div>
-          {/* Day cells */}
+          
           <div className="grid grid-cols-7 gap-1">
             {Array.from({ length: startOffset }).map((_, i) => (
               <div key={`e${i}`} />
@@ -176,6 +174,7 @@ export function SchoolCalendarView({ events, childGrade }: Props) {
               const isToday = ds === today.toISOString().slice(0, 10);
               const hasEvent = eventDates.has(day);
               const isWeek = (startOffset + i) % 7 >= 5;
+              
               return (
                 <div
                   key={day}
@@ -203,14 +202,9 @@ export function SchoolCalendarView({ events, childGrade }: Props) {
               );
             })}
           </div>
-          {/* Legend */}
+
           <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-slate-100">
-            {(
-              Object.entries(CATEGORY) as [
-                EventCategory,
-                (typeof CATEGORY)[EventCategory],
-              ][]
-            )
+            {(Object.entries(CATEGORY) as [EventCategory, typeof CATEGORY[EventCategory]][])
               .filter(([cat]) => visible.some((e) => e.category === cat))
               .map(([cat, s]) => (
                 <span
@@ -228,9 +222,9 @@ export function SchoolCalendarView({ events, childGrade }: Props) {
       {/* ── Upcoming list ─────────────────────────────────────────────────── */}
       <div>
         <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">
-          Next 90 days · {upcoming.length} event
-          {upcoming.length !== 1 ? "s" : ""}
+          Next 90 days · {upcoming.length} event{upcoming.length !== 1 ? "s" : ""}
         </p>
+        
         {upcoming.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 py-10 text-center">
             <CalendarDays className="h-8 w-8 text-slate-300 mb-3" />
@@ -243,10 +237,9 @@ export function SchoolCalendarView({ events, childGrade }: Props) {
             {upcoming.map((event) => {
               const cat = CATEGORY[event.category];
               const startDate = new Date(event.start_date + "T00:00:00");
-              const isToday_ =
-                event.start_date === today.toISOString().slice(0, 10);
-              const isMultiDay =
-                event.end_date && event.end_date !== event.start_date;
+              const isToday_ = event.start_date === today.toISOString().slice(0, 10);
+              const isMultiDay = event.end_date && event.end_date !== event.start_date;
+              
               return (
                 <div
                   key={event.id}
@@ -256,7 +249,6 @@ export function SchoolCalendarView({ events, childGrade }: Props) {
                       : "border-slate-200 bg-white hover:border-slate-300"
                   }`}
                 >
-                  {/* Date block */}
                   <div
                     className={[
                       "flex-shrink-0 flex flex-col items-center justify-center rounded-xl w-12 h-12 border",
@@ -265,30 +257,20 @@ export function SchoolCalendarView({ events, childGrade }: Props) {
                         : "border-slate-200 bg-slate-50 text-slate-700",
                     ].join(" ")}
                   >
-                    <p
-                      className={`text-[9px] uppercase tracking-widest leading-none ${isToday_ ? "text-blue-200" : "text-slate-400"}`}
-                    >
-                      {startDate.toLocaleDateString("en-KE", {
-                        month: "short",
-                      })}
+                    <p className={`text-[9px] uppercase tracking-widest leading-none ${isToday_ ? "text-blue-200" : "text-slate-400"}`}>
+                      {startDate.toLocaleDateString("en-KE", { month: "short" })}
                     </p>
                     <p className="text-xl font-black leading-none tabular-nums mt-0.5">
                       {startDate.getDate()}
                     </p>
                   </div>
-                  {/* Details */}
+
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${cat.bg} ${cat.border} ${cat.text}`}
-                      >
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${cat.bg} ${cat.border} ${cat.text}`}>
                         {cat.label}
                       </span>
-                      {isToday_ && (
-                        <span className="text-[10px] font-black text-blue-600">
-                          Today!
-                        </span>
-                      )}
+                      {isToday_ && <span className="text-[10px] font-black text-blue-600">Today!</span>}
                     </div>
                     <p className="text-sm font-black text-slate-800 leading-snug">
                       {event.title}
@@ -299,10 +281,7 @@ export function SchoolCalendarView({ events, childGrade }: Props) {
                           <Clock className="h-3 w-3" />
                           {isMultiDay
                             ? `${startDate.toLocaleDateString("en-KE", { day: "numeric", month: "short" })} – ${new Date(event.end_date! + "T00:00:00").toLocaleDateString("en-KE", { day: "numeric", month: "short" })}`
-                            : event.start_time?.slice(0, 5) +
-                              (event.end_time
-                                ? ` – ${event.end_time.slice(0, 5)}`
-                                : "")}
+                            : `${event.start_time?.slice(0, 5)}${event.end_time ? ` – ${event.end_time.slice(0, 5)}` : ""}`}
                         </span>
                       )}
                       {event.location && (

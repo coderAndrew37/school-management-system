@@ -28,6 +28,7 @@ export default async function GalleryPage({ searchParams }: PageProps) {
   const childData = await fetchAllChildData(
     activeChild.id,
     activeChild.current_grade,
+    activeChild.grade_label
   );
 
   return (

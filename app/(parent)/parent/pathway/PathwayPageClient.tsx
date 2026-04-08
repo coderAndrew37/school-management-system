@@ -7,10 +7,10 @@ import { Compass } from "lucide-react";
 interface Props {
   pathway: JssPathway | null;
   child: ChildWithAssessments;
-  children: ChildWithAssessments[];
+  allChildren: ChildWithAssessments[];
 }
 
-export function PathwayPageClient({ pathway, child, children }: Props) {
+export function PathwayPageClient({ pathway, child, allChildren }: Props) {
   const cluster = pathway
     ? JSS_PATHWAY_CLUSTERS[pathway.pathway_cluster]
     : null;
@@ -26,9 +26,9 @@ export function PathwayPageClient({ pathway, child, children }: Props) {
               {child.full_name}
             </p>
           </div>
-          {children.length > 1 && (
+          {allChildren.length > 1 && (
             <div className="flex gap-1.5">
-              {children.map((c) => (
+              {allChildren.map((c) => (
                 <a
                   key={c.id}
                   href={`/parent/pathway?child=${c.id}`}
@@ -52,7 +52,7 @@ export function PathwayPageClient({ pathway, child, children }: Props) {
             <p className="text-4xl mb-3">🧭</p>
             <p className="text-slate-700 font-bold">No pathway guidance yet</p>
             <p className="text-xs text-slate-400 mt-2 max-w-xs mx-auto leading-relaxed">
-              {child.full_name}'s class teacher will complete the JSS pathway
+              {child.full_name}&apos;s class teacher will complete the JSS pathway
               assessment and the guidance will appear here.
             </p>
           </div>
@@ -159,7 +159,7 @@ export function PathwayPageClient({ pathway, child, children }: Props) {
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-lg">🤖</span>
                   <p className="text-xs font-black uppercase tracking-wider text-violet-600">
-                    Teacher's Guidance Notes
+                    Teacher&apos;s Guidance Notes
                   </p>
                 </div>
                 <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">
@@ -171,7 +171,7 @@ export function PathwayPageClient({ pathway, child, children }: Props) {
             {/* Info note */}
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center">
               <p className="text-xs text-slate-500 leading-relaxed">
-                This pathway guidance is based on your child's interests,
+                This pathway guidance is based on your child&apos;s interests,
                 strengths, and performance. Speak with their class teacher for
                 more information.
               </p>

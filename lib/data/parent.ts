@@ -178,6 +178,7 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
     class_id: null,
     current_grade: row.current_grade,
     current_stream: row.current_stream || "Main",
+    grade_label: row.current_grade,
     parent_id: primaryParent?.id ?? null,
     created_at: row.created_at,
     photo_url: row.photo_url ?? null,
@@ -205,6 +206,7 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
         created_at: r.created_at,
       }),
     ),
+    
   };
 }
 

@@ -11,7 +11,7 @@ import { useState } from "react";
 
 interface Props {
   child: ChildWithAssessments;
-  children: ChildWithAssessments[];
+  allChildren: ChildWithAssessments[];
 }
 
 const SCORE_STYLES: Record<
@@ -120,7 +120,7 @@ function deriveCompetencies(
     .sort((a, b) => b.avg - a.avg);
 }
 
-export function AcademicsPageClient({ child, children }: Props) {
+export function AcademicsPageClient({ child, allChildren }: Props) {
   const [activeTerm, setActiveTerm] = useState<0 | 1 | 2 | 3>(0); // 0 = all
 
   const allAssessments = child.assessments;
@@ -171,9 +171,9 @@ export function AcademicsPageClient({ child, children }: Props) {
               {child.full_name} · {child.current_grade}
             </p>
           </div>
-          {children.length > 1 && (
+          {allChildren.length > 1 && (
             <div className="flex gap-1.5">
-              {children.map((c) => (
+              {allChildren.map((c) => (
                 <a
                   key={c.id}
                   href={`/parent/academics?child=${c.id}`}
@@ -218,7 +218,7 @@ export function AcademicsPageClient({ child, children }: Props) {
                 Term {activeTerm} Report Card
               </p>
               <p className="text-[10px] text-slate-400 mt-0.5">
-                Download your child's official CBC report
+                Download your child&apos;s official CBC report
               </p>
             </div>
             <DownloadReportButton
@@ -388,7 +388,7 @@ export function AcademicsPageClient({ child, children }: Props) {
                   {a.teacher_remarks && (
                     <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
                       <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">
-                        Teacher's Remarks
+                        Teacher&apos;s Remarks
                       </p>
                       <p className="text-xs text-slate-600 leading-relaxed">
                         {a.teacher_remarks}

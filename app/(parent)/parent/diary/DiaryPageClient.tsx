@@ -16,7 +16,7 @@ import { useState } from "react";
 interface Props {
   diary: TeacherDiaryEntry[];
   child: ChildWithAssessments;
-  children: ChildWithAssessments[];
+  allChildren: ChildWithAssessments[];
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -33,7 +33,7 @@ function formatDate(iso: string) {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function DiaryPageClient({ diary, child, children }: Props) {
+export function DiaryPageClient({ diary, child, allChildren }: Props) {
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<string | null>(diary[0]?.id ?? null);
 
@@ -73,9 +73,9 @@ export function DiaryPageClient({ diary, child, children }: Props) {
             </p>
           </div>
 
-          {children.length > 1 && (
+          {allChildren.length > 1 && (
             <div className="flex gap-1.5">
-              {children.map((c) => (
+              {allChildren.map((c) => (
                 <a
                   key={c.id}
                   href={`/parent/diary?child=${c.id}`}

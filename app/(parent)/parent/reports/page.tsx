@@ -46,7 +46,7 @@ export default async function ParentReportsPage({ searchParams }: Props) {
 
   return (
     <ParentReportsClient
-      children={children}
+      allChildren={children}
       activeChildId={activeChild.id}
       activeChildName={activeChild.full_name}
       activeChildGrade={activeChild.current_grade}

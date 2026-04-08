@@ -119,6 +119,9 @@ interface Props {
 export function ParentPortalHub({ child, data, senderRole }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>("notifications");
 
+  const now = new Date();
+  const todayAtMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
   // ── Badges ────────────────────────────────────────────────────────────────
   const unreadNotifs = data.notifications.filter((n) => !n.is_read).length;
 
@@ -126,24 +129,22 @@ export function ParentPortalHub({ child, data, senderRole }: Props) {
     (m) => !m.is_read && m.sender_role !== senderRole,
   ).length;
 
-  // FIXED: Updated to check entry_type === "homework" and use new date logic
   const homeworkDue = data.diary.filter((e) => {
     const isHw = e.entry_type === "homework";
     if (!isHw || !e.due_date) return false;
 
-    const dueDate = new Date(e.due_date + "T00:00:00");
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const diffDays = (dueDate.getTime() - today.getTime()) / 86400000;
-    return dueDate >= today && diffDays <= 3;
+    const dueDate = new Date(e.due_date + "T00:00:00").getTime();
+    const diffDays = (dueDate - todayAtMidnight) / 86400000;
+    
+    return dueDate >= todayAtMidnight && diffDays <= 3;
   }).length;
 
   const urgentAnnouncements = (data.announcements ?? []).filter((a) => {
-    if (a.expires_at && new Date(a.expires_at) < new Date()) return false;
+    if (a.expires_at && new Date(a.expires_at) < now) return false;
     if (a.audience === "teachers") return false;
-    if (a.audience === "grade" && a.target_grade !== child.current_grade)
+    if (a.audience === "grade" && a.target_class_id !== child.class_id)
       return false;
+      
     return a.priority === "urgent" || a.priority === "high";
   }).length;
 
@@ -152,8 +153,8 @@ export function ParentPortalHub({ child, data, senderRole }: Props) {
   ).length;
 
   const soonEvents = (data.events ?? []).filter((e) => {
-    const diff =
-      (new Date(e.start_date + "T00:00:00").getTime() - Date.now()) / 86400000;
+    const eventTime = new Date(e.start_date + "T00:00:00").getTime();
+    const diff = (eventTime - now.getTime()) / 86400000;
     return diff >= 0 && diff <= 7;
   }).length;
 
@@ -267,23 +268,23 @@ export function ParentPortalHub({ child, data, senderRole }: Props) {
             grade={child.current_grade}
           />
         )}
-        {activeTab === "announcements" && (
+        {activeTab === "announcements" && child.class_id && (
           <AnnouncementsView
             announcements={data.announcements ?? []}
-            childGrade={child.current_grade}
+            childClassId={child.class_id}
           />
         )}
-        {activeTab === "events" && (
+        {activeTab === "events" && child.class_id && (
           <SchoolCalendarView
             events={data.events ?? []}
-            childGrade={child.current_grade}
+            childClassId={child.class_id}
+            childGradeLabel={child.current_grade}
           />
         )}
         {activeTab === "fees" && (
           <FeeStatusPanel
             payments={data.feePayments ?? []}
             childName={child.full_name}
-            childGrade={child.current_grade}
           />
         )}
       </div>
