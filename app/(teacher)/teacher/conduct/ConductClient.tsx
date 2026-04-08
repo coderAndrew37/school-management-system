@@ -88,6 +88,53 @@ export function ConductClient({
   // ── Secondary mutations ───────────────────────────────────────────────────
   const [isMutating, startMutation] = useTransition();
 
+  // ── Mutation handlers (Moved Up to fix Hoisting/Access Error) ─────────────
+
+  function flash(msg: string, ok: boolean) {
+    setToast({ msg, ok });
+    setTimeout(() => setToast(null), 3500);
+  }
+
+  function handleNotify(id: string) {
+    startMutation(async () => {
+      const res = await notifyParentConductAction(id);
+      if (res.success) {
+        setRecords((prev) =>
+          prev.map((r) => (r.id === id ? { ...r, parent_notified: true } : r)),
+        );
+        flash("Parent notified.", true);
+      } else {
+        flash(res.message, false);
+      }
+    });
+  }
+
+  function handleDelete(id: string) {
+    startMutation(async () => {
+      const res = await deleteConductRecordAction(id);
+      if (res.success) {
+        setRecords((prev) => prev.filter((r) => r.id !== id));
+        flash("Record deleted.", true);
+      } else {
+        flash(res.message, false);
+      }
+    });
+  }
+
+  function handleResolve(id: string) {
+    startMutation(async () => {
+      const res = await updateConductRecordAction(id, { is_resolved: true });
+      if (res.success) {
+        setRecords((prev) =>
+          prev.map((r) => (r.id === id ? { ...r, is_resolved: true } : r)),
+        );
+        flash("Marked as resolved.", true);
+      } else {
+        flash(res.message, false);
+      }
+    });
+  }
+
   // ── React to action state ─────────────────────────────────────────────────
   useEffect(() => {
     if (state.status === "idle") return;
@@ -142,56 +189,8 @@ export function ConductClient({
     }
   }, [state]);
 
-  // ── Mutation handlers ─────────────────────────────────────────────────────
-
-  function flash(msg: string, ok: boolean) {
-    setToast({ msg, ok });
-    setTimeout(() => setToast(null), 3500);
-  }
-
-  function handleNotify(id: string) {
-    startMutation(async () => {
-      const res = await notifyParentConductAction(id);
-      if (res.success) {
-        setRecords((prev) =>
-          prev.map((r) => (r.id === id ? { ...r, parent_notified: true } : r)),
-        );
-        flash("Parent notified.", true);
-      } else {
-        flash(res.message, false);
-      }
-    });
-  }
-
-  function handleDelete(id: string) {
-    startMutation(async () => {
-      const res = await deleteConductRecordAction(id);
-      if (res.success) {
-        setRecords((prev) => prev.filter((r) => r.id !== id));
-        flash("Record deleted.", true);
-      } else {
-        flash(res.message, false);
-      }
-    });
-  }
-
-  function handleResolve(id: string) {
-    startMutation(async () => {
-      const res = await updateConductRecordAction(id, { is_resolved: true });
-      if (res.success) {
-        setRecords((prev) =>
-          prev.map((r) => (r.id === id ? { ...r, is_resolved: true } : r)),
-        );
-        flash("Marked as resolved.", true);
-      } else {
-        flash(res.message, false);
-      }
-    });
-  }
-
   // ── Derived / memoised ────────────────────────────────────────────────────
 
-  // Now using selectedClass.id (UUID) to lookup from the map
   const students = useMemo(
     () => (selectedClass ? (studentsByClass[selectedClass.id] ?? []) : []),
     [selectedClass, studentsByClass],
@@ -273,7 +272,7 @@ export function ConductClient({
 
       {toast && (
         <div
-          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-bold shadow-xl ${
+          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-bold shadow-xl animate-in fade-in slide-in-from-top-2 duration-300 ${
             toast.ok ? "bg-emerald-600 text-white" : "bg-rose-500 text-white"
           }`}
         >

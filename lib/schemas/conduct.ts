@@ -1,11 +1,10 @@
-// lib/schemas/conduct.ts
 // Single source of truth for conduct validation.
 // Imported by the server action (lib/actions/conduct.ts) and the client
 // components. Nothing in this file touches the DOM or the database.
 
 import { z } from "zod";
 
-// ── Enums — iterate these in the UI instead of duplicating string literals ────
+// ── Enums ───────────────────────────────────────────────────────────────────
 
 export const CONDUCT_TYPES = ["merit", "demerit", "incident"] as const;
 export const CONDUCT_CATEGORIES = [
@@ -22,9 +21,7 @@ export type ConductType = (typeof CONDUCT_TYPES)[number];
 export type ConductCategory = (typeof CONDUCT_CATEGORIES)[number];
 export type Severity = (typeof SEVERITIES)[number];
 
-// ── Core schema ───────────────────────────────────────────────────────────────
-// Points arrive as a positive integer; the action applies the sign based on type.
-// grade / stream are denormalised onto the record so the feed never needs a join.
+// ── Core schema ──────────────────────────────────────────────────────────────
 
 export const conductSchema = z.object({
   student_id: z.string().uuid("Please select a student."),
@@ -43,14 +40,13 @@ export const conductSchema = z.object({
   severity: z.enum(SEVERITIES).optional().nullable(),
 });
 
-// Inferred types — import these instead of writing them by hand.
+// Inferred types
 export type ConductInput = z.input<typeof conductSchema>;
 export type ConductData = z.output<typeof conductSchema>;
 
 // ── ActionState ───────────────────────────────────────────────────────────────
 // Discriminated union consumed by useActionState in the client.
-// The success arm echoes the full parsed data back so the client can build an
-// optimistic record without a round-trip fetch.
+// We keep this here to avoid the "Export doesn't exist" error in Server Actions.
 
 export type ActionState =
   | { status: "idle" }
@@ -62,7 +58,7 @@ export type ActionState =
   | {
       status: "success";
       message: string;
-      id: string;
-      data: ConductData;
-      studentName: string;
+      id: string;          // Database ID of the created record
+      data: ConductData;   // Parsed data for optimistic updates
+      studentName: string; // Fetched name for immediate UI display
     };

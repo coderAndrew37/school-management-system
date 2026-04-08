@@ -1,9 +1,9 @@
 "use server";
-// lib/actions/conduct.ts
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+// Import ONLY what we need for logic
 import {
   conductSchema,
   type ActionState,
@@ -14,13 +14,13 @@ import {
   type Severity,
 } from "@/lib/schemas/conduct";
 
-// ── Re-exports ────────────────────────────────────────────────────────────────
-// Components import types from here so they only need one import path.
+// ── REMOVED RE-EXPORTS ────────────────────────────────────────────────────────
+// Do not export types/interfaces from "use server" files.
+// Components should import these from @/lib/schemas/conduct instead.
 
-export type { ActionState, ConductType, ConductCategory, Severity };
-
-// ── Public types ──────────────────────────────────────────────────────────────
-
+// ── Public interfaces (Can stay if NOT exported, or move to schema file) ──────
+// NOTE: I am keeping these here but ensuring they are used for internal typing. 
+// If you need ConductRecord in your components, move this definition to @/lib/schemas/conduct.
 export interface ConductRecord {
   id: string;
   student_id: string;
@@ -47,26 +47,18 @@ export interface SimpleActionResult {
   message: string;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function signedPoints(type: ConductType, raw: number): number {
-  if (type === "merit") return Math.abs(raw);
-  if (type === "demerit") return -Math.abs(raw);
-  return 0;
+interface StudentNameJoin {
+  full_name: string;
 }
 
 // ── Create record ─────────────────────────────────────────────────────────────
-// Signature matches useActionState: (prevState, formData) => Promise<ActionState>
 
 export async function createConductRecordAction(
   _prevState: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-    error: authErr,
-  } = await supabase.auth.getUser();
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
 
   if (authErr || !user) {
     return { status: "error", message: "Not authenticated.", fieldErrors: {} };
@@ -78,12 +70,12 @@ export async function createConductRecordAction(
     stream: formData.get("stream") as string,
     academic_year: formData.get("academic_year") as string,
     term: formData.get("term") as string,
-    type: formData.get("type") as string,
-    category: formData.get("category") as string,
+    type: formData.get("type") as ConductType, 
+    category: formData.get("category") as ConductCategory,
     points: formData.get("points") as string,
     description: formData.get("description") as string,
     action_taken: (formData.get("action_taken") as string) || null,
-    severity: (formData.get("severity") as string) || null,
+    severity: (formData.get("severity") as Severity) || null,
   };
 
   const parsed = conductSchema.safeParse(raw);
@@ -92,20 +84,17 @@ export async function createConductRecordAction(
     return {
       status: "error",
       message: "Please fix the errors below.",
-      fieldErrors: parsed.error.flatten().fieldErrors as Partial<
-        Record<keyof ConductData, string[]>
-      >,
+      fieldErrors: parsed.error.flatten().fieldErrors as Partial<Record<keyof ConductData, string[]>>,
     };
   }
 
   const d = parsed.data;
 
-  // Fetch the student name once so the action can echo it back for optimistic UI.
   const { data: studentRow } = await supabase
     .from("students")
     .select("full_name")
     .eq("id", d.student_id)
-    .single<{ full_name: string }>();
+    .single<StudentNameJoin>();
 
   const studentName = studentRow?.full_name ?? "Unknown";
 
@@ -144,18 +133,12 @@ export async function createConductRecordAction(
 
   return {
     status: "success",
-    message: `${TYPE_LABELS[d.type]} record saved.`,
+    message: `${TYPE_LABELS[d.type]} record saved for ${studentName}.`,
     id: record.id,
     data: d,
     studentName,
   };
 }
-
-const TYPE_LABELS: Record<ConductType, string> = {
-  merit: "Merit",
-  demerit: "Demerit",
-  incident: "Incident",
-};
 
 // ── Update record ─────────────────────────────────────────────────────────────
 
@@ -164,12 +147,8 @@ export async function updateConductRecordAction(
   patch: Partial<Pick<ConductRecord, "action_taken" | "is_resolved">>,
 ): Promise<SimpleActionResult> {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-    error: authErr,
-  } = await supabase.auth.getUser();
-  if (authErr || !user)
-    return { success: false, message: "Not authenticated." };
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, message: "Not authenticated." };
 
   const { error } = await supabase
     .from("student_conduct")
@@ -188,12 +167,8 @@ export async function deleteConductRecordAction(
   id: string,
 ): Promise<SimpleActionResult> {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-    error: authErr,
-  } = await supabase.auth.getUser();
-  if (authErr || !user)
-    return { success: false, message: "Not authenticated." };
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, message: "Not authenticated." };
 
   const { error } = await supabase
     .from("student_conduct")
@@ -212,42 +187,29 @@ export async function notifyParentConductAction(
   recordId: string,
 ): Promise<SimpleActionResult> {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-    error: authErr,
-  } = await supabase.auth.getUser();
-  if (authErr || !user)
-    return { success: false, message: "Not authenticated." };
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, message: "Not authenticated." };
 
-  type RecordRow = {
-    id: string;
-    student_id: string;
-    type: ConductType;
-    description: string;
-    severity: Severity | null;
-    students: { full_name: string } | null;
-  };
+  interface RecordWithStudent extends Pick<ConductRecord, 'id'|'student_id'|'type'|'description'|'severity'> {
+    students: StudentNameJoin | null;
+  }
 
   const { data: record, error: fetchErr } = await supabaseAdmin
     .from("student_conduct")
-    .select(
-      "id, student_id, type, description, severity, students ( full_name )",
-    )
+    .select("id, student_id, type, description, severity, students ( full_name )")
     .eq("id", recordId)
-    .single<RecordRow>();
+    .single<RecordWithStudent>();
 
-  if (fetchErr || !record)
-    return { success: false, message: "Record not found." };
+  if (fetchErr || !record) return { success: false, message: "Record not found." };
 
   const studentName = record.students?.full_name ?? "your child";
-  const emoji =
-    record.type === "merit" ? "🏅" : record.type === "incident" ? "⚠️" : "📋";
-  const title =
-    record.type === "merit"
-      ? `${emoji} Merit awarded — ${studentName}`
-      : record.type === "incident"
-        ? `${emoji} Incident report — ${studentName}`
-        : `${emoji} Demerit issued — ${studentName}`;
+  const emoji = record.type === "merit" ? "🏅" : record.type === "incident" ? "⚠️" : "📋";
+  
+  const title = record.type === "merit"
+    ? `${emoji} Merit awarded — ${studentName}`
+    : record.type === "incident"
+      ? `${emoji} Incident report — ${studentName}`
+      : `${emoji} Demerit issued — ${studentName}`;
 
   const { error: notifErr } = await supabaseAdmin.from("notifications").insert({
     student_id: record.student_id,
@@ -270,9 +232,6 @@ export async function notifyParentConductAction(
 }
 
 // ── Fetch records ─────────────────────────────────────────────────────────────
-// Queries by grade strings — matches the original action's data shape.
-// If you migrate to class_id FK on student_conduct, swap .in("grade", grades)
-// for .in("class_id", classIds) and update the caller accordingly.
 
 export async function fetchConductRecordsAction(
   grades: string[],
@@ -280,12 +239,11 @@ export async function fetchConductRecordsAction(
   term: number = 1,
 ): Promise<ConductRecord[]> {
   if (grades.length === 0) return [];
-
   const supabase = await createSupabaseServerClient();
 
-  type RawRow = Omit<ConductRecord, "student_name"> & {
-    students: { full_name: string } | null;
-  };
+  interface RawConductRow extends Omit<ConductRecord, 'student_name'> {
+    students: StudentNameJoin | null;
+  }
 
   const { data, error } = await supabase
     .from("student_conduct")
@@ -294,18 +252,31 @@ export async function fetchConductRecordsAction(
     .eq("academic_year", academicYear)
     .eq("term", term)
     .order("created_at", { ascending: false })
-    .limit(200)
-    .returns<RawRow[]>();
+    .limit(200);
 
   if (error) {
     console.error("[fetchConductRecordsAction]", error.message);
     return [];
   }
 
-  return (data ?? []).map(
-    ({ students, ...rest }): ConductRecord => ({
-      ...rest,
-      student_name: students?.full_name ?? "Unknown",
-    }),
-  );
+  const rows = (data as unknown) as RawConductRow[];
+
+  return rows.map((row): ConductRecord => ({
+    ...row,
+    student_name: row.students?.full_name ?? "Unknown",
+  }));
+}
+
+// ── Logic Helpers ───────────────────────────────────────────────────────────
+
+const TYPE_LABELS: Record<ConductType, string> = {
+  merit: "Merit",
+  demerit: "Demerit",
+  incident: "Incident",
+};
+
+function signedPoints(type: ConductType, raw: number): number {
+  if (type === "merit") return Math.abs(raw);
+  if (type === "demerit") return -Math.abs(raw);
+  return 0;
 }

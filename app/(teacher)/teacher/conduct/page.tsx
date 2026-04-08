@@ -4,6 +4,7 @@ import { fetchMyClassTeacherAssignments } from "@/lib/actions/class-teacher";
 import {
   fetchTeacherAssessmentAllocations,
   fetchClassStudents,
+  type ClassStudent,
 } from "@/lib/data/assessment";
 import { fetchConductRecordsAction } from "@/lib/actions/conduct";
 import { getActiveTermYear } from "@/lib/utils/settings";
@@ -11,15 +12,26 @@ import { ConductClient } from "./ConductClient";
 import { type ClassInfo } from "./_components/ConductForm";
 
 export const metadata = { title: "Conduct & Merits | Kibali Teacher" };
+
+// Ensure we always have the freshest conduct data on load
 export const revalidate = 0;
+
+// Internal interface to resolve the missing 'id' type from assignments
+interface AssignmentClass {
+  id: string;
+  grade: string;
+  stream: string | null;
+}
 
 export default async function ConductPage() {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  
   if (!user) redirect("/login");
 
+  // Fetch teacher profile
   const { data: teacher } = await supabase
     .from("teachers")
     .select("id, full_name")
@@ -30,19 +42,23 @@ export default async function ConductPage() {
 
   const { term, academicYear } = await getActiveTermYear();
 
+  // 1. Fetch all possible class sources in parallel
   const [assignment, allocations] = await Promise.all([
     fetchMyClassTeacherAssignments(),
     fetchTeacherAssessmentAllocations(teacher.id, academicYear),
   ]);
 
-  // Use the exported ClassInfo type to ensure consistency with the form
+  // 2. Aggregate unique classes using a Map to prevent duplicates
   const classesMap = new Map<string, ClassInfo>();
 
   /**
-   * Handle assignments from fetchMyClassTeacherAssignments
-   * Explicitly storing grade and stream for the new DB schema
+   * Safely handle assignments. 
+   * Casting the array type here is the safe alternative to 'any' 
+   * when the external lib type is too narrow.
    */
-  assignment?.classes?.forEach((c: any) => {
+  const teacherClasses = (assignment?.classes as unknown as AssignmentClass[]) || [];
+
+  teacherClasses.forEach((c) => {
     if (c.id) {
       classesMap.set(c.id, {
         id: c.id,
@@ -52,10 +68,7 @@ export default async function ConductPage() {
     }
   });
 
-  /**
-   * Handle allocations using the TeacherAllocationSummary interface
-   * This ensures subject teachers also see their specific classes
-   */
+  // From Subject Teacher allocations
   allocations.forEach((a) => {
     classesMap.set(a.classId, {
       id: a.classId,
@@ -66,7 +79,7 @@ export default async function ConductPage() {
 
   const classes = Array.from(classesMap.values());
 
-  // Early return with empty state if no classes are found
+  // Early return if teacher has no classes assigned
   if (classes.length === 0) {
     return (
       <ConductClient
@@ -80,21 +93,18 @@ export default async function ConductPage() {
     );
   }
 
-  const studentsByClass: Record<
-    string,
-    Awaited<ReturnType<typeof fetchClassStudents>>
-  > = {};
-
   const classIds = classes.map((c) => c.id);
 
-  // Parallel fetching of students for all assigned classes
-  await Promise.all(
-    classIds.map(async (id) => {
-      studentsByClass[id] = await fetchClassStudents(id);
-    }),
-  );
+  // 3. Fetch students and conduct records in parallel
+  const studentsByClass: Record<string, ClassStudent[]> = {};
 
-  const records = await fetchConductRecordsAction(classIds, academicYear, term);
+  const [records] = await Promise.all([
+    fetchConductRecordsAction(classIds, academicYear, term),
+    ...classIds.map(async (id) => {
+      const classStudents = await fetchClassStudents(id);
+      studentsByClass[id] = classStudents;
+    }),
+  ]);
 
   return (
     <ConductClient
