@@ -10,6 +10,8 @@ export interface Class {
   grade: string;
   stream: string;
   level: SubjectLevel;
+  academic_year: number; // Added to match your SQL table definition
+  created_at?: string;
 }
 
 export interface Subject {
@@ -25,10 +27,10 @@ export interface TeacherSubjectAllocation {
   id: string;
   teacher_id: string;
   subject_id: string;
-  class_id: string; // Changed from grade: string
+  class_id: string; // Relational link to public.classes
   academic_year: number;
   created_at: string;
-  // joined
+  // Joined Data
   teachers: {
     id: string;
     full_name: string;
@@ -42,22 +44,22 @@ export interface TeacherSubjectAllocation {
     level: SubjectLevel;
     weekly_lessons: number;
   } | null;
-  classes: Class | null; // Added joined class data
+  classes: Class | null; // Joined class data for grade/stream labels
 }
 
 export interface TimetableSlot {
   id: string;
   allocation_id: string;
-  grade: string; // This remains a string label (e.g. "Grade 4-North") for the UI grid
   day_of_week: number; // 1–5
   period: number; // 1–8
   academic_year: number;
   created_at: string;
-  // joined
+  // Joined Data
   teacher_subject_allocations: {
     class_id: string;
     teachers: { id: string; full_name: string } | null;
     subjects: { name: string; code: string } | null;
+    classes: Class | null; // Added to allow "Grade 4 South" display in timetable
   } | null;
 }
 
@@ -70,6 +72,7 @@ export interface TimetableCell {
   subjectCode: string;
   allocationId: string;
   teacherId: string;
+  className: string; // Added to support displaying "4 South" inside the cell if needed
 }
 
 // Keyed by `${day}-${period}`
@@ -78,12 +81,12 @@ export type TimetableGrid = Record<string, TimetableCell | null>;
 export interface AllocationFormValues {
   teacherId: string;
   subjectId: string;
-  classId: string; // Changed from grade
+  classId: string; // Correctly uses the UUID from the classes table
   academicYear: number;
 }
 
-// These are now used as "Levels" rather than the final list of grades,
-// since specific grades (e.g. Grade 4 Alpha) come from the DB.
+// ── Constants & Helpers ───────────────────────────────────────────────────────
+
 export const CBC_LEVEL_LABELS: Record<SubjectLevel, string> = {
   lower_primary: "Lower Primary (PP1 - Grade 3)",
   upper_primary: "Upper Primary (Grade 4 - Grade 6)",
@@ -111,4 +114,14 @@ export const PERIOD_TIMES: Record<number, string> = {
   6: "12:00–12:50",
   7: "1:30–2:20",
   8: "2:20–3:10",
+};
+
+/**
+ * Helper to format the class display name consistently across the app.
+ * Usage: formatClassName(allocation.classes) -> "Grade 4 South"
+ */
+export const formatClassName = (classObj: Class | null | undefined): string => {
+  if (!classObj) return "Unknown Class";
+  if (classObj.stream === "Main") return classObj.grade;
+  return `${classObj.grade} ${classObj.stream}`;
 };

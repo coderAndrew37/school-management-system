@@ -21,6 +21,7 @@ import type {
   StudentSummary,
   AttendanceOverview,
 } from "@/lib/types/governance";
+import type { Class } from "@/lib/types/allocation";
 
 import { AnnouncementsPanel } from "./AnnouncementsPanel";
 import { AttendanceOverviewPanel } from "./AttendanceOverviewPanel";
@@ -44,6 +45,8 @@ export interface GovernanceHubProps {
   payments: FeePayment[];
   students: StudentSummary[];
   attendanceOverview: AttendanceOverview;
+  /** Added availableClasses to satisfy AnnouncementsPanel requirements */
+  availableClasses: Class[];
 }
 
 const TABS: {
@@ -146,16 +149,13 @@ export function GovernanceHub(props: GovernanceHubProps) {
           const count = tab.countFn(props);
           const hasAlert = tab.alertFn?.(props) ?? false;
 
-          // Satisfy strict ARIA linters by using explicit string "true" | "false"
-          const isSelected = isActive ? "true" : "false";
-
           return (
             <button
               key={tab.id}
               id={`tab-${tab.id}`}
               role="tab"
               aria-controls={`panel-${tab.id}`}
-              tabIndex={isActive ? 0 : -1} // Only active tab is focusable via Tab key
+              tabIndex={isActive ? 0 : -1}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
                 "relative flex items-center gap-2 px-5 py-4 text-sm font-semibold transition-colors",
@@ -195,7 +195,10 @@ export function GovernanceHub(props: GovernanceHubProps) {
         tabIndex={0}
       >
         {activeTab === "announcements" && (
-          <AnnouncementsPanel announcements={props.announcements} />
+          <AnnouncementsPanel 
+            announcements={props.announcements} 
+            availableClasses={props.availableClasses}
+          />
         )}
         {activeTab === "calendar" && <CalendarPanel events={props.events} />}
         {activeTab === "attendance" && (

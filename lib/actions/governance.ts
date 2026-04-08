@@ -48,7 +48,7 @@ export async function createAnnouncementAction(
     title: z.string().min(2).max(200),
     body: z.string().min(10).max(10000),
     audience: z.enum(["all", "parents", "teachers", "grade"]),
-    target_grade: z.string().nullable().optional(),
+    target_class_id: z.string().uuid().nullable().optional(), // Refactored from target_grade
     priority: z.enum(["low", "normal", "high", "urgent"]),
     pinned: z.boolean(),
     expires_at: z.string().nullable().optional(),
@@ -58,11 +58,12 @@ export async function createAnnouncementAction(
     title: str(fd, "title"),
     body: str(fd, "body"),
     audience: str(fd, "audience") ?? "all",
-    target_grade: str(fd, "target_grade"),
+    target_class_id: str(fd, "target_class_id"),
     priority: str(fd, "priority") ?? "normal",
     pinned: fd.get("pinned") === "on" || fd.get("pinned") === "true",
     expires_at: str(fd, "expires_at"),
   });
+  
   if (!parsed.success)
     return { success: false, message: parsed.error.issues[0]!.message };
 
@@ -131,8 +132,13 @@ export async function createEventAction(fd: FormData): Promise<ActionResult> {
     start_time: z.string().nullable().optional(),
     end_time: z.string().nullable().optional(),
     location: z.string().max(200).nullable().optional(),
+    target_class_ids: z.array(z.string().uuid()).nullable().optional(), // Refactored from target_grades
     is_public: z.boolean(),
   });
+
+  // Handle target_class_ids as an array from FormData if applicable
+  const rawClassIds = fd.get("target_class_ids");
+  const targetClassIds = typeof rawClassIds === "string" ? rawClassIds.split(",") : null;
 
   const parsed = schema.safeParse({
     title: str(fd, "title"),
@@ -143,8 +149,10 @@ export async function createEventAction(fd: FormData): Promise<ActionResult> {
     start_time: str(fd, "start_time"),
     end_time: str(fd, "end_time"),
     location: str(fd, "location"),
+    target_class_ids: targetClassIds,
     is_public: fd.get("is_public") !== "false",
   });
+
   if (!parsed.success)
     return { success: false, message: parsed.error.issues[0]!.message };
 
@@ -334,7 +342,7 @@ export async function upsertFeeStructureAction(
   const supabase = await createSupabaseServerClient();
 
   const schema = z.object({
-    grade: z.string().min(1),
+    class_id: z.string().uuid("Invalid class selection"), // Refactored from grade
     term: z.number().int().min(1).max(3),
     academic_year: z.number().int(),
     tuition_fee: z.number().min(0),
@@ -346,7 +354,7 @@ export async function upsertFeeStructureAction(
   });
 
   const parsed = schema.safeParse({
-    grade: str(fd, "grade"),
+    class_id: str(fd, "class_id"),
     term: num(fd, "term"),
     academic_year: num(fd, "academic_year") ?? 2026,
     tuition_fee: num(fd, "tuition_fee") ?? 0,
@@ -361,7 +369,7 @@ export async function upsertFeeStructureAction(
 
   const { data, error } = await supabase
     .from("fee_structures")
-    .upsert(parsed.data, { onConflict: "grade,term,academic_year" })
+    .upsert(parsed.data, { onConflict: "class_id,term,academic_year" })
     .select("id")
     .single();
 

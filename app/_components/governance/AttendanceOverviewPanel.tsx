@@ -1,16 +1,15 @@
 "use client";
+
 import type {
-  AttendanceGradeSummary,
   AttendanceOverview,
+  AttendanceGradeSummary
 } from "@/lib/types/governance";
 import {
   CalendarCheck,
-  ChevronDown,
-  ChevronUp,
   Clock,
   TrendingUp,
   UserCheck,
-  UserX,
+  UserX
 } from "lucide-react";
 import { useState, useTransition } from "react";
 import {
@@ -22,8 +21,9 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { SummaryCard, STATUS_COLORS, GradeRow, CustomTooltip } from "./utils";
 
-// ── Props ─────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Props {
   initial: AttendanceOverview;
@@ -31,14 +31,18 @@ interface Props {
   fetchFn: (date: string) => Promise<AttendanceOverview>;
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
+interface TrendDataItem {
+  label: string;
+  rate: number;
+  marked: number;
+  isToday: boolean;
+}
 
-const STATUS_COLORS = {
-  present: { text: "text-emerald-400", bg: "bg-emerald-400", bar: "#34d399" },
-  late: { text: "text-amber-400", bg: "bg-amber-400", bar: "#f59e0b" },
-  absent: { text: "text-rose-400", bg: "bg-rose-400", bar: "#fb7185" },
-  excused: { text: "text-sky-400", bg: "bg-sky-400", bar: "#38bdf8" },
-};
+interface DotProps {
+  cx?: number;
+  cy?: number;
+  payload?: TrendDataItem;
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -73,7 +77,7 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
         ? "text-amber-400"
         : "text-rose-400";
 
-  const trendData = data.recentDays.map((d) => {
+  const trendData: TrendDataItem[] = data.recentDays.map((d) => {
     const dt = new Date(d.date + "T00:00:00");
     return {
       label: dt.toLocaleDateString("en-KE", {
@@ -206,7 +210,7 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
           <p className="text-[10px] uppercase tracking-widest text-white/30 mb-3">
             By Grade
           </p>
-          {data.byGrade.length === 0 ? (
+          {data.byClass.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-white/10 py-10 text-center">
               <p className="text-sm text-white/30">No grade data available</p>
             </div>
@@ -235,13 +239,13 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.04]">
-                  {data.byGrade.map((row) => (
+                  {data.byClass.map((row: AttendanceGradeSummary) => (
                     <GradeRow
-                      key={row.grade}
+                      key={row.class_id}
                       row={row}
-                      isExpanded={expanded === row.grade}
+                      isExpanded={expanded === row.class_id}
                       onToggle={() =>
-                        setExpanded((e) => (e === row.grade ? null : row.grade))
+                        setExpanded((e) => (e === row.class_id ? null : row.class_id))
                       }
                     />
                   ))}
@@ -299,7 +303,6 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
                     width={28}
                     tickFormatter={(v) => `${v}%`}
                   />
-                  {/* USING CUSTOM TOOLTIP COMPONENT HERE */}
                   <Tooltip
                     content={<CustomTooltip />}
                     cursor={{ stroke: "rgba(255,255,255,0.1)", strokeWidth: 1 }}
@@ -310,8 +313,10 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
                     stroke="#34d399"
                     strokeWidth={2}
                     fill="url(#attendGrad)"
-                    dot={(props: any) => {
+                    dot={(props: DotProps) => {
                       const { cx, cy, payload } = props;
+                      if (cx === undefined || cy === undefined || !payload) return <g key="empty" />;
+                      
                       return payload.isToday ? (
                         <circle
                           key="today"
@@ -360,120 +365,5 @@ export function AttendanceOverviewPanel({ initial, fetchFn }: Props) {
         </div>
       )}
     </div>
-  );
-}
-
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-function CustomTooltip({ active, payload, label }: any) {
-  if (active && payload && payload.length) {
-    const data = payload[0].payload;
-    return (
-      <div className="rounded-xl border border-white/10 bg-[#141824] p-3 shadow-2xl backdrop-blur-md">
-        <p className="text-[10px] uppercase tracking-widest text-white/40 mb-2 font-mono">
-          {label}
-        </p>
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-xs text-white/60">Attendance Rate</span>
-            <span className="text-xs font-bold text-emerald-400">
-              {data.rate}%
-            </span>
-          </div>
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-xs text-white/60">Records Marked</span>
-            <span className="text-xs font-medium text-white">
-              {data.marked}
-            </span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  return null;
-}
-
-function SummaryCard({
-  icon,
-  label,
-  value,
-  color,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  color: keyof typeof STATUS_COLORS;
-}) {
-  const s = STATUS_COLORS[color];
-  return (
-    <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] px-4 py-4 text-center">
-      <div className={`flex justify-center mb-1 ${s.text}`}>{icon}</div>
-      <p className={`text-2xl font-bold tabular-nums ${s.text}`}>{value}</p>
-      <p className="text-[9px] uppercase tracking-widest text-white/25 mt-0.5">
-        {label}
-      </p>
-    </div>
-  );
-}
-
-function GradeRow({
-  row,
-  isExpanded,
-  onToggle,
-}: {
-  row: AttendanceGradeSummary;
-  isExpanded: boolean;
-  onToggle: () => void;
-}) {
-  const rateColor =
-    row.rate >= 90
-      ? "text-emerald-400"
-      : row.rate >= 75
-        ? "text-amber-400"
-        : row.marked > 0
-          ? "text-rose-400"
-          : "text-white/25";
-  return (
-    <tr className="hover:bg-white/[0.02] transition-colors group">
-      <td className="px-3 py-2.5 font-medium text-white text-xs">
-        {row.grade}
-      </td>
-      <td className="px-3 py-2.5 text-white/40 tabular-nums">{row.total}</td>
-      <td className="px-3 py-2.5 text-white/40 tabular-nums">
-        {row.marked > 0 ? row.marked : <span className="text-white/20">—</span>}
-      </td>
-      <td className="px-3 py-2.5 text-emerald-400 tabular-nums">
-        {row.present || <span className="text-white/20">—</span>}
-      </td>
-      <td className="px-3 py-2.5 text-amber-400 tabular-nums">
-        {row.late || <span className="text-white/20">—</span>}
-      </td>
-      <td className="px-3 py-2.5 text-rose-400 tabular-nums">
-        {row.absent || <span className="text-white/20">—</span>}
-      </td>
-      <td className="px-3 py-2.5">
-        {row.marked > 0 ? (
-          <span className={`font-bold tabular-nums ${rateColor}`}>
-            {row.rate}%
-          </span>
-        ) : (
-          <span className="text-white/20 text-xs">not marked</span>
-        )}
-      </td>
-      <td className="px-3 py-2.5">
-        {row.marked > 0 && (
-          <button
-            onClick={onToggle}
-            className="opacity-0 group-hover:opacity-100 p-1 rounded-lg hover:bg-white/10 text-white/30 hover:text-white transition-all"
-          >
-            {isExpanded ? (
-              <ChevronUp className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5" />
-            )}
-          </button>
-        )}
-      </td>
-    </tr>
   );
 }

@@ -155,7 +155,14 @@ export async function generateTimetableAction(
     subjects: { weekly_lessons: number } | null;
   };
 
-  const allocations: RawAllocation[] = (allocationsRaw as any[]).map((row) => ({
+  type AllocationRow = {
+    id: string;
+    teacher_id: string;
+    classes: { grade: string; stream: string };
+    subjects: { weekly_lessons: number } | { weekly_lessons: number }[] | null;
+  };
+
+  const allocations: RawAllocation[] = (allocationsRaw as unknown as AllocationRow[]).map((row) => ({
     id: row.id,
     teacher_id: row.teacher_id,
     // Use Grade + Stream as the unique identifier for the logic

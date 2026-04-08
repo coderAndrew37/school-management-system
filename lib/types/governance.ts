@@ -1,3 +1,6 @@
+// lib/types/governance.ts
+import type { Class } from "./allocation";
+
 export type AnnouncementAudience = "all" | "parents" | "teachers" | "grade";
 export type AnnouncementPriority = "low" | "normal" | "high" | "urgent";
 
@@ -6,7 +9,7 @@ export interface Announcement {
   title: string;
   body: string;
   audience: AnnouncementAudience;
-  target_grade: string | null;
+  target_class_id: string | null; // Refactored from target_grade
   priority: AnnouncementPriority;
   pinned: boolean;
   published_at: string;
@@ -15,6 +18,7 @@ export interface Announcement {
   created_at: string;
   updated_at: string;
   profiles?: { full_name: string | null } | null;
+  classes?: Class | null; // Joined class data for display
 }
 
 // ── School Calendar ───────────────────────────────────────────────────────────
@@ -37,7 +41,7 @@ export interface SchoolEvent {
   start_time: string | null;
   end_time: string | null;
   location: string | null;
-  target_grades: string[] | null;
+  target_class_ids: string[] | null; // Refactored from target_grades
   is_public: boolean;
   author_id: string | null;
   created_at: string;
@@ -117,7 +121,7 @@ export type PaymentMethod =
 
 export interface FeeStructure {
   id: string;
-  grade: string;
+  class_id: string; // Refactored from grade: string
   term: number;
   academic_year: number;
   tuition_fee: number;
@@ -127,6 +131,7 @@ export interface FeeStructure {
   other_fee: number;
   notes: string | null;
   created_at: string;
+  classes?: Class | null;
 }
 
 export interface FeePayment {
@@ -148,7 +153,8 @@ export interface FeePayment {
   students?: {
     full_name: string;
     readable_id: string | null;
-    current_grade: string;
+    class_id: string; // Refactored from current_grade
+    classes?: Class | null;
   } | null;
   payment_date: string;
   reference_number: number;
@@ -163,7 +169,7 @@ export type AttendanceSession = "morning" | "afternoon" | "full_day";
 export interface AttendanceRecord {
   id: string;
   student_id: string;
-  grade: string;
+  class_id: string; // Refactored from grade: string
   date: string;
   session: AttendanceSession;
   status: AttendanceStatus;
@@ -175,17 +181,19 @@ export interface AttendanceRecord {
     full_name: string;
     readable_id: string | null;
   } | null;
+  classes?: Class | null;
 }
 
 export interface AttendanceGradeSummary {
-  grade: string;
-  total: number; // students enrolled in that grade
-  marked: number; // records found for this date
+  class_id: string; // Refactored from grade
+  label: string;    // e.g. "Grade 4 North"
+  total: number;    // students enrolled in that class
+  marked: number;   // records found for this date
   present: number;
   late: number;
   absent: number;
   excused: number;
-  rate: number; // (present + late) / total * 100
+  rate: number;     // (present + late) / total * 100
 }
 
 export interface AttendanceOverview {
@@ -196,9 +204,9 @@ export interface AttendanceOverview {
   late: number;
   absent: number;
   excused: number;
-  presentRate: number; // (present+late) / totalMarked * 100
-  byGrade: AttendanceGradeSummary[];
-  recentDays: { date: string; rate: number; marked: number }[]; // last 14 days
+  presentRate: number;
+  byClass: AttendanceGradeSummary[]; // Refactored from byGrade
+  recentDays: { date: string; rate: number; marked: number }[];
 }
 
 // ── Shared ────────────────────────────────────────────────────────────────────
@@ -207,7 +215,8 @@ export interface StudentSummary {
   id: string;
   full_name: string;
   readable_id: string | null;
-  current_grade: string;
+  class_id: string; // Refactored from current_grade
+  classes?: Class | null;
 }
 
 export interface GovernanceStats {
@@ -219,5 +228,5 @@ export interface GovernanceStats {
   outstandingFees: number;
   presentToday: number;
   absentToday: number;
-  attendanceRate: number; // percent
+  attendanceRate: number;
 }
