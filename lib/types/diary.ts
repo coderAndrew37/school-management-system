@@ -69,14 +69,15 @@ export const DIARY_INITIAL_STATE: DiaryActionState = {
 
 // ── Type guards ───────────────────────────────────────────────────────────────
 
-export function isObservation(e: TeacherDiaryEntry): e is ObservationEntry {
-  return e.entry_type === "observation";
+export function isObservation(e: TeacherDiaryEntry | null | undefined): e is ObservationEntry {
+  return e?.entry_type === "observation";
 }
 
-export function isClassWide(e: TeacherDiaryEntry): e is ClassDiaryEntry {
-  return e.entry_type === "homework" || e.entry_type === "notice";
+export function isClassWide(e: TeacherDiaryEntry | null | undefined): e is ClassDiaryEntry {
+  const type = e?.entry_type;
+  return type === "homework" || type === "notice";
 }
 
-export function isHomework(e: TeacherDiaryEntry): e is ClassDiaryEntry {
-  return e.entry_type === "homework";
+export function isHomework(e: TeacherDiaryEntry | null | undefined): e is ClassDiaryEntry {
+  return e?.entry_type === "homework";
 }

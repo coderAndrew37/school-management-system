@@ -46,29 +46,33 @@ function buildOptimisticEntry(
   const now = new Date().toISOString();
   const base = {
     id: `temp-${Date.now()}`,
-    grade: formState.grade,
     title: formState.title.trim(),
     content: formState.content || null,
     diary_date: now.slice(0, 10),
     created_at: now,
+    updated_at: now,
+    subject_name: null,
   };
 
   if (formState.mode === "observation") {
     return {
       ...base,
       entry_type: "observation",
+      class_id: null,
       student_id: formState.studentId,
-      student_name:
-        students.find((s) => s.id === formState.studentId)?.full_name ??
-        "Unknown",
       due_date: null,
-      is_completed: false as const,
+      is_completed: false,
+      students: {
+        full_name: students.find((s) => s.id === formState.studentId)?.full_name ?? "Unknown Student",
+        readable_id: null
+      }
     } satisfies ObservationEntry;
   }
 
   return {
     ...base,
     entry_type: formState.mode as "homework" | "notice",
+    class_id: formState.grade, // Using grade as the class reference
     student_id: null,
     due_date: formState.mode === "homework" ? formState.dueDate || null : null,
     is_completed: false,
@@ -134,7 +138,6 @@ export default function DiaryClient({
   }
 
   // ── Form success: optimistic insert or update in place ────────────────────
-  // ── Form success: optimistic insert or update in place ────────────────────
   function handleFormSuccess(state: DiaryActionState) {
     flash(state.message, true);
 
@@ -145,27 +148,27 @@ export default function DiaryClient({
         prev.map((e) => {
           if (e.id !== id) return e;
 
-          // Base updates common to all types
           const updatedBase = {
             ...e,
             title: formState.title.trim(),
             content: formState.content || null,
+            updated_at: new Date().toISOString(),
           };
 
-          // Type-specific updates to satisfy ObservationEntry vs ClassDiaryEntry
-          if (e.entry_type === "observation") {
+          if (isObservation(e)) {
             return {
               ...updatedBase,
               entry_type: "observation",
-              due_date: null, // Observations MUST be null
+              class_id: null,
+              due_date: null,
             } as ObservationEntry;
           }
 
           return {
             ...updatedBase,
-            entry_type: e.entry_type, // homework or notice
-            due_date:
-              e.entry_type === "homework" ? formState.dueDate || null : null,
+            entry_type: e.entry_type,
+            student_id: null,
+            due_date: e.entry_type === "homework" ? formState.dueDate || null : null,
           } as ClassDiaryEntry;
         }),
       );
@@ -180,17 +183,19 @@ export default function DiaryClient({
 
   // ── Start editing an entry ────────────────────────────────────────────────
   function handleEdit(entry: TeacherDiaryEntry) {
-    const cls = isClassWide(entry) ? (entry as ClassDiaryEntry) : null;
-    const obs = isObservation(entry) ? (entry as ObservationEntry) : null;
+    const cls = isClassWide(entry) ? entry : null;
+    const obs = isObservation(entry) ? entry : null;
+    
     setFormState({
       mode: entry.entry_type as DiaryMode,
-      grade: entry.grade,
+      grade: cls?.class_id ?? firstGrade,
       studentId: obs?.student_id ?? "",
       title: entry.title,
       content: entry.content ?? "",
       dueDate: cls?.due_date ?? "",
       editEntry: entry,
     });
+    
     setTimeout(
       () =>
         formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
@@ -200,7 +205,6 @@ export default function DiaryClient({
 
   // ── Toggle homework completion (uses <form> submission) ───────────────────
   function handleToggleComplete(id: string, completed: boolean) {
-    // Optimistic UI update
     setEntries((prev) =>
       prev.map((e) =>
         e.id === id && isClassWide(e) ? { ...e, is_completed: completed } : e,
@@ -209,7 +213,6 @@ export default function DiaryClient({
     const fd = new FormData();
     fd.set("entry_id", id);
     fd.set("completed", String(completed));
-    // Fire-and-forget via action — revalidation handles DB truth
     toggleAction(fd);
     flash(completed ? "Marked as submitted." : "Marked as pending.", true);
   }
@@ -267,7 +270,7 @@ export default function DiaryClient({
       {/* Toast */}
       {toast && (
         <div
-          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-medium shadow-lg ${
+          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-medium shadow-lg animate-in slide-in-from-right-5 ${
             toast.ok ? "bg-emerald-600 text-white" : "bg-red-500 text-white"
           }`}
         >
@@ -290,20 +293,22 @@ export default function DiaryClient({
         </div>
 
         {/* Right: feed */}
-        <DiaryFeed
-          entries={entries}
-          grades={grades}
-          filterGrade={filterGrade}
-          filterType={filterType}
-          deleteConfirmId={deleteConfirmId}
-          isPending={isPending}
-          onFilterGrade={setFilterGrade}
-          onFilterType={setFilterType}
-          onEdit={handleEdit}
-          onToggleComplete={handleToggleComplete}
-          onDelete={handleDelete}
-          onCancelDelete={() => setDeleteConfirmId(null)}
-        />
+        <div className="space-y-6">
+          <DiaryFeed
+            entries={entries}
+            grades={grades}
+            filterGrade={filterGrade}
+            filterType={filterType}
+            deleteConfirmId={deleteConfirmId}
+            isPending={isPending}
+            onFilterGrade={setFilterGrade}
+            onFilterType={setFilterType}
+            onEdit={handleEdit}
+            onToggleComplete={handleToggleComplete}
+            onDelete={handleDelete}
+            onCancelDelete={() => setDeleteConfirmId(null)}
+          />
+        </div>
       </div>
     </div>
   );
