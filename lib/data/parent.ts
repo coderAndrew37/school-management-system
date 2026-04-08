@@ -1,4 +1,4 @@
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "../supabase/admin";
 import type { Parent, StudentParentLink } from "@/lib/types/dashboard";
 import type {
   Assessment,
@@ -10,14 +10,12 @@ import type {
   StudentNotification,
   TalentCompetency,
 } from "@/lib/types/parent";
-import { supabaseAdmin } from "../supabase/admin";
 import type {
   Announcement,
   SchoolEvent,
   FeePayment,
 } from "@/lib/types/governance";
 
-// Import the consolidated diary types
 import {
   TeacherDiaryEntry,
   ClassDiaryEntry,
@@ -54,13 +52,31 @@ export interface ChildPortalData {
   unreadCount: number;
 }
 
-// ── Raw DB shapes ─────────────────────────────────────────────────────────────
+// ── Raw DB shapes (Strict Interfaces) ─────────────────────────────────────────
+
+interface RawProfileJoin {
+  full_name: string | null;
+}
+
+interface RawDiaryRow {
+  id: string;
+  entry_type: "homework" | "notice" | "observation";
+  class_id: string | null;
+  student_id: string | null;
+  title: string;
+  content: string | null;
+  subject_name: string | null;
+  due_date: string | null;
+  is_completed: boolean | null;
+  created_at: string;
+  profiles: RawProfileJoin | null;
+}
 
 interface RawGalleryRow {
   id: string;
   student_id: string | null;
   target_grade: string | null;
-  audience: string | null;
+  audience: "student" | "class" | "school" | null;
   teacher_id: string | null;
   title: string | null;
   caption: string | null;
@@ -134,15 +150,12 @@ const STUDENT_WITH_ASSESSMENTS_SELECT = `
   )
 ` as const;
 
-function getPrimaryParent(links: RawStudentRow["student_parents"]) {
-  const primary = links.find((l) => l.is_primary_contact) ?? links[0] ?? null;
-  return primary?.parents ?? null;
-}
+// ── Mappers ───────────────────────────────────────────────────────────────────
 
 function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
-  const primaryParent = getPrimaryParent(row.student_parents);
+  const primaryParentLink = row.student_parents.find((l) => l.is_primary_contact) ?? row.student_parents[0] ?? null;
+  const primaryParent = primaryParentLink?.parents ?? null;
 
-  // Map the student_parents array to the StudentParentLink[] interface
   const allParents: StudentParentLink[] = row.student_parents
     .filter((link) => link.parents !== null)
     .map((link) => ({
@@ -162,9 +175,9 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
     full_name: row.full_name,
     date_of_birth: row.date_of_birth,
     gender: row.gender,
-    class_id: null, // Populated if needed, otherwise matches interface
+    class_id: null,
     current_grade: row.current_grade,
-    current_stream: row.current_stream || "A",
+    current_stream: row.current_stream || "Main",
     parent_id: primaryParent?.id ?? null,
     created_at: row.created_at,
     photo_url: row.photo_url ?? null,
@@ -195,20 +208,12 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
   };
 }
 
-async function signGalleryUrl(
-  mediaUrl: string,
-  imageUrl: string | null,
-): Promise<string> {
+async function signGalleryUrl(mediaUrl: string, imageUrl: string | null): Promise<string> {
   if (imageUrl && imageUrl.startsWith("http")) return imageUrl;
   if (!mediaUrl) return "";
   if (mediaUrl.startsWith("http")) return mediaUrl;
-  const { data, error } = await supabaseAdmin.storage
-    .from("gallery")
-    .createSignedUrl(mediaUrl, 3600);
-  if (error) {
-    console.error("[signGalleryUrl]", error.message);
-    return "";
-  }
+  const { data, error } = await supabaseAdmin.storage.from("gallery").createSignedUrl(mediaUrl, 3600);
+  if (error) return "";
   return data.signedUrl;
 }
 
@@ -224,9 +229,7 @@ async function mapGalleryRow(row: RawGalleryRow): Promise<GalleryItem> {
     caption: row.caption ?? null,
     description: row.description ?? null,
     category: row.category ?? null,
-    media_type: (row.media_type === "video"
-      ? "video"
-      : "image") as GalleryItem["media_type"],
+    media_type: (row.media_type === "video" ? "video" : "image") as GalleryItem["media_type"],
     media_url: row.media_url,
     signedUrl,
     tags: Array.isArray(row.tags) ? row.tags : [],
@@ -238,120 +241,100 @@ async function mapGalleryRow(row: RawGalleryRow): Promise<GalleryItem> {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export async function fetchMyProfile(): Promise<Parent | null> {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-  if (authError || !user) return null;
-
-  const { data, error } = await supabase
+export async function fetchMyProfile(email: string): Promise<Parent | null> {
+  const { data, error } = await supabaseAdmin
     .from("parents")
-    .select(
-      "*, children:students(id, full_name, current_grade, status, photo_url)",
-    )
-    .eq("id", user.id)
-    .single<Parent>();
+    .select("*, children:students(id, full_name, current_grade, status, photo_url)")
+    .eq("email", email)
+    .single();
 
-  if (error) {
-    const { data: byEmail, error: emailErr } = await supabase
-      .from("parents")
-      .select(
-        "*, children:students(id, full_name, current_grade, status, photo_url)",
-      )
-      .eq("email", user.email ?? "")
-      .single<Parent>();
-    if (emailErr) return null;
-    return byEmail;
-  }
-  return data;
+  if (error) return null;
+  return data as Parent;
 }
 
 export async function fetchMyChildren(): Promise<ChildWithAssessments[]> {
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("students")
     .select(STUDENT_WITH_ASSESSMENTS_SELECT)
-    .order("full_name", { ascending: true })
-    .returns<RawStudentRow[]>();
-  if (error) return [];
-  return (data ?? []).map(mapStudentRow);
+    .order("full_name", { ascending: true });
+
+  if (error || !data) return [];
+  return (data as unknown as RawStudentRow[]).map(mapStudentRow);
 }
 
 export async function fetchParentDiaryFeed(
   childId: string,
-  childGrade: string,
+  classId: string,
   limit = 40,
 ): Promise<TeacherDiaryEntry[]> {
-  const supabase = await createSupabaseServerClient();
-
   const [classRes, obsRes] = await Promise.all([
-    supabase
+    supabaseAdmin
       .from("student_diary")
-      .select(
-        "id, entry_type, grade, title, content, due_date, is_completed, created_at",
-      )
-      .eq("grade", childGrade)
+      .select(`
+        id, entry_type, class_id, title, content, due_date, is_completed, created_at, subject_name,
+        profiles ( full_name )
+      `)
+      .eq("class_id", classId)
       .in("entry_type", ["homework", "notice"])
       .is("student_id", null)
       .order("created_at", { ascending: false })
-      .limit(limit),
-    supabase
+      .limit(limit)
+      .returns<RawDiaryRow[]>(),
+    supabaseAdmin
       .from("student_diary")
-      .select(
-        "id, entry_type, grade, student_id, title, content, is_completed, created_at",
-      )
+      .select(`
+        id, entry_type, student_id, title, content, created_at, subject_name,
+        profiles ( full_name )
+      `)
       .eq("student_id", childId)
       .eq("entry_type", "observation")
       .order("created_at", { ascending: false })
-      .limit(limit),
+      .limit(limit)
+      .returns<RawDiaryRow[]>(),
   ]);
 
-  const classResult: ClassDiaryEntry[] = (classRes.data ?? []).map(
-    (r: any) => ({
-      id: r.id,
-      entry_type: r.entry_type as "homework" | "notice",
-      grade: r.grade,
-      title: r.title,
-      content: r.content,
-      body: r.content,
-      diary_date: r.created_at?.slice(0, 10) || "",
-      due_date: r.due_date,
-      student_id: null,
-      is_completed: !!r.is_completed,
-      created_at: r.created_at,
-      homework: r.entry_type === "homework" ? r.content : null,
-    }),
-  );
-
-  const obsResult: ObservationEntry[] = (obsRes.data ?? []).map((r: any) => ({
+  const classResult: ClassDiaryEntry[] = (classRes.data ?? []).map((r) => ({
     id: r.id,
-    entry_type: "observation" as const,
-    grade: r.grade,
-    student_id: r.student_id,
-    student_name: "",
+    entry_type: r.entry_type as "homework" | "notice",
+    class_id: r.class_id ?? "",
     title: r.title,
     content: r.content,
-    body: r.content,
-    diary_date: r.created_at?.slice(0, 10) || "",
+    subject_name: r.subject_name,
+    diary_date: r.created_at.slice(0, 10),
+    due_date: r.due_date,
+    student_id: null,
+    is_completed: !!r.is_completed,
+    created_at: r.created_at,
+    updated_at: r.created_at,
+    profiles: r.profiles,
+  }));
+
+  const obsResult: ObservationEntry[] = (obsRes.data ?? []).map((r) => ({
+    id: r.id,
+    entry_type: "observation" as const,
+    class_id: null,
+    student_id: r.student_id ?? "",
+    title: r.title,
+    content: r.content,
+    subject_name: r.subject_name,
+    diary_date: r.created_at.slice(0, 10),
     due_date: null,
     is_completed: false,
     created_at: r.created_at,
+    updated_at: r.created_at,
+    profiles: r.profiles,
   }));
 
   return [...classResult, ...obsResult].sort(
-    (a, b) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
 }
 
 export async function fetchAllChildData(
   studentId: string,
-  grade: string,
+  classId: string,
+  gradeLabel: string,
 ): Promise<ChildPortalData> {
-  const supabase = await createSupabaseServerClient();
-
   const [
     { data: notifications },
     diary,
@@ -360,141 +343,71 @@ export async function fetchAllChildData(
     { data: galleryStudent },
     { data: galleryClass },
     { data: gallerySchool },
-    { data: pathway },
+    { data: pathwayResult }, // Destructure the full result object
     { data: announcements },
     { data: events },
     { data: feePayments },
     { data: reportCards },
   ] = await Promise.all([
-    supabase
-      .from("notifications")
-      .select("*")
-      .eq("student_id", studentId)
-      .order("created_at", { ascending: false }),
-
-    fetchParentDiaryFeed(studentId, grade),
-
-    supabase
-      .from("attendance")
-      .select("*")
-      .eq("student_id", studentId)
-      .order("date", { ascending: false }),
-
-    supabase
-      .from("communication_book")
-      .select("*")
-      .eq("student_id", studentId)
-      .order("created_at", { ascending: false }),
-
-    supabase
-      .from("talent_gallery")
-      .select(GALLERY_SELECT)
-      .eq("audience", "student")
-      .eq("student_id", studentId)
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false })
-      .limit(60),
-
-    supabase
-      .from("talent_gallery")
-      .select(GALLERY_SELECT)
-      .eq("audience", "class")
-      .eq("target_grade", grade)
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false })
-      .limit(40),
-
-    supabase
-      .from("talent_gallery")
-      .select(GALLERY_SELECT)
-      .eq("audience", "school")
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false })
-      .limit(20),
-
-    supabase
-      .from("jss_pathways")
-      .select("*")
-      .eq("student_id", studentId)
-      .maybeSingle(),
-
-    supabase
-      .from("announcements")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(50),
-
-    supabase
-      .from("school_events")
-      .select("*")
-      .gte(
-        "start_date",
-        new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0],
-      )
-      .order("start_date", { ascending: true })
-      .limit(30),
-
-    supabase
-      .from("fee_payments")
-      .select("*")
-      .eq("student_id", studentId)
-      .order("created_at", { ascending: false }),
-
-    supabase
-      .from("report_cards")
-      .select("*")
-      .eq("student_id", studentId)
-      .eq("status", "published")
-      .order("academic_year", { ascending: false })
-      .order("term", { ascending: false }),
+    supabaseAdmin.from("notifications").select("*").eq("student_id", studentId).order("created_at", { ascending: false }).returns<StudentNotification[]>(),
+    fetchParentDiaryFeed(studentId, classId),
+    supabaseAdmin.from("attendance").select("*").eq("student_id", studentId).order("date", { ascending: false }).returns<AttendanceRecord[]>(),
+    supabaseAdmin.from("communication_book").select("*").eq("student_id", studentId).order("created_at", { ascending: false }).returns<CommMessage[]>(),
+    supabaseAdmin.from("talent_gallery").select(GALLERY_SELECT).eq("audience", "student").eq("student_id", studentId).is("deleted_at", null).order("created_at", { ascending: false }).limit(60).returns<RawGalleryRow[]>(),
+    supabaseAdmin.from("talent_gallery").select(GALLERY_SELECT).eq("audience", "class").eq("target_grade", gradeLabel).is("deleted_at", null).order("created_at", { ascending: false }).limit(40).returns<RawGalleryRow[]>(),
+    supabaseAdmin.from("talent_gallery").select(GALLERY_SELECT).eq("audience", "school").is("deleted_at", null).order("created_at", { ascending: false }).limit(20).returns<RawGalleryRow[]>(),
+    
+    // FIX: Remove .returns here. maybeSingle() correctly returns JssPathway | null
+    supabaseAdmin.from("jss_pathways").select("*").eq("student_id", studentId).maybeSingle(),
+    
+    supabaseAdmin.from("announcements").select("*").order("created_at", { ascending: false }).limit(50).returns<Announcement[]>(),
+    supabaseAdmin.from("school_events").select("*").gte("start_date", new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0]).order("start_date", { ascending: true }).limit(30).returns<SchoolEvent[]>(),
+    supabaseAdmin.from("fee_payments").select("*").eq("student_id", studentId).order("created_at", { ascending: false }).returns<FeePayment[]>(),
+    supabaseAdmin.from("report_cards").select("*").eq("student_id", studentId).eq("status", "published").order("academic_year", { ascending: false }).order("term", { ascending: false }).returns<ParentReportCard[]>(),
   ]);
+
+  // Cast the pathway specifically if inference is still being stubborn
+  const pathway = pathwayResult as JssPathway | null;
 
   const seenIds = new Set<string>();
   const rawGallery: RawGalleryRow[] = [];
-  for (const row of [
-    ...(galleryStudent ?? []),
-    ...(galleryClass ?? []),
-    ...(gallerySchool ?? []),
-  ] as unknown as RawGalleryRow[]) {
+  const galleryCombined = [...(galleryStudent || []), ...(galleryClass || []), ...(gallerySchool || [])];
+  
+  for (const row of galleryCombined) {
     if (row?.id && !seenIds.has(row.id)) {
       seenIds.add(row.id);
       rawGallery.push(row);
     }
   }
-  const gallery: GalleryItem[] = await Promise.all(
-    rawGallery.map(mapGalleryRow),
-  );
 
-  const unreadCount =
-    (notifications?.filter((n) => !n.is_read).length ?? 0) +
-    (messages?.filter((m) => !m.is_read && m.sender_role !== "parent").length ??
-      0);
+  const gallery: GalleryItem[] = await Promise.all(rawGallery.map(mapGalleryRow));
+
+  const safeNotifications = notifications ?? [];
+  const safeMessages = messages ?? [];
 
   return {
-    notifications: notifications ?? [],
+    notifications: safeNotifications,
     diary,
     attendance: attendance ?? [],
-    messages: messages ?? [],
+    messages: safeMessages,
     competencies: [],
     gallery,
-    pathway: pathway ?? null,
-    announcements: (announcements as unknown as Announcement[]) ?? [],
-    events: (events as unknown as SchoolEvent[]) ?? [],
-    feePayments: (feePayments as unknown as FeePayment[]) ?? [],
-    reportCards: (reportCards ?? []) as ParentReportCard[],
-    unreadCount,
+    pathway: pathway, // Now matches JssPathway | null
+    announcements: announcements ?? [],
+    events: events ?? [],
+    feePayments: feePayments ?? [],
+    reportCards: reportCards ?? [],
+    unreadCount: (safeNotifications.filter((n) => !n.is_read).length) + (safeMessages.filter((m) => !m.is_read && m.sender_role !== "parent").length),
   };
 }
 
-export async function fetchChild(
-  studentId: string,
-): Promise<ChildWithAssessments | null> {
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
+export async function fetchChild(studentId: string): Promise<ChildWithAssessments | null> {
+  const { data, error } = await supabaseAdmin
     .from("students")
     .select(STUDENT_WITH_ASSESSMENTS_SELECT)
     .eq("id", studentId)
-    .single<RawStudentRow>();
-  if (error) return null;
-  return data ? mapStudentRow(data) : null;
+    .single();
+
+  if (error || !data) return null;
+  return mapStudentRow(data as unknown as RawStudentRow);
 }

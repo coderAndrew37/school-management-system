@@ -1,7 +1,4 @@
 "use server";
-// lib/actions/teacher-diary.ts
-// All server actions use the (prevState, formData) => DiaryActionState signature
-// so they work directly with React 19's useActionState hook.
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
@@ -11,31 +8,25 @@ import type { DiaryActionState } from "@/lib/types/diary";
 // ── Validation schemas ────────────────────────────────────────────────────────
 
 const classWideSchema = z.object({
-  grade: z.string().min(1, "Class is required"),
-  entry_type: z.enum(["homework", "notice"] as const, {
-    message: "Entry type is required",
-  }),
-  title: z.string().min(1, "Title is required").max(200, "Title too long"),
+  class_id: z.string().uuid("Invalid class selection"),
+  entry_type: z.enum(["homework", "notice"] as const),
+  title: z.string().min(1, "Title is required").max(200),
   content: z.string().max(2000).optional().nullable(),
+  subject_name: z.string().min(1, "Subject is required").max(100),
   due_date: z.string().optional().nullable(),
 });
 
 const observationSchema = z.object({
-  grade: z.string().min(1, "Class is required"),
   student_id: z.string().uuid("Please select a student"),
-  title: z.string().min(1, "Title is required").max(200, "Title too long"),
+  title: z.string().min(1, "Title is required").max(200),
   content: z.string().max(2000).optional().nullable(),
 });
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
-async function getAuthUser() {
+async function getAuthContext() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-  if (error || !user) return { user: null, supabase };
+  const { data: { user } } = await supabase.auth.getUser();
   return { user, supabase };
 }
 
@@ -45,53 +36,53 @@ export async function createClassDiaryEntryAction(
   _prev: DiaryActionState,
   formData: FormData,
 ): Promise<DiaryActionState> {
-  const { user, supabase } = await getAuthUser();
+  const { user, supabase } = await getAuthContext();
   if (!user) return { success: false, message: "Not authenticated." };
 
   const raw = {
-    grade: formData.get("grade"),
+    class_id: formData.get("class_id"),
     entry_type: formData.get("entry_type"),
     title: formData.get("title"),
+    subject_name: formData.get("subject_name"),
     content: (formData.get("content") as string) || null,
     due_date: (formData.get("due_date") as string) || null,
   };
 
   const parsed = classWideSchema.safeParse(raw);
   if (!parsed.success) {
-    const first = parsed.error.issues[0];
     return {
       success: false,
-      message: first?.message ?? "Invalid input",
+      message: "Please check the form for errors.",
       errors: Object.fromEntries(
-        parsed.error.issues.map((i) => [i.path[0], i.message]),
+        parsed.error.issues.map((i) => [i.path[0], i.message])
       ) as DiaryActionState["errors"],
     };
   }
 
   const { error } = await supabase.from("student_diary").insert({
-    grade: parsed.data.grade,
+    class_id: parsed.data.class_id,
+    author_id: user.id, // Professional implementation tracks the creator
     entry_type: parsed.data.entry_type,
-    student_id: null,
     title: parsed.data.title,
-    content: parsed.data.content ?? null,
-    homework: parsed.data.entry_type === "homework",
-    due_date: parsed.data.due_date ?? null,
+    subject_name: parsed.data.subject_name,
+    content: parsed.data.content,
+    due_date: parsed.data.due_date,
+    student_id: null, // Explicitly null for class-wide
     is_completed: false,
   });
 
   if (error) {
     console.error("[createClassDiaryEntry]", error.message);
-    return {
-      success: false,
-      message: "Failed to save entry. Please try again.",
-    };
+    return { success: false, message: "Database error. Could not post entry." };
   }
 
   revalidatePath("/teacher/diary");
   revalidatePath("/parent");
 
-  const label = parsed.data.entry_type === "homework" ? "Homework" : "Notice";
-  return { success: true, message: `${label} posted to ${parsed.data.grade}.` };
+  return { 
+    success: true, 
+    message: `${parsed.data.entry_type === "homework" ? "Homework" : "Notice"} posted successfully.` 
+  };
 }
 
 // ── Create individual observation ─────────────────────────────────────────────
@@ -100,11 +91,10 @@ export async function createObservationAction(
   _prev: DiaryActionState,
   formData: FormData,
 ): Promise<DiaryActionState> {
-  const { user, supabase } = await getAuthUser();
+  const { user, supabase } = await getAuthContext();
   if (!user) return { success: false, message: "Not authenticated." };
 
   const raw = {
-    grade: formData.get("grade"),
     student_id: formData.get("student_id"),
     title: formData.get("title"),
     content: (formData.get("content") as string) || null,
@@ -112,30 +102,28 @@ export async function createObservationAction(
 
   const parsed = observationSchema.safeParse(raw);
   if (!parsed.success) {
-    const first = parsed.error.issues[0];
     return {
       success: false,
-      message: first?.message ?? "Invalid input",
+      message: "Check observation details.",
       errors: Object.fromEntries(
-        parsed.error.issues.map((i) => [i.path[0], i.message]),
+        parsed.error.issues.map((i) => [i.path[0], i.message])
       ) as DiaryActionState["errors"],
     };
   }
 
   const { error } = await supabase.from("student_diary").insert({
-    grade: parsed.data.grade,
-    entry_type: "observation",
     student_id: parsed.data.student_id,
+    author_id: user.id,
+    entry_type: "observation",
     title: parsed.data.title,
-    content: parsed.data.content ?? null,
-    homework: false,
-    due_date: null,
+    content: parsed.data.content,
+    class_id: null, // Explicitly null for individual observations
     is_completed: false,
   });
 
   if (error) {
     console.error("[createObservation]", error.message);
-    return { success: false, message: "Failed to save observation." };
+    return { success: false, message: "Failed to record observation." };
   }
 
   revalidatePath("/teacher/diary");
@@ -149,33 +137,26 @@ export async function updateDiaryEntryAction(
   _prev: DiaryActionState,
   formData: FormData,
 ): Promise<DiaryActionState> {
-  const { user, supabase } = await getAuthUser();
+  const { user, supabase } = await getAuthContext();
   if (!user) return { success: false, message: "Not authenticated." };
 
   const entryId = formData.get("entry_id") as string;
-  const entryType = formData.get("entry_type") as string;
-  const title = (formData.get("title") as string)?.trim();
-  const content = (formData.get("content") as string) || null;
+  const updates = {
+    title: (formData.get("title") as string)?.trim(),
+    content: (formData.get("content") as string) || null,
+    subject_name: (formData.get("subject_name") as string) || null,
+    due_date: (formData.get("due_date") as string) || null,
+  };
 
-  if (!entryId) return { success: false, message: "Entry ID missing." };
-  if (!title)
-    return {
-      success: false,
-      message: "Title is required.",
-      errors: { title: "Title is required" },
-    };
-
-  const updates: Record<string, unknown> = { title, content };
-  if (entryType === "homework") {
-    updates.due_date = (formData.get("due_date") as string) || null;
-  }
+  if (!entryId) return { success: false, message: "Missing entry reference." };
 
   const { error } = await supabase
     .from("student_diary")
     .update(updates)
-    .eq("id", entryId);
+    .eq("id", entryId)
+    .eq("author_id", user.id); // Security: Only author can update
 
-  if (error) return { success: false, message: "Failed to update entry." };
+  if (error) return { success: false, message: "Update failed." };
 
   revalidatePath("/teacher/diary");
   revalidatePath("/parent");
@@ -188,27 +169,22 @@ export async function toggleHomeworkCompleteAction(
   _prev: DiaryActionState,
   formData: FormData,
 ): Promise<DiaryActionState> {
-  const { user, supabase } = await getAuthUser();
+  const { user, supabase } = await getAuthContext();
   if (!user) return { success: false, message: "Not authenticated." };
 
   const entryId = formData.get("entry_id") as string;
   const completed = formData.get("completed") === "true";
-
-  if (!entryId) return { success: false, message: "Entry ID missing." };
 
   const { error } = await supabase
     .from("student_diary")
     .update({ is_completed: completed })
     .eq("id", entryId);
 
-  if (error) return { success: false, message: "Failed to update." };
+  if (error) return { success: false, message: "Status update failed." };
 
   revalidatePath("/teacher/diary");
   revalidatePath("/parent");
-  return {
-    success: true,
-    message: completed ? "Marked as submitted." : "Marked as pending.",
-  };
+  return { success: true, message: completed ? "Submitted." : "Pending." };
 }
 
 // ── Delete entry ──────────────────────────────────────────────────────────────
@@ -217,20 +193,20 @@ export async function deleteDiaryEntryAction(
   _prev: DiaryActionState,
   formData: FormData,
 ): Promise<DiaryActionState> {
-  const { user, supabase } = await getAuthUser();
+  const { user, supabase } = await getAuthContext();
   if (!user) return { success: false, message: "Not authenticated." };
 
   const entryId = formData.get("entry_id") as string;
-  if (!entryId) return { success: false, message: "Entry ID missing." };
 
   const { error } = await supabase
     .from("student_diary")
     .delete()
-    .eq("id", entryId);
+    .eq("id", entryId)
+    .eq("author_id", user.id); // Security: Author only
 
-  if (error) return { success: false, message: "Failed to delete entry." };
+  if (error) return { success: false, message: "Deletion failed." };
 
   revalidatePath("/teacher/diary");
   revalidatePath("/parent");
-  return { success: true, message: "Entry deleted." };
+  return { success: true, message: "Entry removed." };
 }

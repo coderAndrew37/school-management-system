@@ -1,15 +1,48 @@
 "use server";
 
 // lib/actions/parents.ts
-// Admin-side parent management actions.
-
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getSession } from "@/lib/actions/auth";
 
+// --- Types & Interfaces ---
+
 const ADMIN_ROLES = ["admin", "superadmin"] as const;
+
+interface ActionResult {
+  success: boolean;
+  message: string;
+}
+
+/** * Matches the nested join structure from Supabase:
+ * parents -> student_parents[] -> students
+ */
+interface RawParentExportRow {
+  full_name: string;
+  email: string;
+  phone_number: string | null;
+  invite_accepted: boolean | null;
+  created_at: string;
+  student_parents: {
+    students: {
+      full_name: string;
+      current_grade: string;
+    } | null;
+  }[];
+}
+
+export interface ParentExportData {
+  full_name: string;
+  email: string;
+  phone_number: string;
+  invite_accepted: boolean;
+  created_at: string;
+  children: string;
+}
+
+// --- Auth Guard ---
 
 async function requireAdmin() {
   const session = await getSession();
@@ -21,12 +54,7 @@ async function requireAdmin() {
   return session;
 }
 
-interface ActionResult {
-  success: boolean;
-  message: string;
-}
-
-// ── Update parent details ─────────────────────────────────────────────────────
+// --- Actions ---
 
 const updateParentSchema = z.object({
   parentId: z.string().uuid(),
@@ -55,8 +83,6 @@ export async function updateParentAction(
     };
 
   const { parentId, fullName, phone, email } = parsed.data;
-
-  // If email is changing, update the auth user email too
   const supabase = await createSupabaseServerClient();
 
   const { data: existing } = await supabaseAdmin
@@ -66,7 +92,6 @@ export async function updateParentAction(
     .single();
 
   if (existing && existing.email !== email) {
-    // Check no other parent already has this email
     const { data: conflict } = await supabaseAdmin
       .from("parents")
       .select("id")
@@ -102,16 +127,12 @@ export async function updateParentAction(
   return { success: true, message: `${fullName} updated successfully.` };
 }
 
-// ── Delete parent ─────────────────────────────────────────────────────────────
-// Guard: can only delete if the parent has no linked students.
-
 export async function deleteParentAction(
   parentId: string,
 ): Promise<ActionResult> {
   if (!(await requireAdmin()))
     return { success: false, message: "Unauthorised" };
 
-  // Count linked children
   const { count } = await supabaseAdmin
     .from("student_parents")
     .select("*", { count: "exact", head: true })
@@ -124,11 +145,8 @@ export async function deleteParentAction(
     };
   }
 
-  // Delete auth user (cascades to parents row via FK or we delete manually)
-  const { error: authError } =
-    await supabaseAdmin.auth.admin.deleteUser(parentId);
+  const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(parentId);
   if (authError) {
-    // Try deleting the row anyway if auth user was already gone
     console.warn("Auth user delete failed:", authError.message);
   }
 
@@ -139,8 +157,6 @@ export async function deleteParentAction(
   revalidatePath("/admin/parents");
   return { success: true, message: "Parent account deleted." };
 }
-
-// ── Reset parent password (generate new invite link) ─────────────────────────
 
 export async function resetParentPasswordAction(
   parentId: string,
@@ -167,7 +183,6 @@ export async function resetParentPasswordAction(
 
   if (linkErr) return { success: false, message: linkErr.message };
 
-  // Update last_invite_sent
   await supabaseAdmin
     .from("parents")
     .update({ last_invite_sent: new Date().toISOString() })
@@ -181,19 +196,13 @@ export async function resetParentPasswordAction(
   };
 }
 
-// ── Export parents to CSV ─────────────────────────────────────────────────────
-// Returns raw data — CSV building happens client-side to avoid streaming issues.
-
+/**
+ * Fetches parents and formats them for CSV export.
+ * Now uses RawParentExportRow for strict typing of the Supabase join.
+ */
 export async function fetchParentsForExport(): Promise<{
   success: boolean;
-  data: {
-    full_name: string;
-    email: string;
-    phone_number: string | null;
-    invite_accepted: boolean;
-    created_at: string;
-    children: string; // comma-separated "Name (Grade)"
-  }[];
+  data: ParentExportData[];
   message?: string;
 }> {
   if (!(await requireAdmin()))
@@ -201,37 +210,42 @@ export async function fetchParentsForExport(): Promise<{
 
   const { data, error } = await supabaseAdmin
     .from("parents")
-    .select(
-      `
-      full_name, email, phone_number, invite_accepted, created_at,
-      student_parents ( students ( full_name, current_grade ) )
-    `,
-    )
-    .order("full_name");
+    .select(`
+      full_name, 
+      email, 
+      phone_number, 
+      invite_accepted, 
+      created_at,
+      student_parents ( 
+        students ( 
+          full_name, 
+          current_grade 
+        ) 
+      )
+    `)
+    .order("full_name")
+    .returns<RawParentExportRow[]>(); // Applies the interface to the response
 
   if (error) return { success: false, data: [], message: error.message };
 
+  const formattedData: ParentExportData[] = (data ?? []).map((p) => ({
+    full_name: p.full_name,
+    email: p.email,
+    phone_number: p.phone_number ?? "",
+    invite_accepted: p.invite_accepted ?? false,
+    created_at: p.created_at,
+    children: p.student_parents
+      .map((sp) => sp.students)
+      .filter((s): s is NonNullable<typeof s> => s !== null) // Type guard for filter
+      .map((s) => `${s.full_name} (${s.current_grade})`)
+      .join("; "),
+  }));
+
   return {
     success: true,
-    data: (data ?? []).map((p: any) => ({
-      full_name: p.full_name,
-      email: p.email,
-      phone_number: p.phone_number ?? "",
-      invite_accepted: p.invite_accepted ?? false,
-      created_at: p.created_at,
-      children: (p.student_parents ?? [])
-        .map((sp: any) => sp.students)
-        .filter(Boolean)
-        .map((s: any) => `${s.full_name} (${s.current_grade})`)
-        .join("; "),
-    })),
+    data: formattedData,
   };
 }
-
-// ── Data fetchers exposed as server actions ───────────────────────────────────
-// The client component needs these lazily (on tab click) so they must be
-// server actions, not direct imports from lib/data/parents (which uses
-// next/headers and cannot be imported by client components).
 
 export async function getParentFeeBalancesAction(
   childIds: string[],

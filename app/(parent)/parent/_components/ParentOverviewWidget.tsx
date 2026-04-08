@@ -1,7 +1,7 @@
 "use client";
 
 // components/parent/MyChildTodayWidget.tsx
-// "My Child Today" — single-glance widget for the parent overview page.
+// Refactored to align with UUID-based diary schema and professional relations.
 
 import type {
   AttendanceRecord,
@@ -15,6 +15,7 @@ import {
   GraduationCap,
   CheckCircle2,
   XCircle,
+  BookOpen,
 } from "lucide-react";
 
 interface Props {
@@ -34,28 +35,28 @@ const STATUS_CONFIG: Record<
     textColor: string;
   }
 > = {
-  Present: {
+  present: {
     icon: <CheckCircle2 className="h-4 w-4" />,
     text: "At school today",
     bg: "bg-emerald-50",
     border: "border-emerald-200",
     textColor: "text-emerald-700",
   },
-  Absent: {
+  absent: {
     icon: <XCircle className="h-4 w-4" />,
     text: "Absent today",
     bg: "bg-rose-50",
     border: "border-rose-200",
     textColor: "text-rose-700",
   },
-  Late: {
+  late: {
     icon: <Clock className="h-4 w-4" />,
     text: "Arrived late today",
     bg: "bg-amber-50",
     border: "border-amber-200",
     textColor: "text-amber-700",
   },
-  Excused: {
+  excused: {
     icon: <FileText className="h-4 w-4" />,
     text: "Excused absence",
     bg: "bg-sky-50",
@@ -64,7 +65,7 @@ const STATUS_CONFIG: Record<
   },
 };
 
-// ── CBC score display config ──────────────────────────────────────────────────
+// ── CBC score display config (Standardized for Kenyan CBC) ────────────────────
 const SCORE_CONFIG: Record<
   string,
   { label: string; bg: string; textColor: string; border: string }
@@ -98,7 +99,10 @@ const SCORE_CONFIG: Record<
 export function MyChildTodayWidget({ child, attendance, diary }: Props) {
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayAtt = attendance.find((a) => a.date.slice(0, 10) === todayStr);
-  const attConfig = todayAtt ? STATUS_CONFIG[todayAtt.status] : null;
+  
+  // Note: Standardized keys to lowercase to match typical DB enum returns
+  const attStatusKey = todayAtt?.status.toLowerCase() || "";
+  const attConfig = STATUS_CONFIG[attStatusKey];
 
   const recentDiary = diary[0] ?? null;
   const lastScore = child.assessments?.[0] ?? null;
@@ -109,7 +113,7 @@ export function MyChildTodayWidget({ child, attendance, diary }: Props) {
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       {/* Title bar */}
-      <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+      <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2 bg-slate-50/50">
         <div className="h-6 w-6 rounded-lg bg-blue-600 flex items-center justify-center">
           <span className="text-white text-[10px] font-black">✦</span>
         </div>
@@ -125,92 +129,97 @@ export function MyChildTodayWidget({ child, attendance, diary }: Props) {
         </p>
       </div>
 
-      <div className="divide-y divide-slate-50">
-        {/* ── Attendance ─────────────────────────────────────────────────── */}
+      <div className="divide-y divide-slate-100">
+        {/* ── Attendance Section ─────────────────────────────────────────── */}
         {todayAtt && attConfig ? (
           <div className={`flex items-center gap-3 px-4 py-3 ${attConfig.bg}`}>
             <span className={`${attConfig.textColor} shrink-0`}>
               {attConfig.icon}
             </span>
-            <div>
+            <div className="flex-1 min-w-0">
               <p className={`text-xs font-black ${attConfig.textColor}`}>
                 {attConfig.text}
               </p>
               {todayAtt.notes && (
-                <p className="text-[10px] text-slate-500 mt-0.5">
+                <p className="text-[10px] text-slate-500 mt-0.5 truncate">
                   {todayAtt.notes}
                 </p>
               )}
             </div>
             <span
-              className={`ml-auto text-[10px] font-black border px-2 py-0.5 rounded-lg bg-white/60 ${attConfig.textColor} ${attConfig.border}`}
+              className={`text-[10px] font-black border px-2 py-0.5 rounded-lg bg-white/80 uppercase ${attConfig.textColor} ${attConfig.border}`}
             >
               {todayAtt.status}
             </span>
           </div>
         ) : (
-          <div className="flex items-center gap-3 px-4 py-3 bg-slate-50">
-            <CalendarCheck className="h-4 w-4 text-slate-400 shrink-0" />
-            <p className="text-xs text-slate-500 font-semibold">
-              Attendance not yet recorded for today
+          <div className="flex items-center gap-3 px-4 py-3 bg-slate-50/50">
+            <CalendarCheck className="h-4 w-4 text-slate-300 shrink-0" />
+            <p className="text-xs text-slate-400 font-bold italic">
+              Attendance check-in pending...
             </p>
           </div>
         )}
 
         {/* ── Latest Diary Section ────────────────────────────────────────── */}
-        <div className="p-4">
+        <div className="p-4 bg-white">
           {recentDiary ? (
-            <div className="space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-sm font-bold text-slate-700 leading-snug">
-                  {recentDiary.title}
-                </p>
-                {recentDiary.subject_name && (
-                  <span className="shrink-0 text-[10px] font-bold bg-amber-50 text-amber-600 border border-amber-100 rounded-lg px-2 py-0.5">
-                    {recentDiary.subject_name}
-                  </span>
-                )}
+            <div className="space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-blue-600">
+                      Latest {recentDiary.entry_type}
+                    </span>
+                    {recentDiary.subject_name && (
+                      <span className="h-1 w-1 rounded-full bg-slate-200" />
+                    )}
+                    <span className="text-[10px] font-bold text-slate-400">
+                      {recentDiary.subject_name}
+                    </span>
+                  </div>
+                  <p className="text-sm font-black text-slate-800 leading-tight">
+                    {recentDiary.title}
+                  </p>
+                </div>
+                <BookOpen className="h-4 w-4 text-slate-200 shrink-0" />
               </div>
 
               <p className="text-xs text-slate-500 leading-relaxed line-clamp-2">
-                {recentDiary.body}
+                {recentDiary.content || "Notes from teacher recorded."}
               </p>
 
-              {isHomework(recentDiary) && recentDiary.homework && (
-                <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
-                  <p className="text-[10px] font-black uppercase tracking-wider text-amber-600 mb-1">
-                    📚 Homework
-                  </p>
-                  <p className="text-xs text-amber-800 leading-relaxed line-clamp-2">
-                    {recentDiary.homework}
-                  </p>
-                  {/* Fixed: Added a check for due_date existence before passing to Date constructor */}
-                  {recentDiary.due_date && (
-                    <p className="text-[9px] font-bold text-amber-600/70 mt-1 uppercase tracking-tighter">
-                      Due:{" "}
-                      {new Date(recentDiary.due_date).toLocaleDateString(
-                        "en-KE",
-                      )}
+              {/* Homework UI Alignment */}
+              {isHomework(recentDiary) && (
+                <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[9px] font-black uppercase tracking-wider text-blue-700">
+                      📝 Homework Task
                     </p>
-                  )}
+                    {recentDiary.due_date && (
+                      <p className="text-[9px] font-black text-blue-700/60 uppercase">
+                        Due: {new Date(recentDiary.due_date).toLocaleDateString("en-KE")}
+                      </p>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-700 font-medium line-clamp-2">
+                    Complete the following {recentDiary.subject_name?.toLowerCase()} exercise.
+                  </p>
                 </div>
               )}
 
-              <p className="text-[10px] text-slate-400">
-                {new Date(
-                  recentDiary.diary_date + "T00:00:00",
-                ).toLocaleDateString("en-KE", {
-                  day: "numeric",
-                  month: "long",
-                })}
-                {" · "}
-                {recentDiary.author_name}
-              </p>
+              <div className="flex items-center gap-2 pt-1">
+                <div className="h-4 w-4 rounded-full bg-slate-100 flex items-center justify-center text-[8px] font-bold text-slate-400">
+                  {recentDiary.profiles?.full_name?.charAt(0) || "T"}
+                </div>
+                <p className="text-[10px] font-bold text-slate-400">
+                  Posted by {recentDiary.profiles?.full_name || "Class Teacher"}
+                </p>
+              </div>
             </div>
           ) : (
-            <div className="py-4 text-center">
-              <p className="text-[20px] mb-1">📔</p>
-              <p className="text-xs text-slate-400">No diary entries yet</p>
+            <div className="py-4 text-center border-2 border-dashed border-slate-50 rounded-xl">
+              <p className="text-xs text-slate-400 font-semibold italic">No diary entries for today yet</p>
             </div>
           )}
         </div>
@@ -221,20 +230,20 @@ export function MyChildTodayWidget({ child, attendance, diary }: Props) {
             <GraduationCap className="h-4 w-4 text-blue-500 shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">
-                Latest Assessment
+                CBC Assessment
               </p>
-              <p className="text-xs font-bold text-slate-700 line-clamp-1">
+              <p className="text-xs font-bold text-slate-700 truncate">
                 {lastScore.subject_name}
               </p>
             </div>
-            <div className="flex flex-col items-end gap-0.5 shrink-0">
+            <div className="flex flex-col items-end shrink-0">
               <span
-                className={`text-sm font-black border rounded-lg px-2 py-0.5 ${scoreConfig.bg} ${scoreConfig.textColor} ${scoreConfig.border}`}
+                className={`text-xs font-black border rounded-lg px-2 py-0.5 ${scoreConfig.bg} ${scoreConfig.textColor} ${scoreConfig.border}`}
               >
                 {lastScore.score}
               </span>
-              <span className="text-[9px] text-slate-400">
-                {scoreConfig.label}
+              <span className="text-[8px] font-bold text-slate-400 mt-0.5">
+                {scoreConfig.label.split(" ")[0]}...
               </span>
             </div>
           </div>

@@ -14,7 +14,6 @@ import type {
   AnnouncementPriority,
 } from "@/lib/types/governance";
 
-// Priority → prototype .alert colour pairs
 const PRIORITY: Record<
   AnnouncementPriority,
   {
@@ -67,16 +66,25 @@ const PRIORITY: Record<
 
 interface Props {
   announcements: Announcement[];
-  childGrade: string;
+  /** The specific class_id of the parent's child */
+  childClassId: string;
 }
 
-export function AnnouncementsView({ announcements, childGrade }: Props) {
+export function AnnouncementsView({ announcements, childClassId }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  // Filter based on the new implementation
   const visible = announcements.filter((a) => {
+    // 1. Expiry Check
     if (a.expires_at && new Date(a.expires_at) < new Date()) return false;
+    
+    // 2. Role Check
     if (a.audience === "teachers") return false;
-    if (a.audience === "grade" && a.target_grade !== childGrade) return false;
+    
+    // 3. Class/Grade Target Check
+    // Using target_class_id as defined in lib/types/governance.ts
+    if (a.audience === "grade" && a.target_class_id !== childClassId) return false;
+    
     return true;
   });
 
@@ -99,7 +107,7 @@ export function AnnouncementsView({ announcements, childGrade }: Props) {
           No announcements at the moment
         </p>
         <p className="text-xs text-slate-400 mt-1">
-          Check back later for school news and updates
+          Updates for your child&apos;s class will appear here
         </p>
       </div>
     );
@@ -116,6 +124,7 @@ export function AnnouncementsView({ announcements, childGrade }: Props) {
         const isOpen = expandedId === a.id;
         const preview =
           a.body.length > 140 ? a.body.slice(0, 140).trim() + "…" : a.body;
+
         return (
           <div
             key={a.id}
@@ -145,7 +154,7 @@ export function AnnouncementsView({ announcements, childGrade }: Props) {
                   </span>
                   {a.audience === "grade" && (
                     <span className="text-[10px] text-slate-400 font-mono font-bold">
-                      {a.target_grade} only
+                      {a.classes?.grade || "Class Update"}
                     </span>
                   )}
                 </div>
@@ -164,8 +173,6 @@ export function AnnouncementsView({ announcements, childGrade }: Props) {
                     month: "short",
                     year: "numeric",
                   })}
-                  {a.expires_at &&
-                    ` · Expires ${new Date(a.expires_at).toLocaleDateString("en-KE", { day: "numeric", month: "short" })}`}
                 </p>
               </div>
               <div className={`flex-shrink-0 mt-1 ${p.text}`}>

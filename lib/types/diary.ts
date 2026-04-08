@@ -1,5 +1,4 @@
-// lib/types/diary.ts
-// Pure type definitions — no "use client" needed (types are erased at runtime).
+import type { Class } from "./allocation";
 
 export type DiaryEntryType = "homework" | "notice" | "observation";
 
@@ -7,22 +6,27 @@ export type DiaryEntryType = "homework" | "notice" | "observation";
 
 export interface DiaryBase {
   id: string;
-  grade: string;
   entry_type: DiaryEntryType;
   title: string;
   content: string | null;
+  subject_name: string | null;
   created_at: string;
+  updated_at: string;
   // Derived on the client from created_at — not a DB column
   diary_date: string;
-  subject_name?: string | null;
-  author_name?: string | null;
+  
+  // Optional Joins for rich UI (Nuke-proof relations)
+  classes?: Class | null;
+  profiles?: { full_name: string | null } | null;
+  students?: { full_name: string; readable_id: string | null } | null;
 }
 
 // ── Class-wide entries: homework and notice ────────────────────────────────────
 
 export interface ClassDiaryEntry extends DiaryBase {
   entry_type: "homework" | "notice";
-  student_id: null;
+  class_id: string;      // Required for class-wide scope
+  student_id: null;      // Must be null per chk_diary_scope
   due_date: string | null;
   is_completed: boolean;
 }
@@ -31,24 +35,30 @@ export interface ClassDiaryEntry extends DiaryBase {
 
 export interface ObservationEntry extends DiaryBase {
   entry_type: "observation";
-  student_id: string;
-  student_name: string;
+  class_id: null;        // Must be null per chk_diary_scope
+  student_id: string;    // Required for individual scope
   due_date: null;
   is_completed: false;
 }
 
-// ── Union ─────────────────────────────────────────────────────────────────────
+// ── Union & View Types ────────────────────────────────────────────────────────
 
 export type TeacherDiaryEntry = ClassDiaryEntry | ObservationEntry;
+
+// For Parent Dashboard / Student views
+export type StudentDiaryView = TeacherDiaryEntry;
 
 // ── ActionState for useActionState ────────────────────────────────────────────
 
 export interface DiaryActionState {
   success: boolean;
   message: string;
-  // Field-level errors keyed by form field name
+  // Fields updated to match refactored DB columns
   errors?: Partial<
-    Record<"grade" | "title" | "content" | "student_id" | "due_date", string>
+    Record<
+      "class_id" | "student_id" | "title" | "content" | "subject_name" | "due_date",
+      string
+    >
   >;
 }
 

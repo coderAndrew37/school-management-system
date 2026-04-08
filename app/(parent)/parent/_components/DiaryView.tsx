@@ -65,15 +65,15 @@ export function DiaryView({ entries }: Props) {
           </p>
           {urgentHw.map((e) => (
             <div key={e.id} className="flex items-start gap-2">
-              <span className="text-[10px] font-black text-amber-600 min-w-[72px] flex-shrink-0 mt-0.5">
+              <span className="text-[10px] font-black text-amber-600 min-w-[72px] shrink-0 mt-0.5">
                 {e.subject_name || e.title}
               </span>
               <span className="flex-1 text-xs text-amber-800 leading-relaxed line-clamp-1">
-                {e.body || e.content}
+                {e.content || e.content}
               </span>
               {isHomework(e) && e.due_date && (
                 <span
-                  className={`flex-shrink-0 text-[10px] font-black ml-1 ${
+                  className={`shrink-0 text-[10px] font-black ml-1 ${
                     isOverdue(e.due_date) ? "text-red-700" : "text-amber-700"
                   }`}
                 >
@@ -135,7 +135,7 @@ export function DiaryView({ entries }: Props) {
                 <div className="flex items-start gap-3">
                   <div
                     className={[
-                      "flex-shrink-0 h-9 w-9 rounded-xl flex items-center justify-center border",
+                      "shrink-0 h-9 w-9 rounded-xl flex items-center justify-center border",
                       isHw
                         ? "border-amber-200 bg-amber-100"
                         : isObs
@@ -176,7 +176,7 @@ export function DiaryView({ entries }: Props) {
 
                 {/* Content */}
                 <p className="text-sm text-slate-600 leading-relaxed">
-                  {entry.body || entry.content}
+                  {entry.content || entry.content}
                 </p>
 
                 {/* Homework specific footer info */}

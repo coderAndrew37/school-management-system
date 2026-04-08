@@ -63,6 +63,7 @@ export interface ChildWithAssessments extends Student {
    */
   all_parents: StudentParentLink[];
   assessments: Assessment[];
+  grade_label: string;
 }
 
 // ── Derived shapes ────────────────────────────────────────────────────────────
