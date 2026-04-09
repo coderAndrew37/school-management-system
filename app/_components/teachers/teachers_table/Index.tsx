@@ -10,6 +10,7 @@ import { TeachersTableContent } from "./TeachersTableContent";
 import { useTeachersFilter } from "./useTeachersFilters"; // Changed from useTeachersFilters to match the export
 
 import type { Teacher } from "@/lib/types/dashboard";
+import RegisterTeacherModal from "../RegisterTeacherModal";
 
 interface TeachersIndexProps {
   initialTeachers: Teacher[];
@@ -72,13 +73,7 @@ export default function TeachersIndex({
             </div>
           </div>
 
-          <button
-            onClick={() => setIsAddingNew(true)}
-            className="flex items-center bg-amber-400 hover:bg-amber-500 transition-colors text-[#0c0f1a] font-bold rounded-xl px-5 py-2.5 text-sm"
-          >
-            <Plus className="h-4 w-4 mr-2 stroke-[3]" />
-            Add Teacher
-          </button>
+          <RegisterTeacherModal/>
         </div>
       </div>
 
