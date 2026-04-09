@@ -165,6 +165,8 @@ export interface TransferStudentSnippet {
   current_grade: string;
   readable_id: string | null;
   status: string;
+  /** Added: Used to determine the target class during inbound approval */
+  class_id?: string | null; 
 }
 
 // ── Transfer action inputs ────────────────────────────────────────────────────
@@ -178,6 +180,8 @@ export interface InitiateOutboundInput {
 export interface ApproveInboundInput {
   transferId: string;
   studentId: string;
+  /** Added: Approval now requires a target class to restore student records */
+  classId: string; 
 }
 
 export interface InboundScanInput {

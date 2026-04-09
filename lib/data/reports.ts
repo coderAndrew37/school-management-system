@@ -4,7 +4,52 @@
 
 import { supabaseAdmin } from "../supabase/admin";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── 1. Row Interfaces ─────────────────────────────────────────────────────────
+
+interface RawStudentRow {
+  id: string;
+  full_name: string;
+  readable_id: string | null;
+  date_of_birth: string;
+  gender: "Male" | "Female" | null;
+  current_grade: string;
+  class_id: string | null;
+}
+
+interface RawParentLink {
+  student_id: string;
+  is_primary_contact: boolean;
+  parents: {
+    full_name: string;
+    phone_number: string | null;
+  } | null;
+}
+
+interface RawAssessmentRow {
+  student_id: string;
+  subject_name: string;
+  strand_id: string;
+  score: "EE" | "ME" | "AE" | "BE" | null;
+  teacher_remarks: string | null;
+  term: number;
+  academic_year: number;
+  teachers: { full_name: string } | null;
+}
+
+interface RawReportCardRow {
+  student_id: string;
+  class_teacher_remarks: string | null;
+  conduct_grade: string | null;
+  effort_grade: string | null;
+  status: string;
+}
+
+interface RawAttendanceRow {
+  student_id: string;
+  status: string;
+}
+
+// ── 2. Domain Types ───────────────────────────────────────────────────────────
 
 export interface ReportAssessment {
   subject_name: string;
@@ -25,7 +70,6 @@ export interface ReportStudent {
   parent_name: string | null;
   parent_phone: string | null;
   assessments: ReportAssessment[];
-  // Report card fields (class teacher remarks etc.)
   class_teacher_remarks: string | null;
   conduct_grade: string | null;
   effort_grade: string | null;
@@ -35,113 +79,85 @@ export interface ReportStudent {
   attendance_total: number;
 }
 
-export interface ReportGenerationPayload {
-  students: ReportStudent[];
-  term: number;
-  academic_year: number;
-  mode: "bulk" | "single";
-}
-
-// ── Main fetch ────────────────────────────────────────────────────────────────
+// ── 3. Main fetch ──────────────────────────────────────────────────────────────
 
 export async function fetchStudentsForReports(
-  grade: string | null,
+  classId: string | null, // Refactored to use classId instead of grade string
   term: number,
   academicYear: number,
 ): Promise<ReportStudent[]> {
-  // 1. Students
+  // 1. Fetch Students based on the specific Class/Stream
   let studentQuery = supabaseAdmin
     .from("students")
-    .select("id, full_name, readable_id, date_of_birth, gender, current_grade")
-    .order("current_grade")
+    .select("id, full_name, readable_id, date_of_birth, gender, current_grade, class_id")
     .order("full_name");
 
-  if (grade && grade !== "all") {
-    studentQuery = studentQuery.eq("current_grade", grade);
+  if (classId && classId !== "all") {
+    studentQuery = studentQuery.eq("class_id", classId);
   }
 
-  const { data: students, error: studentsErr } = await studentQuery;
+  const { data: students, error: studentsErr } = await studentQuery.returns<RawStudentRow[]>();
+  
   if (studentsErr || !students || students.length === 0) {
     console.error("[fetchStudentsForReports] students:", studentsErr?.message);
     return [];
   }
 
-  const studentIds = students.map((s: any) => s.id as string);
+  const studentIds = students.map((s) => s.id);
 
-  // 2. Parent contacts via junction table (students.parent_id does not exist)
-  const { data: parentLinks } = await supabaseAdmin
-    .from("student_parents")
-    .select(
-      "student_id, is_primary_contact, parents ( full_name, phone_number )",
-    )
-    .in("student_id", studentIds);
+  // 2. Parallel fetch for all related report data
+  const [parentRes, assessRes, cardRes, attRes] = await Promise.all([
+    supabaseAdmin
+      .from("student_parents")
+      .select("student_id, is_primary_contact, parents ( full_name, phone_number )")
+      .in("student_id", studentIds)
+      .returns<RawParentLink[]>(),
 
-  // 3. Assessments for this term
-  const { data: assessments, error: assessErr } = await supabaseAdmin
-    .from("assessments")
-    .select(
-      `
-      student_id,
-      subject_name,
-      strand_id,
-      score,
-      teacher_remarks,
-      term,
-      academic_year,
-      teachers ( full_name )
-    `,
-    )
-    .in("student_id", studentIds)
-    .eq("term", term)
-    .eq("academic_year", academicYear)
-    .not("score", "is", null)
-    .order("subject_name");
+    supabaseAdmin
+      .from("assessments")
+      .select("student_id, subject_name, strand_id, score, teacher_remarks, term, academic_year, teachers ( full_name )")
+      .in("student_id", studentIds)
+      .eq("term", term)
+      .eq("academic_year", academicYear)
+      .not("score", "is", null)
+      .order("subject_name")
+      .returns<RawAssessmentRow[]>(),
 
-  if (assessErr)
-    console.error("[fetchStudentsForReports] assessments:", assessErr.message);
+    supabaseAdmin
+      .from("report_cards")
+      .select("student_id, class_teacher_remarks, conduct_grade, effort_grade, status")
+      .in("student_id", studentIds)
+      .eq("term", term)
+      .eq("academic_year", academicYear)
+      .returns<RawReportCardRow[]>(),
 
-  // 4. Report cards (class teacher remarks, conduct, effort)
-  const { data: reportCards } = await supabaseAdmin
-    .from("report_cards")
-    .select(
-      "student_id, class_teacher_remarks, conduct_grade, effort_grade, status",
-    )
-    .in("student_id", studentIds)
-    .eq("term", term)
-    .eq("academic_year", academicYear);
+    supabaseAdmin
+      .from("attendance")
+      .select("student_id, status")
+      .in("student_id", studentIds)
+      .returns<RawAttendanceRow[]>(),
+  ]);
 
-  // 5. Attendance (all records — no term date table yet)
-  const { data: attendanceRows } = await supabaseAdmin
-    .from("attendance")
-    .select("student_id, status")
-    .in("student_id", studentIds);
-
-  // ── Aggregate helpers ─────────────────────────────────────────────────────
+  // ── 4. Map and Aggregate Data ────────────────────────────────────────────────
 
   // Parents map: studentId → primary parent
-  const parentMap = new Map<
-    string,
-    { full_name: string; phone_number: string | null }
-  >();
-  for (const link of (parentLinks ?? []) as any[]) {
+  const parentMap = new Map<string, { full_name: string; phone_number: string | null }>();
+  for (const link of (parentRes.data ?? [])) {
     const existing = parentMap.get(link.student_id);
-    // Prefer primary contact; otherwise take first
     if (!existing || link.is_primary_contact) {
-      const p = Array.isArray(link.parents) ? link.parents[0] : link.parents;
-      if (p) parentMap.set(link.student_id, p);
+      if (link.parents) parentMap.set(link.student_id, link.parents);
     }
   }
 
   // Assessments map: studentId → ReportAssessment[]
   const assessMap = new Map<string, ReportAssessment[]>();
-  for (const a of (assessments ?? []) as any[]) {
-    const teacher = Array.isArray(a.teachers) ? a.teachers[0] : a.teachers;
+  for (const a of (assessRes.data ?? [])) {
     const entry: ReportAssessment = {
       subject_name: a.subject_name,
       strand_id: a.strand_id,
       score: a.score,
-      teacher_remarks: a.teacher_remarks ?? null,
-      teacher_name: teacher?.full_name ?? null,
+      teacher_remarks: a.teacher_remarks,
+      teacher_name: a.teachers?.full_name ?? null,
       term: a.term,
       academic_year: a.academic_year,
     };
@@ -150,21 +166,15 @@ export async function fetchStudentsForReports(
     assessMap.set(a.student_id, list);
   }
 
-  // Report cards map: studentId → rc
-  const rcMap = new Map<string, any>();
-  for (const rc of (reportCards ?? []) as any[]) {
+  // Report cards map
+  const rcMap = new Map<string, RawReportCardRow>();
+  for (const rc of (cardRes.data ?? [])) {
     rcMap.set(rc.student_id, rc);
   }
 
-  // Attendance map: studentId → { present, absent, late }
-  const attMap = new Map<
-    string,
-    { present: number; absent: number; late: number }
-  >();
-  for (const r of (attendanceRows ?? []) as {
-    student_id: string;
-    status: string;
-  }[]) {
+  // Attendance map
+  const attMap = new Map<string, { present: number; absent: number; late: number }>();
+  for (const r of (attRes.data ?? [])) {
     const cur = attMap.get(r.student_id) ?? { present: 0, absent: 0, late: 0 };
     if (r.status === "Present") cur.present++;
     else if (r.status === "Absent") cur.absent++;
@@ -172,17 +182,18 @@ export async function fetchStudentsForReports(
     attMap.set(r.student_id, cur);
   }
 
-  // ── Build result ──────────────────────────────────────────────────────────
-  return (students as any[]).map((s): ReportStudent => {
+  // ── 5. Build Resulting Objects ──────────────────────────────────────────────
+
+  return students.map((s): ReportStudent => {
     const parent = parentMap.get(s.id);
-    const rc = rcMap.get(s.id) ?? null;
+    const rc = rcMap.get(s.id);
     const att = attMap.get(s.id) ?? { present: 0, absent: 0, late: 0 };
 
     return {
       full_name: s.full_name,
-      readable_id: s.readable_id ?? null,
+      readable_id: s.readable_id,
       date_of_birth: s.date_of_birth,
-      gender: s.gender ?? null,
+      gender: s.gender,
       current_grade: s.current_grade,
       parent_name: parent?.full_name ?? null,
       parent_phone: parent?.phone_number ?? null,
@@ -198,48 +209,27 @@ export async function fetchStudentsForReports(
   });
 }
 
-// ── Grade list for filter dropdowns ──────────────────────────────────────────
+// ── 4. Refactored Grades List (fetches from 'classes' table) ───────────────────
 
-export async function fetchAllGrades(): Promise<string[]> {
+export interface ClassListOption {
+  id: string;
+  label: string;
+}
+
+export async function fetchReportClassOptions(academicYear: number): Promise<ClassListOption[]> {
   const { data, error } = await supabaseAdmin
-    .from("students")
-    .select("current_grade");
+    .from("classes")
+    .select("id, grade, stream")
+    .eq("academic_year", academicYear)
+    .order("grade");
 
   if (error) {
-    console.error("[fetchAllGrades]", error.message);
+    console.error("[fetchReportClassOptions]", error.message);
     return [];
   }
 
-  const grades = [
-    ...new Set(
-      (data ?? []).map((r: { current_grade: string }) => r.current_grade),
-    ),
-  ];
-
-  const CBC_ORDER = [
-    "PP1",
-    "PP2",
-    "Grade 1",
-    "Grade 2",
-    "Grade 3",
-    "Grade 4",
-    "Grade 5",
-    "Grade 6",
-    "Grade 7 / JSS 1",
-    "Grade 8 / JSS 2",
-    "Grade 9 / JSS 3",
-    "Form 1",
-    "Form 2",
-    "Form 3",
-    "Form 4",
-  ];
-
-  return grades.sort((a, b) => {
-    const ai = CBC_ORDER.indexOf(a);
-    const bi = CBC_ORDER.indexOf(b);
-    if (ai === -1 && bi === -1) return a.localeCompare(b);
-    if (ai === -1) return 1;
-    if (bi === -1) return -1;
-    return ai - bi;
-  });
+  return (data ?? []).map((c) => ({
+    id: c.id,
+    label: c.stream && c.stream !== "Main" ? `${c.grade} — ${c.stream}` : c.grade,
+  }));
 }

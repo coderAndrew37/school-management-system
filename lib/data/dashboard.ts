@@ -4,23 +4,63 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { GRADE_LEVEL_MAP } from "@/lib/types/assessment";
 import { DashboardStats, Student } from "@/lib/types/dashboard";
 
-// ── Helper: Map Student Join Table ───────────────────────────────────────────
+// ── 1. Internal Types for Supabase Joins ──────────────────────────────────────
+
+interface RawParent {
+  id: string;
+  full_name: string;
+  phone_number: string | null;
+  email: string;
+  invite_accepted: boolean;
+}
+
+interface RawParentLink {
+  is_primary_contact: boolean;
+  relationship_type: string;
+  parents: RawParent | null;
+}
+
+interface RawStudentRow {
+  id: string;
+  readable_id: string;
+  upi_number: string | null;
+  full_name: string;
+  date_of_birth: string;
+  gender: "Male" | "Female" | null;
+  current_grade: string;
+  current_stream: string | null;
+  class_id: string | null;
+  photo_url: string | null;
+  status: string | null;
+  created_at: string;
+  student_parents: RawParentLink[] | null;
+}
+
+// ── 2. Helper: Map Student Join Table ───────────────────────────────────────────
+
 /**
  * Flattens the join table student_parents into the shape the frontend expects.
  * Prioritizes the primary contact for the summary 'parents' field.
  */
-function mapStudentRow(row: any): Student {
-  const links: any[] = Array.isArray(row.student_parents)
-    ? row.student_parents
-    : [];
+function mapStudentRow(row: RawStudentRow): Student {
+  const links = row.student_parents ?? [];
   const primary = links.find((l) => l.is_primary_contact) ?? links[0] ?? null;
 
   return {
-    ...row,
+    id: row.id,
+    readable_id: row.readable_id,
+    upi_number: row.upi_number,
+    full_name: row.full_name,
+    date_of_birth: row.date_of_birth,
+    gender: row.gender,
+    current_grade: row.current_grade,
+    current_stream: row.current_stream ?? "Main",
+    class_id: row.class_id ?? "",
+    photo_url: row.photo_url,
+    created_at: row.created_at,
     parents: primary?.parents ?? null,
-    parent_id: null,
-    status: row.status ?? "active",
-    all_parents: links.map((l: any) => ({
+    status: (row.status as Student["status"]) ?? "active",
+    all_parents: links.map((l) => ({
       parent_id: l.parents?.id ?? "",
       full_name: l.parents?.full_name ?? "",
       phone_number: l.parents?.phone_number ?? null,
@@ -34,7 +74,7 @@ function mapStudentRow(row: any): Student {
 
 const STUDENT_SELECT = `
   id, readable_id, upi_number, full_name,
-  date_of_birth, gender, current_grade, photo_url, status, created_at,
+  date_of_birth, gender, current_grade, current_stream, class_id, photo_url, status, created_at,
   student_parents (
     is_primary_contact,
     relationship_type,
@@ -42,7 +82,7 @@ const STUDENT_SELECT = `
   )
 ` as const;
 
-// ── Student Fetchers ──────────────────────────────────────────────────────────
+// ── 3. Student Fetchers ──────────────────────────────────────────────────────────
 
 export async function fetchStudents(limit?: number): Promise<Student[]> {
   const supabase = await createSupabaseServerClient();
@@ -58,7 +98,9 @@ export async function fetchStudents(limit?: number): Promise<Student[]> {
     console.error("[fetchStudents] error:", error.message);
     return [];
   }
-  return (data ?? []).map(mapStudentRow);
+  
+  const rawData = data as unknown as RawStudentRow[];
+  return (rawData ?? []).map(mapStudentRow);
 }
 
 export async function fetchAllStudents({
@@ -96,10 +138,12 @@ export async function fetchAllStudents({
     console.error("[fetchAllStudents] error:", error.message);
     return [];
   }
-  return (data ?? []).map(mapStudentRow);
+
+  const rawData = data as unknown as RawStudentRow[];
+  return (rawData ?? []).map(mapStudentRow);
 }
 
-// ── Dashboard Stats ───────────────────────────────────────────────────────────
+// ── 4. Dashboard Stats ───────────────────────────────────────────────────────────
 
 export async function fetchDashboardStats(): Promise<DashboardStats> {
   const supabase = await createSupabaseServerClient();
@@ -116,7 +160,7 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
   };
 }
 
-// ── Chart Data Types & Metadata ───────────────────────────────────────────────
+// ── 5. Chart Data Types & Metadata ───────────────────────────────────────────────
 
 export interface GradeEnrollmentBar {
   grade: string;
@@ -164,7 +208,7 @@ const SCORE_META: Record<string, { label: string; color: string }> = {
   BE: { label: "Below Expectation", color: "#fb7185" },
 };
 
-// ── Dashboard Analytics ───────────────────────────────────────────────────────
+// ── 6. Dashboard Analytics ───────────────────────────────────────────────────────
 
 export async function fetchDashboardChartData(
   term = 1,
@@ -185,24 +229,12 @@ export async function fetchDashboardChartData(
       .not("score", "is", null),
   ]);
 
-  const students = (studentsRes.data ?? []) as {
-    id: string;
-    current_grade: string;
-    gender: string | null;
-    created_at: string;
-  }[];
-  const assessments = (assessRes.data ?? []) as {
-    student_id: string;
-    score: string;
-  }[];
+  const rawStudents = studentsRes.data ?? [];
+  const rawAssessments = assessRes.data ?? [];
 
-  // 1. Dynamic Grade Enrollment logic
-  const gradeMap: Record<
-    string,
-    { male: number; female: number; total: number }
-  > = {};
+  const gradeMap: Record<string, { male: number; female: number; total: number }> = {};
 
-  for (const s of students) {
+  for (const s of rawStudents) {
     const g = s.current_grade || "Unknown";
     if (!gradeMap[g]) gradeMap[g] = { male: 0, female: 0, total: 0 };
     gradeMap[g]!.total++;
@@ -210,7 +242,6 @@ export async function fetchDashboardChartData(
     if (s.gender === "Female") gradeMap[g]!.female++;
   }
 
-  // Sort grades naturally (PP1, PP2, Grade 1, Grade 2...)
   const sortedActiveGrades = Object.keys(gradeMap).sort((a, b) =>
     a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
   );
@@ -223,7 +254,6 @@ export async function fetchDashboardChartData(
     female: gradeMap[g]!.female,
   }));
 
-  // 2. Level Summary logic
   const levelCount: Record<string, number> = {};
   for (const row of gradeEnrollment) {
     levelCount[row.level] = (levelCount[row.level] ?? 0) + row.count;
@@ -237,17 +267,15 @@ export async function fetchDashboardChartData(
     }),
   );
 
-  // 3. Gender split
-  const male = students.filter((s) => s.gender === "Male").length;
-  const female = students.filter((s) => s.gender === "Female").length;
-  const unknown = students.length - male - female;
+  const male = rawStudents.filter((s) => s.gender === "Male").length;
+  const female = rawStudents.filter((s) => s.gender === "Female").length;
+  const unknown = rawStudents.length - male - female;
 
-  // 4. Score distribution
   const scoreCounts: Record<string, number> = { EE: 0, ME: 0, AE: 0, BE: 0 };
-  for (const a of assessments) {
-    if (scoreCounts[a.score] !== undefined) scoreCounts[a.score]!++;
+  for (const a of rawAssessments) {
+    if (a.score && scoreCounts[a.score] !== undefined) scoreCounts[a.score]!++;
   }
-  const scoreTotal = assessments.length;
+  const scoreTotal = rawAssessments.length;
   const scoreDistribution: ScoreDistItem[] = (
     ["EE", "ME", "AE", "BE"] as const
   ).map((s) => ({
@@ -259,15 +287,13 @@ export async function fetchDashboardChartData(
     color: SCORE_META[s]!.color,
   }));
 
-  // 5. Assessment totals
-  const assessedStudentIds = new Set(assessments.map((a) => a.student_id));
+  const assessedStudentIds = new Set(rawAssessments.map((a) => a.student_id));
   const assessmentTotals = {
-    total: students.length,
+    total: rawStudents.length,
     assessed: assessedStudentIds.size,
-    unassessed: students.length - assessedStudentIds.size,
+    unassessed: rawStudents.length - assessedStudentIds.size,
   };
 
-  // 6. Recent admissions (KE Locale)
   const now = new Date();
   const monthLabels = Array.from({ length: 6 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
@@ -278,7 +304,7 @@ export async function fetchDashboardChartData(
   });
 
   const admissionsPerMonth: Record<string, number> = {};
-  for (const s of students) {
+  for (const s of rawStudents) {
     const d = new Date(s.created_at);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     admissionsPerMonth[key] = (admissionsPerMonth[key] ?? 0) + 1;

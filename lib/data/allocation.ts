@@ -3,9 +3,58 @@ import type {
   Subject,
   TeacherSubjectAllocation,
   TimetableGrid,
+  Class,
+  SubjectLevel
 } from "@/lib/types/allocation";
 
-// ── 1. Fetch Subjects ─────────────────────────────────────────────────────────
+// ── 1. Internal Types for Supabase Joins ──────────────────────────────────────
+
+interface RawAllocationRow {
+  id: string;
+  teacher_id: string;
+  subject_id: string;
+  class_id: string;
+  academic_year: number;
+  created_at: string;
+  teachers: { id: string; full_name: string; email: string; tsc_number: string | null } | { id: string; full_name: string; email: string; tsc_number: string | null }[];
+  subjects: { id: string; name: string; code: string; level: SubjectLevel; weekly_lessons: number } | { id: string; name: string; code: string; level: SubjectLevel; weekly_lessons: number }[];
+  classes: Class | Class[];
+}
+
+interface RawTimetableSlot {
+  id: string;
+  allocation_id: string;
+  grade: string;
+  day_of_week: number;
+  period: number;
+  academic_year: number;
+  teacher_subject_allocations: {
+    teacher_id: string;
+    class_id: string;
+    teachers: { id: string; full_name: string } | { id: string; full_name: string }[] | null;
+    subjects: { name: string; code: string } | { name: string; code: string }[] | null;
+    classes: Class | Class[] | null;
+  } | {
+    teacher_id: string;
+    class_id: string;
+    teachers: { id: string; full_name: string } | { id: string; full_name: string }[] | null;
+    subjects: { name: string; code: string } | { name: string; code: string }[] | null;
+    classes: Class | Class[] | null;
+  }[] | null;
+}
+
+// ── 2. Helpers ────────────────────────────────────────────────────────────────
+
+function mapAllocationRow(row: RawAllocationRow): TeacherSubjectAllocation {
+  return {
+    ...row,
+    teachers: Array.isArray(row.teachers) ? row.teachers[0] : row.teachers,
+    subjects: Array.isArray(row.subjects) ? row.subjects[0] : row.subjects,
+    classes: Array.isArray(row.classes) ? row.classes[0] : row.classes,
+  };
+}
+
+// ── 3. Fetch Functions ────────────────────────────────────────────────────────
 
 export async function fetchSubjects(): Promise<Subject[]> {
   const supabase = createServerClient();
@@ -14,6 +63,7 @@ export async function fetchSubjects(): Promise<Subject[]> {
     .select("*")
     .order("level")
     .order("name");
+
   if (error) {
     console.error("fetchSubjects:", error);
     return [];
@@ -21,33 +71,18 @@ export async function fetchSubjects(): Promise<Subject[]> {
   return (data ?? []) as Subject[];
 }
 
-// Helper to flatten Supabase's joined array responses
-function mapAllocationRow(row: any): TeacherSubjectAllocation {
-  return {
-    ...row,
-    // Flatten joins if they come back as single-item arrays
-    teachers: Array.isArray(row.teachers) ? row.teachers[0] : row.teachers,
-    subjects: Array.isArray(row.subjects) ? row.subjects[0] : row.subjects,
-    classes: Array.isArray(row.classes) ? row.classes[0] : row.classes,
-  };
-}
-
-// ── 2. Fetch All Allocations ──────────────────────────────────────────────────
-
 export async function fetchAllocations(
   academicYear = 2026,
 ): Promise<TeacherSubjectAllocation[]> {
   const supabase = createServerClient();
   const { data, error } = await supabase
     .from("teacher_subject_allocations")
-    .select(
-      `
+    .select(`
       id, teacher_id, subject_id, class_id, academic_year, created_at,
       teachers ( id, full_name, email, tsc_number ),
       subjects ( id, name, code, level, weekly_lessons ),
-      classes ( id, grade, stream )
-    `,
-    )
+      classes ( id, grade, stream, level, academic_year )
+    `)
     .eq("academic_year", academicYear)
     .order("created_at", { ascending: false });
 
@@ -55,10 +90,8 @@ export async function fetchAllocations(
     console.error("fetchAllocations:", error);
     return [];
   }
-  return (data ?? []).map(mapAllocationRow);
+  return (data as unknown as RawAllocationRow[] ?? []).map(mapAllocationRow);
 }
-
-// ── 3. Fetch Allocations by Teacher ───────────────────────────────────────────
 
 export async function fetchAllocationsByTeacher(
   teacherId: string,
@@ -67,14 +100,12 @@ export async function fetchAllocationsByTeacher(
   const supabase = createServerClient();
   const { data, error } = await supabase
     .from("teacher_subject_allocations")
-    .select(
-      `
+    .select(`
       id, teacher_id, subject_id, class_id, academic_year, created_at,
       teachers ( id, full_name, email, tsc_number ),
       subjects ( id, name, code, level, weekly_lessons ),
-      classes ( id, grade, stream )
-    `,
-    )
+      classes ( id, grade, stream, level, academic_year )
+    `)
     .eq("teacher_id", teacherId)
     .eq("academic_year", academicYear);
 
@@ -82,28 +113,26 @@ export async function fetchAllocationsByTeacher(
     console.error("fetchAllocationsByTeacher:", error);
     return [];
   }
-  return (data ?? []).map(mapAllocationRow);
+  return (data as unknown as RawAllocationRow[] ?? []).map(mapAllocationRow);
 }
 
-// ── 4. Fetch Timetable for a Specific Class ──────────────────────────────────
-
 export async function fetchTimetableForGrade(
-  gradeLabel: string, // format: "Grade 4-North"
+  gradeLabel: string,
   academicYear = 2026,
 ): Promise<TimetableGrid> {
   const supabase = createServerClient();
   const { data, error } = await supabase
     .from("timetable_slots")
-    .select(
-      `
+    .select(`
       id, allocation_id, grade, day_of_week, period, academic_year,
       teacher_subject_allocations (
         teacher_id,
+        class_id,
         teachers ( id, full_name ),
-        subjects ( name, code )
+        subjects ( name, code ),
+        classes ( id, grade, stream, level, academic_year )
       )
-    `,
-    )
+    `)
     .eq("grade", gradeLabel)
     .eq("academic_year", academicYear);
 
@@ -113,18 +142,16 @@ export async function fetchTimetableForGrade(
   }
 
   const grid: TimetableGrid = {};
+  const slots = data as unknown as RawTimetableSlot[];
 
-  for (const rawSlot of (data ?? []) as any[]) {
+  for (const rawSlot of slots ?? []) {
     let alloc = rawSlot.teacher_subject_allocations;
     if (Array.isArray(alloc)) alloc = alloc[0];
     if (!alloc) continue;
 
-    const teacher = Array.isArray(alloc.teachers)
-      ? alloc.teachers[0]
-      : alloc.teachers;
-    const subject = Array.isArray(alloc.subjects)
-      ? alloc.subjects[0]
-      : alloc.subjects;
+    const teacher = Array.isArray(alloc.teachers) ? alloc.teachers[0] : alloc.teachers;
+    const subject = Array.isArray(alloc.subjects) ? alloc.subjects[0] : alloc.subjects;
+    const classData = Array.isArray(alloc.classes) ? alloc.classes[0] : alloc.classes;
 
     if (teacher && subject) {
       const key = `${rawSlot.day_of_week}-${rawSlot.period}`;
@@ -135,13 +162,12 @@ export async function fetchTimetableForGrade(
         subjectCode: subject.code,
         allocationId: rawSlot.allocation_id,
         teacherId: teacher.id ?? alloc.teacher_id,
+        className: classData ? `${classData.grade} ${classData.stream}` : rawSlot.grade,
       };
     }
   }
   return grid;
 }
-
-// ── 5. Get List of Grades that have Timetables ────────────────────────────────
 
 export async function fetchAllGradesWithTimetable(
   academicYear = 2026,
@@ -152,12 +178,9 @@ export async function fetchAllGradesWithTimetable(
     .select("grade")
     .eq("academic_year", academicYear);
 
-  if (error) return [];
-  // Use a Set to get unique Grade-Stream labels
-  return [...new Set((data ?? []).map((r: any) => r.grade))].sort();
+  if (error || !data) return [];
+  return [...new Set(data.map((r) => r.grade as string))].sort();
 }
-
-// ── 6. Fetch allocations for a class (for the timetable dropdown) ─────────────
 
 export interface GradeAllocation {
   allocationId: string;
@@ -168,23 +191,19 @@ export interface GradeAllocation {
 }
 
 export async function fetchGradeAllocations(
-  gradeLabel: string, // e.g. "Grade 4-North"
+  gradeLabel: string,
   academicYear = 2026,
 ): Promise<GradeAllocation[]> {
   const supabase = createServerClient();
 
-  // We filter by the 'grade' label in timetable logic because that's what
-  // the generator uses to identify unique class groups
   const { data, error } = await supabase
     .from("teacher_subject_allocations")
-    .select(
-      `
-      id,
+    .select(`
+      id, teacher_id, subject_id, class_id, academic_year, created_at,
       teachers ( id, full_name ),
       subjects ( name, code ),
-      classes ( grade, stream )
-    `,
-    )
+      classes ( id, grade, stream, level, academic_year )
+    `)
     .eq("academic_year", academicYear);
 
   if (error) {
@@ -192,19 +211,21 @@ export async function fetchGradeAllocations(
     return [];
   }
 
-  // Filter in JS to match the specific grade/stream label
-  return (data ?? [])
+  const rawRows = data as unknown as RawAllocationRow[];
+
+  return (rawRows ?? [])
     .map(mapAllocationRow)
-    .filter(
-      (row) => `${row.classes?.grade}-${row.classes?.stream}` === gradeLabel,
-    )
-    .map(
-      (row): GradeAllocation => ({
+    .filter((row) => {
+        const rowLabel = row.classes?.stream === "Main" 
+            ? row.classes.grade 
+            : `${row.classes?.grade}-${row.classes?.stream}`;
+        return rowLabel === gradeLabel;
+    })
+    .map((row): GradeAllocation => ({
         allocationId: row.id,
         subjectName: row.subjects?.name ?? "Unknown",
         subjectCode: row.subjects?.code ?? "?",
         teacherName: row.teachers?.full_name ?? "Unknown",
         teacherId: row.teachers?.id ?? "",
-      }),
-    );
+    }));
 }

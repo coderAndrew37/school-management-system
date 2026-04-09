@@ -1,25 +1,63 @@
 // lib/data/parents.ts
 // Server-side data fetching for the admin parents management page.
-// Separated from dashboard.ts to keep concerns focused.
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type {
   Parent,
   ParentFeeBalance,
   ParentNotificationSummary,
+  StudentStatus, // Imported to fix type casting
 } from "@/lib/types/dashboard";
 
-// ── Select fragment ────────────────────────────────────────────────────────────
+// ── 1. Raw DB row shapes ──────────────────────────────────────────────────────
 
-const PARENT_SELECT = `
-  id, full_name, email, phone_number, created_at,
-  invite_accepted, last_invite_sent,
-  student_parents (
-    students ( id, full_name, current_grade, photo_url, status )
-  )
-` as const;
+interface RawStudentLink {
+  students: {
+    id: string;
+    full_name: string;
+    current_grade: string;
+    photo_url: string | null;
+    status: string | null;
+  } | null;
+}
 
-function mapParentRow(row: any): Parent {
+interface RawParentRow {
+  id: string;
+  full_name: string;
+  email: string;
+  phone_number: string | null;
+  created_at: string;
+  invite_accepted: boolean | null;
+  last_invite_sent: string | null;
+  student_parents: RawStudentLink[] | null;
+}
+
+interface RawFeePayment {
+  student_id: string;
+  amount: number;
+  status: string;
+}
+
+interface RawFeeStructure {
+  grade: string;
+  term: number;
+  academic_year: number;
+  amount: number;
+}
+
+interface RawNotification {
+  id: string;
+  student_id: string;
+  title: string;
+  body: string;
+  type: string; // Will be cast to the specific union type
+  is_read: boolean;
+  created_at: string;
+}
+
+// ── 2. Mapper helpers ──────────────────────────────────────────────────────────
+
+function mapParentRow(row: RawParentRow): Parent {
   return {
     id: row.id,
     full_name: row.full_name,
@@ -29,19 +67,28 @@ function mapParentRow(row: any): Parent {
     invite_accepted: row.invite_accepted ?? false,
     last_invite_sent: row.last_invite_sent ?? null,
     children: (row.student_parents ?? [])
-      .map((sp: any) => sp.students)
-      .filter(Boolean)
-      .map((s: any) => ({
+      .map((sp) => sp.students)
+      .filter((s): s is NonNullable<typeof s> => !!s)
+      .map((s) => ({
         id: s.id,
         full_name: s.full_name,
         current_grade: s.current_grade,
         photo_url: s.photo_url ?? null,
-        status: s.status ?? "active",
+        // Cast string from DB to StudentStatus union type
+        status: (s.status as StudentStatus) ?? "active",
       })),
   };
 }
 
-// ── Fetch all parents ─────────────────────────────────────────────────────────
+const PARENT_SELECT = `
+  id, full_name, email, phone_number, created_at,
+  invite_accepted, last_invite_sent,
+  student_parents (
+    students ( id, full_name, current_grade, photo_url, status )
+  )
+` as const;
+
+// ── 3. Public API ──────────────────────────────────────────────────────────────
 
 export async function fetchAllParents(): Promise<Parent[]> {
   const supabase = await createSupabaseServerClient();
@@ -51,15 +98,18 @@ export async function fetchAllParents(): Promise<Parent[]> {
     .order("full_name", { ascending: true });
 
   if (error) {
-    console.error("fetchAllParents error:", error.message);
+    console.error("[fetchAllParents] error:", error.message);
     return [];
   }
-  return (data ?? []).map(mapParentRow);
+  
+  // Cast the unknown Supabase response to our local RawParentRow interface
+  const rawData = data as unknown as RawParentRow[];
+  return (rawData ?? []).map(mapParentRow);
 }
 
-// ── Fetch fee balances for a parent's children ────────────────────────────────
-// Used in the parent drawer. Shows total paid vs total due per child.
-
+/**
+ * Fetch fee balances for a parent's children.
+ */
 export async function fetchParentFeeBalances(
   childIds: string[],
   academicYear = 2026,
@@ -68,42 +118,47 @@ export async function fetchParentFeeBalances(
 
   const supabase = await createSupabaseServerClient();
 
-  // Get all payments for these students
-  const { data: payments } = await supabase
-    .from("fee_payments")
-    .select("student_id, amount, status")
-    .in("student_id", childIds)
-    .eq("academic_year", academicYear)
-    .eq("status", "paid");
-
-  // Get fee structures for relevant grades
-  const { data: students } = await supabase
-    .from("students")
-    .select("id, full_name, current_grade")
-    .in("id", childIds);
-
-  const { data: feeStructures } = await supabase
-    .from("fee_structures")
-    .select("grade, term, academic_year, amount")
-    .eq("academic_year", academicYear);
+  const [paymentsRes, studentsRes, structuresRes] = await Promise.all([
+    supabase
+      .from("fee_payments")
+      .select("student_id, amount, status")
+      .in("student_id", childIds)
+      .eq("academic_year", academicYear)
+      .eq("status", "paid")
+      .returns<RawFeePayment[]>(),
+    supabase
+      .from("students")
+      .select("id, full_name, current_grade")
+      .in("id", childIds),
+    supabase
+      .from("fee_structures")
+      .select("grade, term, academic_year, amount")
+      .eq("academic_year", academicYear)
+      .returns<RawFeeStructure[]>(),
+  ]);
 
   const studentMap: Record<string, { name: string; grade: string }> = {};
-  for (const s of (students ?? []) as any[]) {
+  for (const s of (studentsRes.data ?? [])) {
     studentMap[s.id] = { name: s.full_name, grade: s.current_grade };
   }
 
   const paidMap: Record<string, number> = {};
-  for (const p of (payments ?? []) as any[]) {
+  for (const p of (paymentsRes.data ?? [])) {
     paidMap[p.student_id] = (paidMap[p.student_id] ?? 0) + Number(p.amount);
   }
 
   const dueMap: Record<string, number> = {};
-  for (const f of (feeStructures ?? []) as any[]) {
-    for (const [sid, info] of Object.entries(studentMap)) {
-      if (info.grade === f.grade) {
-        dueMap[sid] = (dueMap[sid] ?? 0) + Number(f.amount);
-      }
-    }
+  const feeStructures = structuresRes.data ?? [];
+  
+  for (const sid of childIds) {
+    const info = studentMap[sid];
+    if (!info) continue;
+    
+    const totalForGrade = feeStructures
+      .filter((f) => f.grade === info.grade)
+      .reduce((acc, f) => acc + Number(f.amount), 0);
+    
+    dueMap[sid] = totalForGrade;
   }
 
   return childIds.map((sid) => ({
@@ -115,8 +170,9 @@ export async function fetchParentFeeBalances(
   }));
 }
 
-// ── Fetch recent notifications sent to a parent's children ───────────────────
-
+/**
+ * Fetch recent notifications sent to a parent's children.
+ */
 export async function fetchParentNotificationHistory(
   childIds: string[],
   limit = 5,
@@ -131,20 +187,29 @@ export async function fetchParentNotificationHistory(
     .in("id", childIds);
 
   const nameMap: Record<string, string> = {};
-  for (const s of (students ?? []) as any[]) nameMap[s.id] = s.full_name;
+  if (students) {
+    for (const s of students) nameMap[s.id] = s.full_name;
+  }
 
-  const { data: notifs } = await supabase
+  const { data: notifs, error } = await supabase
     .from("notifications")
     .select("id, student_id, title, body, type, is_read, created_at")
     .in("student_id", childIds)
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .limit(limit)
+    .returns<RawNotification[]>();
 
-  return (notifs ?? []).map((n: any) => ({
+  if (error) {
+    console.error("[fetchParentNotificationHistory] error:", error.message);
+    return [];
+  }
+
+  return (notifs ?? []).map((n) => ({
     id: n.id,
     title: n.title,
     body: n.body,
-    type: n.type,
+    // Cast to the specific union type required by ParentNotificationSummary
+    type: n.type as ParentNotificationSummary["type"],
     is_read: n.is_read,
     created_at: n.created_at,
     student_name: nameMap[n.student_id] ?? "Unknown",

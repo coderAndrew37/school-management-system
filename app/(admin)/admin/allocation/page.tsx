@@ -14,6 +14,7 @@ import { GenerateTimetableButton } from "../../../_components/allocation/Generat
 import { AllocationPanel } from "../../../_components/allocation/AllocationPanel";
 import { SubjectManagerModal } from "../../../_components/allocation/SubjectManagerModal";
 import { getActiveTermYear } from "@/lib/utils/settings";
+import { Class } from "@/lib/types/allocation"; // Import the type
 
 export const metadata = { title: "Subject Allocation | Kibali Academy" };
 export const revalidate = 60;
@@ -28,25 +29,24 @@ async function fetchTeachers(): Promise<Teacher[]> {
   return (data ?? []) as Teacher[];
 }
 
-// NEW: Fetch classes for the scalable allocation approach
-async function fetchClasses() {
+// FIXED: Included academic_year and added explicit Return Type
+async function fetchClasses(): Promise<Class[]> {
   const supabase = createServerClient();
   const { data, error } = await supabase
     .from("classes")
-    .select("id, grade, stream, level")
+    .select("id, grade, stream, level, academic_year, created_at")
     .order("grade", { ascending: true });
 
   if (error) {
     console.error("Error fetching classes:", error);
     return [];
   }
-  return data ?? [];
+  return (data ?? []) as Class[];
 }
 
 export default async function AllocationPage() {
   const { academicYear } = await getActiveTermYear();
 
-  // Added fetchClasses to the parallel data fetch
   const [teachers, subjects, allocations, classes] = await Promise.all([
     fetchTeachers(),
     fetchSubjects(),
@@ -109,8 +109,6 @@ export default async function AllocationPage() {
 
         {/* Summary strip */}
         <div className="grid grid-cols-4 gap-3">
-          {" "}
-          {/* Changed to 4 columns to include classes */}
           <SummaryChip label="Teachers" value={teachers.length} color="amber" />
           <SummaryChip
             label="CBC Subjects"
@@ -129,7 +127,7 @@ export default async function AllocationPage() {
           />
         </div>
 
-        {/* Main card */}
+        {/* Main content */}
         {teachers.length === 0 ? (
           <EmptyState message="No teachers found. Add teachers to the system first." />
         ) : subjects.length === 0 ? (
@@ -137,7 +135,7 @@ export default async function AllocationPage() {
             message={`No subjects found. Click 'Manage Subjects' above to add CBC subjects.`}
           />
         ) : classes.length === 0 ? (
-          <EmptyState message="No classes found. Set up your grades and streams (e.g., Grade 4 Alpha) before allocating." />
+          <EmptyState message="No classes found. Set up your grades and streams before allocating." />
         ) : (
           <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-xl p-6">
             <div className="h-px w-full bg-gradient-to-r from-transparent via-amber-400/30 to-transparent mb-6" />
@@ -145,7 +143,7 @@ export default async function AllocationPage() {
               teachers={teachers}
               subjects={subjects}
               allocations={allocations}
-              classes={classes} // Passing the fetched classes to the client component
+              classes={classes}
             />
           </div>
         )}

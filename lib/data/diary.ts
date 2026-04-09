@@ -1,6 +1,6 @@
 // lib/data/diary.ts
 // Server-side data fetching for the diary page.
-// Maps raw Supabase rows to the typed TeacherDiaryEntry union.
+// Maps raw Supabase rows to the typed TeacherDiaryEntry union using class_id logic.
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type {
@@ -9,42 +9,48 @@ import type {
   TeacherDiaryEntry,
 } from "@/lib/types/diary";
 
-// ── Raw DB row shapes (no `any`) ──────────────────────────────────────────────
+// ── 1. Raw DB row shapes ──────────────────────────────────────────────────────
 
 interface ClassRow {
   id: string;
   entry_type: string;
-  grade: string | null;
+  class_id: string | null;
   title: string;
+  subject_name: string | null;
   content: string | null;
   due_date: string | null;
   is_completed: boolean | null;
   created_at: string;
+  updated_at: string;
 }
 
 interface ObsRow {
   id: string;
   entry_type: string;
-  grade: string | null;
+  class_id: string | null;
   student_id: string;
   title: string;
+  subject_name: string | null;
   content: string | null;
   is_completed: boolean | null;
   created_at: string;
+  updated_at: string;
   students: { full_name: string } | null;
 }
 
-// ── Mapper helpers ────────────────────────────────────────────────────────────
+// ── 2. Mapper helpers ────────────────────────────────────────────────────────────
 
 function toClassEntry(r: ClassRow): ClassDiaryEntry {
   return {
     id: r.id,
-    grade: r.grade ?? "",
+    class_id: r.class_id ?? "",
     entry_type: r.entry_type as "homework" | "notice",
     title: r.title,
+    subject_name: r.subject_name ?? "General",
     content: r.content,
     diary_date: r.created_at.slice(0, 10),
     created_at: r.created_at,
+    updated_at: r.updated_at,
     student_id: null,
     due_date: r.due_date ?? null,
     is_completed: r.is_completed ?? false,
@@ -54,36 +60,40 @@ function toClassEntry(r: ClassRow): ClassDiaryEntry {
 function toObsEntry(r: ObsRow): ObservationEntry {
   return {
     id: r.id,
-    grade: r.grade ?? "",
+    // ObservationEntry interface requires null for class_id 
+    // to separate it from class-wide notices/homework.
+    class_id: null, 
     entry_type: "observation",
     title: r.title,
+    subject_name: r.subject_name ?? "General",
     content: r.content,
     diary_date: r.created_at.slice(0, 10),
     created_at: r.created_at,
+    updated_at: r.updated_at,
     student_id: r.student_id,
-    student_name: r.students?.full_name ?? "Unknown",
     due_date: null,
-    is_completed: false,
+    is_completed: false, // Per ObservationEntry interface requirement
   };
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── 3. Public API ──────────────────────────────────────────────────────────────
 
+/**
+ * Fetches diary entries based on class_ids.
+ */
 export async function fetchTeacherDiaryEntries(
-  grades: string[],
+  classIds: string[],
   limit = 60,
 ): Promise<TeacherDiaryEntry[]> {
-  if (grades.length === 0) return [];
+  if (classIds.length === 0) return [];
   const supabase = await createSupabaseServerClient();
   const half = Math.ceil(limit / 2);
 
   const [classRes, obsRes] = await Promise.all([
     supabase
       .from("student_diary")
-      .select(
-        "id, entry_type, grade, title, content, due_date, is_completed, created_at",
-      )
-      .in("grade", grades)
+      .select("id, entry_type, class_id, title, subject_name, content, due_date, is_completed, created_at, updated_at")
+      .in("class_id", classIds)
       .in("entry_type", ["homework", "notice"])
       .is("student_id", null)
       .order("created_at", { ascending: false })
@@ -92,20 +102,19 @@ export async function fetchTeacherDiaryEntries(
 
     supabase
       .from("student_diary")
-      .select(
-        "id, entry_type, grade, student_id, title, content, is_completed, created_at, students!inner ( full_name )",
-      )
-      .in("grade", grades)
+      .select(`
+        id, entry_type, class_id, student_id, title, subject_name, content, is_completed, created_at, updated_at,
+        students!inner ( full_name )
+      `)
+      .in("class_id", classIds)
       .eq("entry_type", "observation")
       .order("created_at", { ascending: false })
       .limit(half)
       .returns<ObsRow[]>(),
   ]);
 
-  if (classRes.error)
-    console.error("[fetchTeacherDiary] class:", classRes.error.message);
-  if (obsRes.error)
-    console.error("[fetchTeacherDiary] obs:", obsRes.error.message);
+  if (classRes.error) console.error("[fetchTeacherDiary] class:", classRes.error.message);
+  if (obsRes.error) console.error("[fetchTeacherDiary] obs:", obsRes.error.message);
 
   const entries: TeacherDiaryEntry[] = [
     ...(classRes.data ?? []).map(toClassEntry),
@@ -113,20 +122,18 @@ export async function fetchTeacherDiaryEntries(
   ];
 
   return entries.sort(
-    (a, b) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
 }
 
-// ── Fetch available grades from the classes table ─────────────────────────────
-// Used by the diary page to validate that a grade exists before posting.
+// ── 4. Fetch available grades/streams from the classes table ──────────────────
 
 export interface ClassOption {
   id: string;
   grade: string;
   stream: string;
   academicYear: number;
-  label: string; // e.g. "Grade 5" or "Grade 5 — East"
+  label: string; 
 }
 
 export async function fetchClassOptions(
@@ -146,11 +153,12 @@ export async function fetchClassOptions(
     console.error("[fetchClassOptions]", error.message);
     return [];
   }
+  
   return (data ?? []).map((c) => ({
     id: c.id,
     grade: c.grade,
     stream: c.stream,
     academicYear: c.academic_year,
-    label: c.stream !== "Main" ? `${c.grade} — ${c.stream}` : c.grade,
+    label: c.stream && c.stream !== "Main" ? `${c.grade} — ${c.stream}` : c.grade,
   }));
 }
