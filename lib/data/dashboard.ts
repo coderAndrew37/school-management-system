@@ -28,11 +28,14 @@ interface RawStudentRow {
   date_of_birth: string;
   gender: "Male" | "Female" | null;
   current_grade: string;
-  current_stream: string | null;
   class_id: string | null;
   photo_url: string | null;
   status: string | null;
   created_at: string;
+  // Joined from classes table
+  classes: {
+    stream: string;
+  } | null;
   student_parents: RawParentLink[] | null;
 }
 
@@ -54,7 +57,8 @@ function mapStudentRow(row: RawStudentRow): Student {
     date_of_birth: row.date_of_birth,
     gender: row.gender,
     current_grade: row.current_grade,
-    current_stream: row.current_stream ?? "Main",
+    // Extract stream from the joined classes object
+    current_stream: row.classes?.stream ?? "Main",
     class_id: row.class_id ?? "",
     photo_url: row.photo_url,
     created_at: row.created_at,
@@ -74,7 +78,8 @@ function mapStudentRow(row: RawStudentRow): Student {
 
 const STUDENT_SELECT = `
   id, readable_id, upi_number, full_name,
-  date_of_birth, gender, current_grade, current_stream, class_id, photo_url, status, created_at,
+  date_of_birth, gender, current_grade, class_id, photo_url, status, created_at,
+  classes ( stream ),
   student_parents (
     is_primary_contact,
     relationship_type,
