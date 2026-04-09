@@ -1,7 +1,7 @@
-// app/admin/applications/page.tsx
 import { redirect }           from "next/navigation";
 import { getSession }         from "@/lib/actions/auth";
-import { fetchApplications }  from "@/lib/actions/applications";
+import { fetchApplications, ApplicationStatus }  from "@/lib/actions/applications";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ApplicationsClient } from "./ApplicationsClient";
 
 export const metadata = { title: "Applications | Kibali Academy Admin" };
@@ -18,12 +18,12 @@ export default async function ApplicationsPage({
   }
 
   const sp     = await searchParams;
-  const status = (sp.status ?? "all") as any;
+  const status = (sp.status ?? "all") as ApplicationStatus | "all";
   const page   = Number(sp.page ?? 1);
 
+  // 1. Fetch applications and counts
   const { data, count } = await fetchApplications(status, page);
 
-  // Counts per status tab
   const [pendingResult, reviewingResult, approvedResult, declinedResult] =
     await Promise.all([
       fetchApplications("pending",   1, 1),
@@ -40,6 +40,15 @@ export default async function ApplicationsPage({
     declined:  declinedResult.count,
   };
 
+  // 2. Fetch classes for the conversion dropdown
+  const supabase = await createSupabaseServerClient();
+  const { data: classesData } = await supabase
+    .from("classes")
+    .select("id, name")
+    .order("name", { ascending: true });
+
+  const classes = classesData ?? [];
+
   return (
     <ApplicationsClient
       applications={data}
@@ -47,6 +56,7 @@ export default async function ApplicationsPage({
       currentStatus={status}
       currentPage={page}
       totalCount={count}
+      classes={classes}
     />
   );
 }

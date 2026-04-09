@@ -2,13 +2,13 @@
 
 // app/admin/applications/_components/ApplicationsClient.tsx
 
-import type { PublicApplication, ApplicationStatus } from "@/lib/actions/applications";
-import { updateApplicationStatus, convertApplicationToStudent } from "@/lib/actions/applications";
+import type { ApplicationStatus, PublicApplication } from "@/lib/actions/applications";
+import { convertApplicationToStudent, updateApplicationStatus } from "@/lib/actions/applications";
 import {
   AlertCircle, Check, ChevronRight, ClipboardList,
   GraduationCap, LayoutDashboard, Loader2, UserPlus, X,
 } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -19,6 +19,8 @@ interface Props {
   currentStatus: string;
   currentPage: number;
   totalCount: number;
+  // Note: You might want to pass your classes here from the server component
+  classes?: { id: string; name: string }[]; 
 }
 
 const PAGE_SIZE = 20;
@@ -43,12 +45,15 @@ function StatusBadge({ status }: { status: ApplicationStatus }) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export function ApplicationsClient({
-  applications, counts, currentStatus, currentPage, totalCount,
+  applications, counts, currentStatus, currentPage, totalCount, classes = []
 }: Props) {
   const router        = useRouter();
   const [selected, setSelected] = useState<PublicApplication | null>(null);
   const [isPending, startTransition] = useTransition();
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  
+  // State for class selection during conversion
+  const [selectedClassId, setSelectedClassId] = useState<string>("");
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
@@ -75,12 +80,18 @@ export function ApplicationsClient({
   }
 
   async function handleConvert() {
-    if (!selected) return;
+    if (!selected || !selectedClassId) {
+      if (!selectedClassId) showToast("error", "Please select a class first.");
+      return;
+    }
+    
     startTransition(async () => {
-      const result = await convertApplicationToStudent(selected.id);
+      // FIX: Passing both applicationId and the selected classId
+      const result = await convertApplicationToStudent(selected.id, selectedClassId);
       showToast(result.success ? "success" : "error", result.message);
       if (result.success) {
         setSelected(null);
+        setSelectedClassId("");
         router.refresh();
       }
     });
@@ -280,7 +291,7 @@ export function ApplicationsClient({
                 <Row label="Name"       value={`${selected.student_first_name} ${selected.student_last_name}`} />
                 <Row label="Gender"     value={selected.student_gender} />
                 <Row label="DOB"        value={new Date(selected.student_dob).toLocaleDateString("en-KE")} />
-                <Row label="Current"    value={selected.current_grade} />
+                <Row label="Current"     value={selected.current_grade} />
                 <Row label="Applying"   value={selected.applying_for_grade} />
               </Section>
 
@@ -312,6 +323,10 @@ export function ApplicationsClient({
                 onStatusChange={handleStatusChange}
                 onConvert={handleConvert}
                 isConverted={!!selected.converted_student_id}
+                // Selection logic
+                classes={classes}
+                selectedClassId={selectedClassId}
+                setSelectedClassId={setSelectedClassId}
               />
             </div>
           </div>
@@ -361,6 +376,7 @@ function Row({ label, value }: { label: string; value: string }) {
 function AdminNotesSection({
   applicationId, currentStatus, existingNotes,
   isPending, onStatusChange, onConvert, isConverted,
+  classes, selectedClassId, setSelectedClassId
 }: {
   applicationId: string;
   currentStatus: ApplicationStatus;
@@ -369,6 +385,9 @@ function AdminNotesSection({
   onStatusChange: (status: ApplicationStatus, notes?: string) => void;
   onConvert: () => void;
   isConverted: boolean;
+  classes: { id: string; name: string }[];
+  selectedClassId: string;
+  setSelectedClassId: (id: string) => void;
 }) {
   const [notes, setNotes] = useState(existingNotes ?? "");
 
@@ -416,19 +435,38 @@ function AdminNotesSection({
         </div>
       )}
 
-      {/* Convert to student */}
+      {/* Convert to student UI */}
       {currentStatus === "approved" && !isConverted && (
-        <button
-          onClick={onConvert}
-          disabled={isPending}
-          className="w-full flex items-center justify-center gap-2 rounded-xl bg-amber-400 px-4 py-2.5 text-sm font-bold text-[#0c0f1a] hover:bg-amber-300 disabled:opacity-50 transition-all"
-        >
-          {isPending ? (
-            <><Loader2 className="h-4 w-4 animate-spin" /> Processing…</>
-          ) : (
-            <><UserPlus className="h-4 w-4" /> Admit Student & Invite Parent</>
-          )}
-        </button>
+        <div className="space-y-3 pt-2">
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-widest text-white/30 mb-2">
+              Assign to Class
+            </label>
+            <select
+            aria-label="select class id"
+              value={selectedClassId}
+              onChange={(e) => setSelectedClassId(e.target.value)}
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5 text-sm text-white outline-none focus:border-amber-400/50 transition-colors"
+            >
+              <option value="" disabled className="bg-[#0c0f1a]">Select a class...</option>
+              {classes.map(c => (
+                <option key={c.id} value={c.id} className="bg-[#0c0f1a]">{c.name}</option>
+              ))}
+            </select>
+          </div>
+          
+          <button
+            onClick={onConvert}
+            disabled={isPending || !selectedClassId}
+            className="w-full flex items-center justify-center gap-2 rounded-xl bg-amber-400 px-4 py-2.5 text-sm font-bold text-[#0c0f1a] hover:bg-amber-300 disabled:opacity-50 transition-all"
+          >
+            {isPending ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Processing…</>
+            ) : (
+              <><UserPlus className="h-4 w-4" /> Admit Student & Invite Parent</>
+            )}
+          </button>
+        </div>
       )}
 
       {/* Re-open declined */}

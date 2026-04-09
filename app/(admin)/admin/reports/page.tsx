@@ -6,8 +6,9 @@ import {
   Calendar,
   UserRoundPlus,
 } from "lucide-react";
-import { fetchAllGrades } from "@/lib/data/reports";
-import { createServerClient } from "@/lib/supabase/client";
+// Corrected import name
+import { fetchReportClassOptions } from "@/lib/data/reports";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ReportsClient } from "@/app/_components/reports/ReportsClient";
 
 export const metadata = {
@@ -21,7 +22,7 @@ async function fetchStudentCountsByGrade(): Promise<{
   counts: Record<string, number>;
   total: number;
 }> {
-  const supabase = createServerClient();
+  const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("students")
     .select("current_grade");
@@ -37,8 +38,9 @@ async function fetchStudentCountsByGrade(): Promise<{
 }
 
 export default async function ReportsPage() {
+  // Pass the current academic year to the fetcher
   const [grades, { counts, total }] = await Promise.all([
-    fetchAllGrades(),
+    fetchReportClassOptions(2026),
     fetchStudentCountsByGrade(),
   ]);
 

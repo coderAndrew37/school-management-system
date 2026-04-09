@@ -12,9 +12,10 @@ import {
   Printer,
 } from "lucide-react";
 import type { ReportTerm } from "@/lib/types/reports";
+import { ClassListOption } from "@/lib/data/reports";
 
 interface ReportsClientProps {
-  availableGrades: string[];
+  availableGrades: ClassListOption[]; // Changed from string[] to object array
   studentCounts: Record<string, number>;
   totalStudents: number;
 }
@@ -33,16 +34,20 @@ export function ReportsClient({
   studentCounts,
   totalStudents,
 }: ReportsClientProps) {
-  const [selectedGrade, setSelectedGrade] = useState<string>("all");
+  const [selectedGradeId, setSelectedGradeId] = useState<string>("all");
   const [selectedTerm, setSelectedTerm] = useState<ReportTerm>(1);
   const [academicYear] = useState<number>(2026);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
 
+  // Helper to find the label of the currently selected grade/class
+  const selectedGradeObj = availableGrades.find(g => g.id === selectedGradeId);
+  const gradeLabel = selectedGradeId === "all" ? "All Grades" : (selectedGradeObj?.label ?? "Selected Class");
+
   const targetCount =
-    selectedGrade === "all"
+    selectedGradeId === "all"
       ? totalStudents
-      : (studentCounts[selectedGrade] ?? 0);
-  const gradeLabel = selectedGrade === "all" ? "All Grades" : selectedGrade;
+      : (studentCounts[gradeLabel] ?? 0); // Note: studentCounts still uses the grade string as key from your fetcher
+  
   const termLabel = TERMS.find((t) => t.value === selectedTerm)?.label ?? "";
 
   const handleGenerate = async () => {
@@ -64,7 +69,7 @@ export function ReportsClient({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          grade: selectedGrade,
+          classId: selectedGradeId, // Sending the UUID to the API
           term: selectedTerm,
           academic_year: academicYear,
           mode: "bulk",
@@ -76,7 +81,6 @@ export function ReportsClient({
         throw new Error(err.error ?? `HTTP ${res.status}`);
       }
 
-      // Trigger download
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -123,8 +127,8 @@ export function ReportsClient({
             <div className="relative">
               <select
                 aria-label="grade"
-                value={selectedGrade}
-                onChange={(e) => setSelectedGrade(e.target.value)}
+                value={selectedGradeId}
+                onChange={(e) => setSelectedGradeId(e.target.value)}
                 className={selectCls}
                 disabled={isGenerating}
               >
@@ -132,8 +136,8 @@ export function ReportsClient({
                   All Grades ({totalStudents} students)
                 </option>
                 {availableGrades.map((g) => (
-                  <option key={g} value={g} className="bg-[#0c0f1a]">
-                    {g} ({studentCounts[g] ?? 0} students)
+                  <option key={g.id} value={g.id} className="bg-[#0c0f1a]">
+                    {g.label} ({studentCounts[g.label] ?? 0} students)
                   </option>
                 ))}
               </select>
@@ -171,7 +175,7 @@ export function ReportsClient({
             </div>
           </div>
 
-          {/* Academic year — display only */}
+          {/* Academic year */}
           <div>
             <label className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-widest text-amber-400/70 mb-2">
               <FileText className="h-3.5 w-3.5 text-amber-400" />
@@ -207,7 +211,6 @@ export function ReportsClient({
           </div>
         </div>
 
-        {/* Generate button */}
         <button
           onClick={handleGenerate}
           disabled={isGenerating || targetCount === 0}
@@ -229,55 +232,25 @@ export function ReportsClient({
         </button>
       </div>
 
-      {/* ── How it works ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {[
-          {
-            icon: "🎯",
-            title: "Filter",
-            desc: "Select a grade (or all) and the term to generate reports for.",
-          },
-          {
-            icon: "⚙️",
-            title: "Generate",
-            desc: "Reports are built server-side with student details and CBC assessment scores.",
-          },
-          {
-            icon: "📥",
-            title: "Download",
-            desc: "A single merged PDF is downloaded — one page per student, ready to print.",
-          },
-        ].map(({ icon, title, desc }) => (
-          <div
-            key={title}
-            className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-5 py-4"
-          >
-            <p className="text-2xl mb-2">{icon}</p>
-            <p className="text-sm font-semibold text-white mb-1">{title}</p>
-            <p className="text-xs text-white/40 leading-relaxed">{desc}</p>
-          </div>
-        ))}
-      </div>
-
       {/* ── Grade breakdown table ── */}
       {availableGrades.length > 0 && (
         <div className="rounded-2xl border border-white/[0.07] overflow-hidden">
           <div className="bg-white/[0.04] px-5 py-3 border-b border-white/[0.07]">
             <p className="text-xs font-semibold uppercase tracking-widest text-white/40">
-              Students by Grade
+              Students by Class
             </p>
           </div>
           <div className="divide-y divide-white/[0.04]">
             {availableGrades.map((grade) => {
-              const count = studentCounts[grade] ?? 0;
+              const count = studentCounts[grade.label] ?? 0;
               const pct = totalStudents > 0 ? (count / totalStudents) * 100 : 0;
               return (
                 <div
-                  key={grade}
+                  key={grade.id}
                   className="flex items-center gap-4 px-5 py-3 hover:bg-white/[0.02] transition-colors group"
                 >
-                  <span className="text-sm text-white/80 w-36 flex-shrink-0">
-                    {grade}
+                  <span className="text-sm text-white/80 w-48 flex-shrink-0">
+                    {grade.label}
                   </span>
                   <div className="flex-1 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
                     <div
@@ -290,7 +263,7 @@ export function ReportsClient({
                   </span>
                   <button
                     onClick={() => {
-                      setSelectedGrade(grade);
+                      setSelectedGradeId(grade.id);
                       window.scrollTo({ top: 0, behavior: "smooth" });
                     }}
                     className="text-[10px] font-semibold text-amber-400/0 group-hover:text-amber-400/70 transition-colors uppercase tracking-wider flex-shrink-0"

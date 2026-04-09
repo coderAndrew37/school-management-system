@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/actions/auth";
+import { CBC_ORDER, getNextGrade } from "@/lib/utils/promotion-utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -20,21 +21,6 @@ export interface GradeCount {
   count: number;
   next: string | null;
 }
-
-// ── CBC Standard Progression ──────────────────────────────────────────────────
-
-export const CBC_ORDER = [
-  "PP1", "PP2", 
-  "Grade 1", "Grade 2", "Grade 3", 
-  "Grade 4", "Grade 5", "Grade 6", 
-  "Grade 7", "Grade 8", "Grade 9"
-];
-
-const getNextGrade = (current: string): string | null => {
-  const idx = CBC_ORDER.indexOf(current);
-  if (idx === -1 || idx === CBC_ORDER.length - 1) return null;
-  return CBC_ORDER[idx + 1];
-};
 
 /**
  * Security middleware
@@ -77,7 +63,7 @@ export async function promoteAllGradesAction(targetYear: number): Promise<Promot
   await requireAdmin();
   const supabase = await createSupabaseServerClient();
 
-  // 1. Validate that target classes exist for the new year to avoid orphaned streams
+  // 1. Validate that target classes exist for the new year
   const { data: targetClasses } = await supabase
     .from("classes")
     .select("grade, stream")
@@ -100,13 +86,13 @@ export async function promoteAllGradesAction(targetYear: number): Promise<Promot
     return [{ success: false, message: "No active students found to promote." }];
   }
 
-  // 3. Group students by grade to handle the reverse-order processing
+  // 3. Process grades in reverse order to prevent double-promotion logic issues
   const results: PromotionResult[] = [];
   const reversedGrades = [...CBC_ORDER].reverse();
 
   for (const fromGrade of reversedGrades) {
     const toGrade = getNextGrade(fromGrade);
-    if (!toGrade) continue; // Skip Grade 9 (handled by graduation action)
+    if (!toGrade) continue; 
 
     const studentsInGrade = students.filter(s => s.current_grade === fromGrade);
     if (studentsInGrade.length === 0) continue;
@@ -114,7 +100,6 @@ export async function promoteAllGradesAction(targetYear: number): Promise<Promot
     let promotedInThisGrade = 0;
     const gradeErrors: string[] = [];
 
-    // 4. Process each student to ensure their stream exists in the next grade
     for (const student of studentsInGrade) {
       const streamExists = targetClasses.some(
         c => c.grade === toGrade && c.stream === student.stream
@@ -164,7 +149,6 @@ export async function promoteGradeAction(
 
   const supabase = await createSupabaseServerClient();
 
-  // Verify target streams exist for this specific grade
   const { data: targetClasses } = await supabase
     .from("classes")
     .select("stream")

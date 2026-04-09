@@ -32,16 +32,22 @@ import {
 
 type Mode = "students" | "teachers";
 
+interface BulkAdmitClientProps {
+  classes: { id: string; name: string }[];
+}
+
 // ── Default empty rows ─────────────────────────────────────────────────────────
 const EMPTY_STUDENT = (): BulkAdmitRow => ({
   studentName: "",
   dateOfBirth: "",
   gender: "Male",
   currentGrade: "",
+  classId: "",
   parentName: "",
   parentEmail: "",
   parentPhone: "",
 });
+
 const EMPTY_TEACHER = (): BulkTeacherRow => ({
   fullName: "",
   email: "",
@@ -63,6 +69,7 @@ function parseStudentCSV(text: string): BulkAdmitRow[] {
       dateOfBirth = "",
       gender = "Male",
       currentGrade = "",
+      classId = "",
       parentName = "",
       parentEmail = "",
       parentPhone = "",
@@ -72,6 +79,7 @@ function parseStudentCSV(text: string): BulkAdmitRow[] {
       dateOfBirth,
       gender: gender === "Female" ? "Female" : "Male",
       currentGrade,
+      classId,
       parentName,
       parentEmail,
       parentPhone,
@@ -113,7 +121,7 @@ const inputCls =
   "w-full text-xs border border-slate-200 rounded-lg px-2.5 py-2 bg-white text-slate-700 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-sky-400";
 const selectCls = `${inputCls} cursor-pointer`;
 
-export function BulkAdmitClient() {
+export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
   const [mode, setMode] = useState<Mode>("students");
   const [studentRows, setStudentRows] = useState<BulkAdmitRow[]>([
     EMPTY_STUDENT(),
@@ -204,7 +212,7 @@ export function BulkAdmitClient() {
   function downloadTemplate() {
     const csv =
       mode === "students"
-        ? "Student Name,Date of Birth,Gender,Grade,Parent Name,Parent Email,Parent Phone\nAmani Otieno,2015-03-14,Male,Grade 3,David Otieno,david@example.com,0712345678"
+        ? "Student Name,Date of Birth,Gender,Grade,Class ID,Parent Name,Parent Email,Parent Phone\nAmani Otieno,2015-03-14,Male,Grade 3,,David Otieno,david@example.com,0712345678"
         : "Full Name,Email,Phone,TSC Number\nJane Wambui,jane@school.ac.ke,0712345678,TSC/12345";
     const blob = new Blob([csv], { type: "text/csv" });
     const a = document.createElement("a");
@@ -391,7 +399,7 @@ export function BulkAdmitClient() {
             {mode === "students" ? (
               <table
                 className="w-full border-collapse"
-                style={{ minWidth: "900px" }}
+                style={{ minWidth: "1000px" }}
               >
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200">
@@ -403,6 +411,7 @@ export function BulkAdmitClient() {
                       "Date of Birth",
                       "Gender",
                       "Grade",
+                      "Assigned Class",
                       "Parent Name",
                       "Parent Email",
                       "Parent Phone",
@@ -479,6 +488,23 @@ export function BulkAdmitClient() {
                             {GRADES.map((g) => (
                               <option key={g} value={g}>
                                 {g}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-1.5 py-1.5">
+                          <select
+                            aria-label="Class"
+                            className={selectCls}
+                            value={row.classId}
+                            onChange={(e) =>
+                              updateStudent(i, "classId", e.target.value)
+                            }
+                          >
+                            <option value="">Select Class…</option>
+                            {classes.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
                               </option>
                             ))}
                           </select>

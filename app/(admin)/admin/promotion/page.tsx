@@ -2,7 +2,7 @@
 import { fetchGradesForPromotion } from "@/lib/actions/promotion";
 import { ArrowRight, GraduationCap } from "lucide-react";
 import { PromotionClient } from "./PromotionClient";
-import { CBC_ORDER } from "@/lib/actions/promotion"; // Export this from your actions file
+import { CBC_ORDER } from "@/lib/utils/promotion-utils";
 
 export const metadata = {
   title: "Grade Promotion | Kibali Academy Admin",
