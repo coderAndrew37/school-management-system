@@ -83,19 +83,18 @@ export async function searchParentsAction(
   }
 }
 
-// ── 3. Admit Student (New Class Implementation) ───────────────────────────────
+// ── 3. Admit Student ──────────────────────────────────────────────────────────
 
 export async function admitStudentAction(
   formData: FormData,
 ): Promise<AdmissionActionResult> {
   const existingParentId = (formData.get("existingParentId") as string | null) || null;
-  const classId = formData.get("classId") as string | null;
-
+  
   const raw = {
     studentName: formData.get("studentName"),
     dateOfBirth: formData.get("dateOfBirth"),
     gender: formData.get("gender"),
-    currentGrade: formData.get("currentGrade"),
+    classId: formData.get("classId"), // Aligned with schema
     relationshipType: formData.get("relationshipType") ?? "guardian",
     existingParentId: existingParentId,
     parentName: formData.get("parentName") || null,
@@ -111,10 +110,6 @@ export async function admitStudentAction(
     };
   }
 
-  if (!classId) {
-    return { success: false, message: "A class must be selected for the student." };
-  }
-
   const d = parsed.data;
 
   // Validation for new parents
@@ -128,10 +123,25 @@ export async function admitStudentAction(
   }
 
   try {
+    // ── 1. Resolve Class ID ──
+    // Fetching the grade string from the classes table to keep logic robust
+    const { data: classRecord, error: classError } = await supabaseAdmin
+      .from("classes")
+      .select("id, grade")
+      .eq("id", d.classId)
+      .single();
+
+    if (classError || !classRecord) {
+      return { 
+        success: false, 
+        message: "The selected class record was not found. Please ensure classes are initialized." 
+      };
+    }
+
     let parentId: string;
     let isNewParent = false;
 
-    // ── 1. Resolve Parent ──
+    // ── 2. Resolve Parent ──
     if (existingParentId) {
       parentId = existingParentId;
     } else {
@@ -173,22 +183,23 @@ export async function admitStudentAction(
       if (upsertErr) throw new Error(`Parent setup failed: ${upsertErr.message}`);
     }
 
-    // ── 2. Register Student (with class_id) ──
+    // ── 3. Register Student ──
     const { data: newStudent, error: studentError } = await supabaseAdmin
       .from("students")
       .insert({
         full_name: d.studentName,
         date_of_birth: d.dateOfBirth,
         gender: d.gender,
-        current_grade: d.currentGrade,
-        class_id: classId,
+        current_grade: classRecord.grade, // Using the string from class lookup
+        class_id: classRecord.id,
+        status: "active",
       })
       .select("id")
       .single();
 
-    if (studentError || !newStudent) throw new Error("Student registration failed.");
+    if (studentError || !newStudent) throw new Error(`Student registration failed: ${studentError?.message}`);
 
-    // ── 3. Handle Passport Photo ──
+    // ── 4. Handle Passport Photo ──
     const photoFile = formData.get("passportPhoto") as File | null;
     if (photoFile && photoFile.size > 0) {
       const ext = photoFile.type.split("/")[1] || "jpg";
@@ -207,7 +218,7 @@ export async function admitStudentAction(
       }
     }
 
-    // ── 4. Link Student & Parent ──
+    // ── 5. Link Student & Parent ──
     const { error: linkErr } = await supabaseAdmin
       .from("student_parents")
       .insert({
@@ -222,7 +233,7 @@ export async function admitStudentAction(
       throw new Error("Failed to link student to parent.");
     }
 
-    // ── 5. Welcome Email ──
+    // ── 6. Welcome Email ──
     if (isNewParent) {
       const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
         type: "magiclink",
@@ -236,7 +247,7 @@ export async function admitStudentAction(
             parentEmail: d.parentEmail!,
             parentName: d.parentName!,
             studentName: d.studentName,
-            grade: d.currentGrade,
+            grade: classRecord.grade,
             setupLink: linkData.properties.action_link,
           });
         } catch (e) {
@@ -255,6 +266,7 @@ export async function admitStudentAction(
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
+    console.error("[AdmitStudent] Error:", msg);
     return { success: false, message: msg };
   }
 }

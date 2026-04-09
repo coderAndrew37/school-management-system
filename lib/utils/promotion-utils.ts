@@ -13,8 +13,15 @@ export const getNextGrade = (current: string): string | null => {
   return CBC_ORDER[idx + 1];
 };
 
-export const getGradeCategory = (grade: string) => {
-  if (["PP1", "PP2", "Grade 1", "Grade 2", "Grade 3"].includes(grade)) return "lower";
-  if (["Grade 4", "Grade 5", "Grade 6"].includes(grade)) return "upper";
-  return "junior";
+/**
+ * Maps the grade to the DB level check constraint
+ */
+export const getGradeLevel = (grade: string): string => {
+  if (["PP1", "PP2", "Grade 1", "Grade 2", "Grade 3"].includes(grade)) {
+    return "lower_primary";
+  }
+  if (["Grade 4", "Grade 5", "Grade 6"].includes(grade)) {
+    return "upper_primary";
+  }
+  return "junior_secondary";
 };
