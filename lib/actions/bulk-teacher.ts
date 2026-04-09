@@ -1,8 +1,5 @@
 "use server";
 
-// lib/actions/bulk-teacher.ts
-// Bulk teacher addition — processes multiple rows from CSV or multi-row form.
-
 import { getSession } from "@/lib/actions/auth";
 import { sendTeacherWelcomeEmail } from "@/lib/mail";
 import { revalidatePath } from "next/cache";
@@ -15,7 +12,7 @@ const rowSchema = z.object({
   fullName: z.string().min(2, "Name too short").max(100),
   email: z.string().email("Invalid email"),
   phone: z.string().min(9, "Phone too short").max(15),
-  tscNumber: z.string().max(30).optional().default(""),
+  tscNumber: z.string().max(30).optional().transform(v => v || null),
 });
 
 export type BulkTeacherRow = z.infer<typeof rowSchema>;
@@ -37,128 +34,108 @@ export async function bulkAddTeachersAction(rows: BulkTeacherRow[]): Promise<{
   const session = await getSession();
   
   if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
-    return {
-      results: rows.map((r, i) => ({
-        index: i,
-        fullName: r.fullName,
-        success: false,
-        message: "Unauthorized",
-      })),
-      successCount: 0,
-      failCount: rows.length,
-    };
+    throw new Error("Unauthorized"); 
   }
 
   const results: BulkTeacherResult[] = [];
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const parsed = rowSchema.safeParse(row);
-
-    if (!parsed.success) {
-      results.push({
-        index: i,
-        fullName: row.fullName || `Row ${i + 1}`,
-        success: false,
-        message: parsed.error.issues.map((e) => e.message).join("; "),
-      });
-      continue;
-    }
-
-    const { fullName, email, phone, tscNumber } = parsed.data;
-
+  for (const [i, row] of rows.entries()) {
     try {
-      // 1. Create auth user
-      const { data: authData, error: authErr } =
-        await supabaseAdmin.auth.admin.createUser({
-          email,
-          phone,
-          email_confirm: true,
-          user_metadata: { 
-            full_name: fullName, 
-            role: "teacher" 
-          },
+      const { data, success, error } = rowSchema.safeParse(row);
+      if (!success) {
+        results.push({
+          index: i,
+          fullName: row.fullName || `Row ${i + 1}`,
+          success: false,
+          message: error.issues.map((e) => e.message).join(", "),
         });
+        continue;
+      }
+
+      // 1. Create Auth User
+      const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
+        email: data.email,
+        phone: data.phone,
+        email_confirm: true,
+        user_metadata: { 
+          full_name: data.fullName, 
+          role: "teacher" 
+        },
+      });
 
       if (authErr) throw new Error(`Auth: ${authErr.message}`);
       const userId = authData.user.id;
 
-      // 2. Insert teachers record
+      // 2. Insert Teacher record
       const { error: tErr } = await supabaseAdmin.from("teachers").insert({
         id: userId,
-        full_name: fullName,
-        email,
-        phone_number: phone,
-        tsc_number: tscNumber || null,
+        full_name: data.fullName,
+        email: data.email,
+        phone_number: data.phone,
+        tsc_number: data.tscNumber,
         last_invite_sent: new Date().toISOString(),
       });
 
       if (tErr) {
-        // Rollback Auth user if DB record fails
         await supabaseAdmin.auth.admin.deleteUser(userId);
-        throw new Error(`Teacher record: ${tErr.message}`);
+        throw new Error(`DB Error: ${tErr.message}`);
       }
 
-      // 3. Link profile (The profile is usually created by a trigger on auth.users)
-      const { error: pErr } = await supabaseAdmin
+      // 3. Update profile (Non-blocking)
+      supabaseAdmin
         .from("profiles")
         .update({ teacher_id: userId })
-        .eq("id", userId);
-
-      if (pErr) {
-        console.error(`[bulkAddTeachers] Profile link failed for ${userId}:`, pErr.message);
-        // We don't necessarily roll back here as the core record exists, 
-        // but we should log it for manual fixing if the trigger missed it.
-      }
-
-      // 4. Generate setup link + send welcome email
-      const { data: linkData, error: linkErr } =
-        await supabaseAdmin.auth.admin.generateLink({
-          type: "recovery",
-          email,
-          options: {
-            redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
-          },
+        .eq("id", userId)
+        .then(({ error }) => {
+          if (error) console.error(`Profile link failed for ${userId}:`, error.message);
         });
 
-      if (linkErr) throw linkErr;
+      // 4. Handle Email
+      const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
+        type: "recovery",
+        email: data.email,
+        options: { redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm` },
+      });
 
-      try {
-        await sendTeacherWelcomeEmail({
-          teacherEmail: email,
-          teacherName: fullName,
+      if (linkData?.properties?.action_link) {
+        sendTeacherWelcomeEmail({
+          teacherEmail: data.email,
+          teacherName: data.fullName,
           setupLink: linkData.properties.action_link,
+        }).catch(err => {
+            const msg = err instanceof Error ? err.message : "Mail failed";
+            console.error("Email error:", msg);
         });
-      } catch (mailErr) {
-        console.error(`[bulkAddTeachers] Email delivery failed for ${email}:`, mailErr);
-        // Non-fatal error for the process, but worth noting
       }
 
       results.push({
         index: i,
-        fullName,
+        fullName: data.fullName,
         success: true,
-        message: "Added successfully",
+        message: "Success",
       });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Process failed";
+
+    } catch (err: unknown) { // Use 'unknown' instead of 'any'
+      // Use Type Narrowing to safely access the error message
+      const errorMessage = err instanceof Error ? err.message : "Unknown error occurred";
+      
       results.push({
         index: i,
         fullName: row.fullName,
         success: false,
-        message: msg,
+        message: errorMessage,
       });
     }
-    
-    // Optional: Add a tiny delay to avoid hitting rate limits on rapid Auth/Mail calls
-    if (rows.length > 5) {
-      await new Promise((r) => setTimeout(r, 150));
-    }
+
+    if (rows.length > 3) await new Promise((r) => setTimeout(r, 100));
   }
 
   revalidatePath("/admin/teachers");
-  revalidatePath("/admin");
-
+  
   const successCount = results.filter((r) => r.success).length;
-  return { results, successCount, failCount: rows.length - successCount };
+  return { 
+    results, 
+    successCount, 
+    failCount: rows.length - successCount 
+  };
 }

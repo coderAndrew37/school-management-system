@@ -29,97 +29,22 @@ import {
   type BulkTeacherRow,
   type BulkTeacherResult,
 } from "@/lib/actions/bulk-teacher";
+import { 
+  GRADES, 
+  EMPTY_STUDENT, 
+  EMPTY_TEACHER, 
+  parseStudentCSV, 
+  parseTeacherCSV, 
+  getCSVTemplate,
+  inputCls,
+  selectCls 
+} from "./utils";
 
 type Mode = "students" | "teachers";
 
 interface BulkAdmitClientProps {
   classes: { id: string; name: string }[];
 }
-
-// ── Default empty rows ─────────────────────────────────────────────────────────
-const EMPTY_STUDENT = (): BulkAdmitRow => ({
-  studentName: "",
-  dateOfBirth: "",
-  gender: "Male",
-  currentGrade: "",
-  classId: "",
-  parentName: "",
-  parentEmail: "",
-  parentPhone: "",
-});
-
-const EMPTY_TEACHER = (): BulkTeacherRow => ({
-  fullName: "",
-  email: "",
-  phone: "",
-  tscNumber: "",
-});
-
-// ── CSV parsing ───────────────────────────────────────────────────────────────
-function parseStudentCSV(text: string): BulkAdmitRow[] {
-  const lines = text.trim().split("\n").filter(Boolean);
-  const header = lines[0]?.toLowerCase() ?? "";
-  const dataLines =
-    header.includes("student") || header.includes("name")
-      ? lines.slice(1)
-      : lines;
-  return dataLines.map((line) => {
-    const [
-      studentName = "",
-      dateOfBirth = "",
-      gender = "Male",
-      currentGrade = "",
-      classId = "",
-      parentName = "",
-      parentEmail = "",
-      parentPhone = "",
-    ] = line.split(",").map((s) => s.trim().replace(/^"|"$/g, ""));
-    return {
-      studentName,
-      dateOfBirth,
-      gender: gender === "Female" ? "Female" : "Male",
-      currentGrade,
-      classId,
-      parentName,
-      parentEmail,
-      parentPhone,
-    };
-  });
-}
-
-function parseTeacherCSV(text: string): BulkTeacherRow[] {
-  const lines = text.trim().split("\n").filter(Boolean);
-  const header = lines[0]?.toLowerCase() ?? "";
-  const dataLines =
-    header.includes("name") || header.includes("email")
-      ? lines.slice(1)
-      : lines;
-  return dataLines.map((line) => {
-    const [fullName = "", email = "", phone = "", tscNumber = ""] = line
-      .split(",")
-      .map((s) => s.trim().replace(/^"|"$/g, ""));
-    return { fullName, email, phone, tscNumber };
-  });
-}
-
-// ── Grade options ──────────────────────────────────────────────────────────────
-const GRADES = [
-  "PP1",
-  "PP2",
-  "Grade 1",
-  "Grade 2",
-  "Grade 3",
-  "Grade 4",
-  "Grade 5",
-  "Grade 6",
-  "Grade 7 / JSS 1",
-  "Grade 8 / JSS 2",
-  "Grade 9 / JSS 3",
-];
-
-const inputCls =
-  "w-full text-xs border border-slate-200 rounded-lg px-2.5 py-2 bg-white text-slate-700 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-sky-400";
-const selectCls = `${inputCls} cursor-pointer`;
 
 export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
   const [mode, setMode] = useState<Mode>("students");
@@ -146,7 +71,7 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
   }
 
   // ── Student row ops ──────────────────────────────────────────────────────────
-  function updateStudent(i: number, field: keyof BulkAdmitRow, value: string) {
+  function updateStudent(i: number, field: keyof BulkAdmitRow, value: string | number) {
     setStudentRows((rows) =>
       rows.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)),
     );
@@ -210,10 +135,7 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
 
   // ── CSV template download ────────────────────────────────────────────────────
   function downloadTemplate() {
-    const csv =
-      mode === "students"
-        ? "Student Name,Date of Birth,Gender,Grade,Class ID,Parent Name,Parent Email,Parent Phone\nAmani Otieno,2015-03-14,Male,Grade 3,,David Otieno,david@example.com,0712345678"
-        : "Full Name,Email,Phone,TSC Number\nJane Wambui,jane@school.ac.ke,0712345678,TSC/12345";
+    const csv = getCSVTemplate(mode);
     const blob = new Blob([csv], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -265,7 +187,7 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
       {/* Toast */}
       {toast && (
         <div
-          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-bold shadow-lg flex items-center gap-2 ${toast.ok ? "bg-emerald-600 text-white" : "bg-rose-500 text-white"}`}
+          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-bold shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-2 ${toast.ok ? "bg-emerald-600 text-white" : "bg-rose-50 text-white"}`}
         >
           {toast.ok && <Check className="h-4 w-4" />}
           {toast.msg}
@@ -273,14 +195,14 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
       )}
 
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
           <Link href="/admin" className="text-slate-400 hover:text-slate-600">
             <ChevronLeft className="h-5 w-5" />
           </Link>
           <div className="flex-1">
             <p className="text-sm font-black text-slate-800">Bulk Admission</p>
-            <p className="text-[10px] text-slate-400 font-semibold">
-              {rowCount} row{rowCount !== 1 ? "s" : ""} · paste or upload CSV
+            <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-tight">
+              {rowCount} row{rowCount !== 1 ? "s" : ""} · 2026 Academic Cycle
             </p>
           </div>
           <div className="flex gap-2">
@@ -308,7 +230,7 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-5 space-y-4">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 space-y-4">
         {/* Mode toggle */}
         <div className="flex gap-2 bg-white rounded-2xl border border-slate-200 p-1.5 shadow-sm max-w-xs">
           {(
@@ -337,7 +259,7 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
 
         {/* Results panel */}
         {summary && results && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3 animate-in zoom-in-95 duration-200">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-5 w-5 text-emerald-500" />
@@ -399,7 +321,7 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
             {mode === "students" ? (
               <table
                 className="w-full border-collapse"
-                style={{ minWidth: "1000px" }}
+                style={{ minWidth: "1200px" }}
               >
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200">
@@ -411,7 +333,7 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
                       "Date of Birth",
                       "Gender",
                       "Grade",
-                      "Assigned Class",
+                      "Stream",
                       "Parent Name",
                       "Parent Email",
                       "Parent Phone",
@@ -432,7 +354,7 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
                     return (
                       <tr
                         key={i}
-                        className={`border-b border-slate-100 ${result?.success ? "bg-emerald-50/30" : result ? "bg-rose-50/30" : ""}`}
+                        className={`border-b border-slate-100 transition-colors ${result?.success ? "bg-emerald-50/30" : result ? "bg-rose-50/30" : ""}`}
                       >
                         <td className="px-3 py-1.5 text-[10px] text-slate-400 font-bold">
                           {i + 1}
@@ -493,21 +415,14 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
                           </select>
                         </td>
                         <td className="px-1.5 py-1.5">
-                          <select
-                            aria-label="Class"
-                            className={selectCls}
-                            value={row.classId}
+                          <input
+                            className={inputCls}
+                            placeholder="Stream (e.g. North)"
+                            value={row.stream}
                             onChange={(e) =>
-                              updateStudent(i, "classId", e.target.value)
+                              updateStudent(i, "stream", e.target.value)
                             }
-                          >
-                            <option value="">Select Class…</option>
-                            {classes.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {c.name}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </td>
                         <td className="px-1.5 py-1.5">
                           <input
@@ -588,7 +503,7 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
                     return (
                       <tr
                         key={i}
-                        className={`border-b border-slate-100 ${result?.success ? "bg-emerald-50/30" : result ? "bg-rose-50/30" : ""}`}
+                        className={`border-b border-slate-100 transition-colors ${result?.success ? "bg-emerald-50/30" : result ? "bg-rose-50/30" : ""}`}
                       >
                         <td className="px-3 py-1.5 text-[10px] text-slate-400 font-bold">
                           {i + 1}
@@ -625,15 +540,15 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
                           />
                         </td>
                         <td className="px-1.5 py-1.5">
-                          <input
-                            className={inputCls}
-                            placeholder="TSC/12345"
-                            value={row.tscNumber}
-                            onChange={(e) =>
-                              updateTeacher(i, "tscNumber", e.target.value)
-                            }
-                          />
-                        </td>
+  <input
+    className={inputCls}
+    placeholder="TSC/12345"
+    value={row.tscNumber ?? ""}
+    onChange={(e) =>
+      updateTeacher(i, "tscNumber", e.target.value)
+    }
+  />
+</td>
                         <td className="px-2 py-1.5">
                           <button
                             aria-label="Remove teacher"
@@ -661,13 +576,13 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
               Add row
             </button>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] text-slate-400">
+              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
                 {rowCount} row{rowCount !== 1 ? "s" : ""}
               </span>
               <button
                 onClick={handleSubmit}
                 disabled={isPending}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold transition-all disabled:opacity-50 shadow-md shadow-sky-100 active:scale-95"
               >
                 {isPending ? (
                   <>
@@ -690,10 +605,22 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
           </div>
         </div>
 
-        <p className="text-[10px] text-slate-400 text-center">
-          Each row creates auth accounts, database records, and sends welcome
-          emails automatically. Duplicate emails are skipped gracefully.
-        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+           <div className="p-4 rounded-2xl bg-sky-50 border border-sky-100">
+             <h4 className="text-xs font-black text-sky-900 uppercase mb-1">Class Assignment Logic</h4>
+             <p className="text-[11px] text-sky-700 leading-relaxed">
+               Students are automatically assigned to classes based on their <strong>Grade</strong> and <strong>Stream</strong>. 
+               Ensure the class (e.g., &quot;Grade 4 - North&quot;) exists in your dashboard before uploading.
+             </p>
+           </div>
+           <div className="p-4 rounded-2xl bg-slate-100 border border-slate-200">
+             <h4 className="text-xs font-black text-slate-900 uppercase mb-1">Safety & Automation</h4>
+             <p className="text-[11px] text-slate-600 leading-relaxed">
+               Each row creates a secure auth account for the parent. They will receive an email with a 
+               setup link to create their password and access the portal.
+             </p>
+           </div>
+        </div>
       </div>
     </div>
   );

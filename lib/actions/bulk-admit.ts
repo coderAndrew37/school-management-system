@@ -14,7 +14,8 @@ const rowSchema = z.object({
   dateOfBirth: z.string().min(1, "DOB required"),
   gender: z.enum(["Male", "Female"]),
   currentGrade: z.string().min(1).max(30),
-  classId: z.string().uuid("Invalid Class ID"), // New requirement for class architecture
+  stream: z.string().min(1).default("Main"), // Explicitly handle stream
+  academicYear: z.number().default(2026),     // Default for the current cycle
   parentName: z.string().min(2, "Parent name too short").max(100),
   parentEmail: z.string().email("Invalid email"),
   parentPhone: z.string().min(9, "Phone too short").max(15),
@@ -73,7 +74,8 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
       dateOfBirth,
       gender,
       currentGrade,
-      classId,
+      stream,
+      academicYear,
       parentName,
       parentEmail,
       parentPhone,
@@ -83,7 +85,22 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
       const email = parentEmail.toLowerCase();
       const phone = normalizeKenyanPhone(parentPhone);
 
-      // ── 1. Parent Handling ──
+      // ── 1. Class Lookup ──
+      // This step converts the human-readable Grade + Stream into the DB class_id
+      const { data: classRecord, error: classErr } = await supabaseAdmin
+        .from("classes")
+        .select("id")
+        .eq("grade", currentGrade)
+        .eq("stream", stream)
+        .eq("academic_year", academicYear)
+        .maybeSingle();
+
+      if (classErr) throw new Error(`Class Query: ${classErr.message}`);
+      if (!classRecord) {
+        throw new Error(`Class not found: ${currentGrade} - ${stream} (${academicYear})`);
+      }
+
+      // ── 2. Parent Handling ──
       let parentId: string;
       let isNewParent = false;
 
@@ -109,7 +126,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
         isNewParent = true;
       }
 
-      // UPSERT parent to ensure the phone number and name are correctly synced
+      // UPSERT parent details to ensure consistency
       const { error: pErr } = await supabaseAdmin.from("parents").upsert({
         id: parentId,
         full_name: parentName,
@@ -119,7 +136,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
 
       if (pErr) throw new Error(`Parent Record: ${pErr.message}`);
 
-      // ── 2. Student Creation (with class_id) ──
+      // ── 3. Student Creation (Mapping to the found classRecord.id) ──
       const { data: student, error: sErr } = await supabaseAdmin
         .from("students")
         .insert({
@@ -127,14 +144,14 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
           date_of_birth: dateOfBirth,
           gender,
           current_grade: currentGrade,
-          class_id: classId, // Mapping to new structure
+          class_id: classRecord.id, // Linked via lookup
         })
         .select("id")
         .single();
 
       if (sErr || !student) throw new Error(`Student: ${sErr?.message ?? "Insert failed"}`);
 
-      // ── 3. Linking ──
+      // ── 4. Linking Parent & Student ──
       const { error: linkErr } = await supabaseAdmin
         .from("student_parents")
         .insert({
@@ -145,12 +162,11 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
         });
 
       if (linkErr) {
-        // Cleanup student if link fails
         await supabaseAdmin.from("students").delete().eq("id", student.id);
         throw new Error(`Linking: ${linkErr.message}`);
       }
 
-      // ── 4. Welcome Email ──
+      // ── 5. Welcome Email & Recovery Link ──
       if (isNewParent) {
         const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
           type: "recovery",
@@ -166,7 +182,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
               parentEmail: email,
               parentName,
               studentName,
-              grade: currentGrade,
+              grade: `${currentGrade} (${stream})`,
               setupLink: linkData.properties.action_link,
             });
           } catch (e) {
