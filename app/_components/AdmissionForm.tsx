@@ -3,7 +3,7 @@
 import {
   admitStudentAction,
   uploadStudentPhotoAction,
-  type ParentSearchResult
+  type ParentSearchResult,
 } from "@/lib/actions/admit";
 import {
   admissionSchema,
@@ -23,13 +23,19 @@ import {
   Search,
   User,
   UserRoundPlus,
-  Users
+  Users,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { SubmitHandler, useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Divider, FieldError, Label, ParentSearchBox, ClassSelect } from "./AdmissionFormUtils";
+import {
+  Divider,
+  FieldError,
+  Label,
+  ParentSearchBox,
+  ClassSelect,
+} from "./AdmissionFormUtils";
 
 const RELATIONSHIP_TYPES = [
   { value: "mother", label: "Mother" },
@@ -38,7 +44,11 @@ const RELATIONSHIP_TYPES = [
   { value: "other", label: "Other" },
 ] as const;
 
-export default function AdmissionForm() {
+interface AdmissionFormProps {
+  availableClasses: { id: string; grade: string; stream: string }[];
+}
+
+export default function AdmissionForm({ availableClasses }: AdmissionFormProps) {
   const [isPending, startTransition] = useTransition();
   const [selectedParent, setSelectedParent] = useState<ParentSearchResult | null>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -47,29 +57,28 @@ export default function AdmissionForm() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
-  // We define the form without the generic <AdmissionFormValues> here 
-  // to avoid the strict variance mismatch with the Zod resolver.
-  const {
-    register,
-    handleSubmit,
-    reset,
-    setValue,
-    watch,
-    formState: { errors },
-  } = useForm({
-    resolver: zodResolver(admissionSchema),
-    defaultValues: {
-      studentName: "",
-      dateOfBirth: "",
-      gender: "" as "Male" | "Female", // Typed directly to satisfy the enum
-      classId: "",
-      relationshipType: "guardian" as "mother" | "father" | "guardian" | "other",
-      existingParentId: null as string | null,
-      parentName: "",
-      parentEmail: "",
-      parentPhone: "",
-    },
-  });
+const {
+  register,
+  handleSubmit,
+  reset,
+  setValue,
+  watch,
+  formState: { errors },
+} = useForm<AdmissionFormValues>({
+  resolver: zodResolver(admissionSchema),
+  defaultValues: {
+    studentName: "",
+    dateOfBirth: "",
+    // Use 'as const' or ensure the value exactly matches the Zod enum
+    gender: "Male", 
+    classId: "",
+    relationshipType: "guardian", 
+    existingParentId: null,
+    parentName: "",
+    parentEmail: "",
+    parentPhone: "",
+  },
+});
 
   const selectedClassId = watch("classId");
 
@@ -95,57 +104,53 @@ export default function AdmissionForm() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  // Type the data here instead of the whole function
- // 1. Use the actual type from your schema instead of any
-const onSubmit: SubmitHandler<AdmissionFormValues> = (values) => {
-  startTransition(async () => {
-    const fd = new FormData();
+  const onSubmit: SubmitHandler<AdmissionFormValues> = (values) => {
+    startTransition(async () => {
+      const fd = new FormData();
 
-    // Now values is strictly typed, no 'as' casting needed
-    fd.append("studentName", values.studentName);
-    fd.append("dateOfBirth", values.dateOfBirth);
-    fd.append("gender", values.gender);
-    fd.append("classId", values.classId);
-    fd.append("relationshipType", values.relationshipType);
+      fd.append("studentName", values.studentName);
+      fd.append("dateOfBirth", values.dateOfBirth);
+      fd.append("gender", values.gender);
+      fd.append("classId", values.classId);
+      fd.append("relationshipType", values.relationshipType);
 
-    if (values.existingParentId) {
-      fd.append("existingParentId", values.existingParentId);
-    } else {
-      // Use nullish coalescing to ensure we always append a string
-      fd.append("parentName", values.parentName ?? "");
-      fd.append("parentEmail", values.parentEmail ?? "");
-      fd.append("parentPhone", values.parentPhone ?? "");
-    }
+      if (values.existingParentId) {
+        fd.append("existingParentId", values.existingParentId);
+      } else {
+        fd.append("parentName", values.parentName ?? "");
+        fd.append("parentEmail", values.parentEmail ?? "");
+        fd.append("parentPhone", values.parentPhone ?? "");
+      }
 
-    const result = await admitStudentAction(fd);
+      const result = await admitStudentAction(fd);
 
-    if (!result.success) {
-      toast.error("Admission Failed", { description: result.message });
-      return;
-    }
+      if (!result.success) {
+        toast.error("Admission Failed", { description: result.message });
+        return;
+      }
 
-    if (photoFile && result.studentId) {
-      setPhotoUploading(true);
-      const photoFd = new FormData();
-      photoFd.set("photo", photoFile);
-      const photoResult = await uploadStudentPhotoAction(result.studentId, photoFd);
-      setPhotoUploading(false);
-      if (!photoResult.success) console.warn("Photo upload failed:", photoResult.message);
-    }
+      if (photoFile && result.studentId) {
+        setPhotoUploading(true);
+        const photoFd = new FormData();
+        photoFd.set("photo", photoFile);
+        const photoResult = await uploadStudentPhotoAction(result.studentId, photoFd);
+        setPhotoUploading(false);
+        if (!photoResult.success) console.warn("Photo upload failed:", photoResult.message);
+      }
 
-    toast.success("Admission Successful 🎓", {
-      description: selectedParent
-        ? `${values.studentName} added to ${selectedParent.full_name}'s account.`
-        : `${values.studentName} admitted — parent invite sent.`,
+      toast.success("Admission Successful 🎓", {
+        description: selectedParent
+          ? `${values.studentName} added to ${selectedParent.full_name}'s account.`
+          : `${values.studentName} admitted — parent invite sent.`,
+      });
+
+      reset();
+      setSelectedParent(null);
+      setPhotoFile(null);
+      setPhotoPreview(null);
+      router.push("/admin/students");
     });
-
-    reset();
-    setSelectedParent(null);
-    setPhotoFile(null);
-    setPhotoPreview(null);
-    router.push("/admin/students");
-  });
-};
+  };
 
   const inputBase = "w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/25 outline-none transition-all duration-200 focus:border-amber-400/60 focus:bg-white/10 focus:ring-2 focus:ring-amber-400/20 disabled:opacity-50 disabled:cursor-not-allowed";
 
@@ -175,14 +180,14 @@ const onSubmit: SubmitHandler<AdmissionFormValues> = (values) => {
               <div>
                 <Label htmlFor="studentName" icon={<UserRoundPlus className="h-3.5 w-3.5" />}>Student Full Name</Label>
                 <input id="studentName" type="text" placeholder="e.g. Amani Wanjiku Otieno" className={inputBase} {...register("studentName")} disabled={isPending} />
-                <FieldError message={(errors.studentName?.message as string)} />
+                <FieldError message={errors.studentName?.message} />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="dateOfBirth" icon={<CalendarDays className="h-3.5 w-3.5" />}>Date of Birth</Label>
                   <input id="dateOfBirth" type="date" className={`${inputBase} [color-scheme:dark]`} {...register("dateOfBirth")} disabled={isPending} />
-                  <FieldError message={(errors.dateOfBirth?.message as string)} />
+                  <FieldError message={errors.dateOfBirth?.message} />
                 </div>
 
                 <div>
@@ -192,18 +197,19 @@ const onSubmit: SubmitHandler<AdmissionFormValues> = (values) => {
                     <option value="Male" className="bg-[#0c0f1a] text-white">Male</option>
                     <option value="Female" className="bg-[#0c0f1a] text-white">Female</option>
                   </select>
-                  <FieldError message={(errors.gender?.message as string)} />
+                  <FieldError message={errors.gender?.message} />
                 </div>
               </div>
 
               <div>
-                <Label htmlFor="classId" icon={<GraduationCap className="h-3.5 w-3.5" />}>Assigned Class (2026)</Label>
+                <Label htmlFor="classId" icon={<GraduationCap className="h-3.5 w-3.5" />}>Assigned Class ({new Date().getFullYear()})</Label>
                 <ClassSelect 
-                  value={selectedClassId as string} 
+                  value={selectedClassId} 
+                  options={availableClasses}
                   onChange={(val) => setValue("classId", val, { shouldValidate: true })}
                   disabled={isPending} 
                 />
-                <FieldError message={(errors.classId?.message as string)} />
+                <FieldError message={errors.classId?.message} />
               </div>
             </div>
 
@@ -273,14 +279,14 @@ const onSubmit: SubmitHandler<AdmissionFormValues> = (values) => {
                   <div>
                     <Label htmlFor="parentName" icon={<User className="h-3.5 w-3.5" />}>Parent Full Name</Label>
                     <input id="parentName" type="text" placeholder="Full Name" className={inputBase} {...register("parentName")} disabled={isPending} />
-                    <FieldError message={(errors.parentName?.message as string)} />
+                    <FieldError message={errors.parentName?.message} />
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="parentEmail" icon={<Mail className="h-3.5 w-3.5" />}>Email Address</Label>
                       <input id="parentEmail" type="email" placeholder="email@example.com" className={inputBase} {...register("parentEmail")} disabled={isPending} />
-                      <FieldError message={(errors.parentEmail?.message as string)} />
+                      <FieldError message={errors.parentEmail?.message} />
                     </div>
                     <div>
                       <Label htmlFor="parentPhone" icon={<Phone className="h-3.5 w-3.5" />}>Phone Number</Label>
@@ -288,7 +294,7 @@ const onSubmit: SubmitHandler<AdmissionFormValues> = (values) => {
                         <span className="absolute inset-y-0 left-4 flex items-center text-sm">🇰🇪</span>
                         <input id="parentPhone" type="tel" placeholder="07xx xxx xxx" className={`${inputBase} pl-12`} {...register("parentPhone")} disabled={isPending} />
                       </div>
-                      <FieldError message={(errors.parentPhone?.message as string)} />
+                      <FieldError message={errors.parentPhone?.message} />
                     </div>
                   </div>
                 </div>

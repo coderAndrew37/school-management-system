@@ -1,9 +1,8 @@
 import { ParentSearchResult, searchParentsAction } from "@/lib/actions/admit";
 import { CheckCircle2, X, Search, Loader2, School } from "lucide-react";
 import { useState, useRef, useCallback, useEffect } from "react";
-import { supabase } from "@/lib/supabase/client"; // Assuming you have a standard client
 
-// ── Components ─────────────────────────────────────────────────────────────
+// ── Shared UI Components ─────────────────────────────────────────────────────
 
 export function FieldError({ message }: { message?: string }) {
   if (!message) return null;
@@ -47,60 +46,47 @@ export function Divider({ label }: { label: string }) {
   );
 }
 
-// ── New: Class Selector (Implementation for the New Schema) ────────────────
+// ── Class Selector (Now a Controlled "Dumb" Component) ───────────────────────
 
 export function ClassSelect({
   value,
   onChange,
+  options,
   disabled,
 }: {
   value: string;
   onChange: (val: string) => void;
+  options: { id: string; grade: string; stream: string }[];
   disabled?: boolean;
 }) {
-  const [classes, setClasses] = useState<{ id: string; grade: string; stream: string }[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function fetchClasses() {
-      const { data } = await supabase
-        .from("classes")
-        .select("id, grade, stream")
-        .eq("academic_year", 2026) // Strictly for the current year
-        .order("grade", { ascending: true });
-      
-      if (data) setClasses(data);
-      setLoading(false);
-    }
-    fetchClasses();
-  }, []);
-
   return (
     <div className="relative">
       <select
-      aria-label="Select Class"
+        aria-label="Select Class"
         id="classId"
         name="classId"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        disabled={disabled || loading}
+        disabled={disabled}
         className="w-full appearance-none rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition-all focus:border-amber-400/60 focus:ring-2 focus:ring-amber-400/20 disabled:opacity-50"
       >
-        <option value="" className="bg-[#111827]">Select a specific class...</option>
-        {classes.map((c) => (
+        <option value="" className="bg-[#111827]">
+          Select a specific class...
+        </option>
+        {options.map((c) => (
           <option key={c.id} value={c.id} className="bg-[#111827]">
             {c.grade} — {c.stream}
           </option>
         ))}
       </select>
       <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white/20">
-        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <School className="h-4 w-4" />}
+        <School className="h-4 w-4" />
       </div>
     </div>
   );
 }
 
-// ── Parent search combobox ────────────────────────────────────────────────────
+// ── Parent Search Combobox ────────────────────────────────────────────────────
 
 export function ParentSearchBox({
   onSelect,

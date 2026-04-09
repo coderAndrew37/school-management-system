@@ -18,7 +18,6 @@ const studentFields = {
 
   relationshipType: z
     .enum(["mother", "father", "guardian", "other"])
-    .default("guardian"),
 };
 
 /**

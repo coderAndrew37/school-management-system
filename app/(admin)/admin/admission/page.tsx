@@ -1,15 +1,8 @@
 // app/admin/admit/page.tsx
-// Server component — auth guard + no data to prefetch for admission.
-// The form itself handles parent search via server actions.
-
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/actions/auth";
 import AdmissionForm from "@/app/_components/AdmissionForm";
-
-export const metadata = {
-  title: "New Student Admission | Kibali Academy",
-  description: "Admit a new student to Kibali Academy",
-};
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export default async function AdmissionPage() {
   const session = await getSession();
@@ -17,5 +10,15 @@ export default async function AdmissionPage() {
     redirect("/login?redirectTo=/admin/admit");
   }
 
-  return <AdmissionForm />;
+  // Fetch classes on the server
+  const supabase = await createSupabaseServerClient();
+  const currentYear = new Date().getFullYear();
+
+  const { data: classes } = await supabase
+    .from("classes")
+    .select("id, grade, stream")
+    .eq("academic_year", currentYear)
+    .order("grade", { ascending: true });
+
+  return <AdmissionForm availableClasses={classes ?? []} />;
 }
