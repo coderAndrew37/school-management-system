@@ -4,16 +4,17 @@ import { sendTeacherWelcomeEmail } from "@/lib/mail";
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "../supabase/admin";
 import { getAuthConfirmUrl } from "@/lib/utils/site-url";
-import { normalizeKenyanPhone } from "@/lib/utils/phone"; // Updated import
+import { normalizeKenyanPhone } from "@/lib/utils/phone";
+import type { ActionResult } from "@/lib/types/dashboard";
 
-export async function addTeacherAction(formData: FormData) {
+export async function addTeacherAction(formData: FormData): Promise<ActionResult> {
   const fullName = formData.get("fullName") as string;
   const email = formData.get("email") as string;
   const rawPhone = formData.get("phone") as string;
   const tscNumber = formData.get("tscNumber") as string;
   const imageFile = formData.get("image") as File | null;
 
-  // Apply your normalization utility
+  // Apply normalization utility
   const phone = normalizeKenyanPhone(rawPhone);
 
   try {
@@ -30,10 +31,9 @@ export async function addTeacherAction(formData: FormData) {
     const userId = authData.user.id;
 
     // 2. Handle Image Upload (Optional)
-    let avatarUrl = null;
+    let avatarUrl: string | null = null;
     if (imageFile && imageFile.size > 0) {
       const fileExt = imageFile.name.split(".").pop();
-      // Using Date.now() for unique naming
       const fileName = `${userId}-${Date.now()}.${fileExt}`;
       const filePath = `teachers/${fileName}`;
 
@@ -47,7 +47,7 @@ export async function addTeacherAction(formData: FormData) {
           .getPublicUrl(filePath);
         avatarUrl = publicData.publicUrl;
       } else {
-        console.error("Storage upload error:", uploadError.message);
+        console.error("[Storage Upload]:", uploadError.message);
       }
     }
 
@@ -71,6 +71,7 @@ export async function addTeacherAction(formData: FormData) {
     }
 
     // 4. Update the Profile
+    // We expect the trigger to have created the profile; we update it with teacher context
     const { error: profileError } = await supabaseAdmin
       .from("profiles")
       .update({
@@ -101,9 +102,18 @@ export async function addTeacherAction(formData: FormData) {
     revalidatePath("/admin/teachers");
     revalidatePath("/admin/dashboard");
 
-    return { success: true };
-  } catch (error: any) {
-    console.error("addTeacherAction failed:", error.message);
-    return { success: false, message: error.message };
+    return { 
+      success: true, 
+      message: "Teacher added and welcome email sent successfully." 
+    };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
+    console.error("[addTeacherAction] failed:", errorMessage);
+    
+    return { 
+      success: false, 
+      message: errorMessage 
+    };
   }
 }

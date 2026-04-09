@@ -8,7 +8,7 @@ import { sendTeacherWelcomeEmail } from "@/lib/mail";
 import { getAuthConfirmUrl } from "@/lib/utils/site-url";
 import { ActionResult, TeacherStatus } from "@/lib/types/dashboard";
 
-// ── Validation ────────────────────────────────────────────────────────────────
+// ── 1. Validation ─────────────────────────────────────────────────────────────
 
 const teacherUpdateSchema = z.object({
   teacherId: z.string().uuid(),
@@ -18,12 +18,12 @@ const teacherUpdateSchema = z.object({
   avatarUrl: z.string().optional().nullable(),
 });
 
-// ── Guard ─────────────────────────────────────────────────────────────────────
+// ── 2. Guard ──────────────────────────────────────────────────────────────────
 
 /**
  * Ensures the requester is authenticated and has administrative privileges.
  */
-async function ensureAdmin() {
+async function ensureAdmin(): Promise<void> {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -42,7 +42,7 @@ async function ensureAdmin() {
   }
 }
 
-// ── Update Teacher ────────────────────────────────────────────────────────────
+// ── 3. Update Teacher ─────────────────────────────────────────────────────────
 
 export async function updateTeacherAction(fd: FormData): Promise<ActionResult> {
   try {
@@ -63,8 +63,7 @@ export async function updateTeacherAction(fd: FormData): Promise<ActionResult> {
       };
     }
 
-    const { teacherId, fullName, phoneNumber, tscNumber, avatarUrl } =
-      parsed.data;
+    const { teacherId, fullName, phoneNumber, tscNumber, avatarUrl } = parsed.data;
 
     // 1. Update the Teachers table
     const { error: teacherErr } = await supabaseAdmin
@@ -94,13 +93,14 @@ export async function updateTeacherAction(fd: FormData): Promise<ActionResult> {
     revalidatePath(`/admin/teachers/${teacherId}`);
 
     return { success: true, message: `${fullName} updated successfully.` };
-  } catch (err: any) {
-    console.error("[updateTeacherAction] Error:", err.message);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Update failed";
+    console.error("[updateTeacherAction] Error:", msg);
     return { success: false, message: "Failed to update teacher record." };
   }
 }
 
-// ── Change Status ─────────────────────────────────────────────────────────────
+// ── 4. Change Status ──────────────────────────────────────────────────────────
 
 /**
  * Updates teacher status and automatically relieves them of active
@@ -140,13 +140,14 @@ export async function changeTeacherStatusAction(
       success: true,
       message: `Status updated to ${status.replace("_", " ")}.`,
     };
-  } catch (err: any) {
-    console.error("[changeTeacherStatusAction] Error:", err.message);
-    return { success: false, message: err.message };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Status update failed";
+    console.error("[changeTeacherStatusAction] Error:", msg);
+    return { success: false, message: msg };
   }
 }
 
-// ── Resend Invite ─────────────────────────────────────────────────────────────
+// ── 5. Resend Invite ──────────────────────────────────────────────────────────
 
 export async function resendTeacherInviteAction(
   teacherId: string,
@@ -154,13 +155,14 @@ export async function resendTeacherInviteAction(
   try {
     await ensureAdmin();
 
-    const { data: teacher } = await supabaseAdmin
+    const { data: teacher, error: fetchErr } = await supabaseAdmin
       .from("teachers")
       .select("email, full_name")
       .eq("id", teacherId)
+      .returns<{ email: string; full_name: string }[]>()
       .single();
 
-    if (!teacher) return { success: false, message: "Teacher not found." };
+    if (fetchErr || !teacher) return { success: false, message: "Teacher not found." };
 
     const { data: link, error: linkErr } =
       await supabaseAdmin.auth.admin.generateLink({
@@ -186,13 +188,14 @@ export async function resendTeacherInviteAction(
     revalidatePath(`/admin/teachers/${teacherId}`);
 
     return { success: true, message: "Invite email resent." };
-  } catch (err: any) {
-    console.error("[resendTeacherInviteAction] Error:", err.message);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Invite failed";
+    console.error("[resendTeacherInviteAction] Error:", msg);
     return { success: false, message: "Failed to resend invite." };
   }
 }
 
-// ── Delete Teacher ────────────────────────────────────────────────────────────
+// ── 6. Delete Teacher ─────────────────────────────────────────────────────────
 
 export async function deleteTeacherAction(
   teacherId: string,
@@ -212,12 +215,11 @@ export async function deleteTeacherAction(
     if (allocations?.length) {
       return {
         success: false,
-        message:
-          "Cannot delete: Teacher has active subject allocations. Clear them first.",
+        message: "Cannot delete: Teacher has active subject allocations. Clear them first.",
       };
     }
 
-    // 2. Cleanup Class Teacher roles (Hard delete of history allowed on full removal)
+    // 2. Cleanup Class Teacher roles
     await supabaseAdmin
       .from("class_teacher_assignments")
       .delete()
@@ -232,8 +234,9 @@ export async function deleteTeacherAction(
     revalidatePath("/admin/dashboard");
 
     return { success: true, message: "Teacher removed from Kibali Academy." };
-  } catch (err: any) {
-    console.error("[deleteTeacherAction] Error:", err.message);
-    return { success: false, message: "Deletion failed: " + err.message };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Deletion failed";
+    console.error("[deleteTeacherAction] Error:", msg);
+    return { success: false, message: "Deletion failed: " + msg };
   }
 }

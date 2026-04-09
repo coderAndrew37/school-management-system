@@ -37,7 +37,7 @@ const recordPaymentSchema = z.object({
   paid_at: z.string().optional(), // ISO date string
 });
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Types & Interfaces ────────────────────────────────────────────────────────
 
 export interface FeeStructure {
   id: string;
@@ -77,6 +77,33 @@ export interface GradeFeeStats {
   fee_amount: number;
 }
 
+interface RawFeeRecordRow {
+  id: string;
+  student_id: string;
+  amount: number;
+  status: string;
+  term: number;
+  academic_year: number;
+  payment_method: string | null;
+  reference_number: string | null;
+  notes: string | null;
+  paid_at: string | null;
+  created_at: string;
+  students: {
+    full_name: string;
+    current_grade: string;
+  } | null;
+}
+
+interface RawPaymentStatsRow {
+  amount: number;
+  status: string;
+  term: number;
+  students: {
+    current_grade: string;
+  } | null;
+}
+
 // ── Auth guard ────────────────────────────────────────────────────────────────
 
 async function requireAdmin() {
@@ -99,6 +126,7 @@ export async function fetchFeeStructures(
     .eq("academic_year", academic_year)
     .order("grade")
     .order("term");
+
   if (error) {
     console.error("[fetchFeeStructures]", error.message);
     return [];
@@ -113,31 +141,41 @@ export async function upsertFeeStructureAction(input: {
   amount: number;
   description?: string;
 }): Promise<{ success: boolean; error?: string }> {
-  await requireAdmin();
-  const parsed = feeStructureSchema.safeParse(input);
-  if (!parsed.success)
-    return { success: false, error: parsed.error.issues[0]?.message };
+  try {
+    await requireAdmin();
+    const parsed = feeStructureSchema.safeParse(input);
+    if (!parsed.success)
+      return { success: false, error: parsed.error.issues[0]?.message };
 
-  const { error } = await supabaseAdmin
-    .from("fee_structures")
-    .upsert(parsed.data, { onConflict: "grade,term,academic_year" });
+    const { error } = await supabaseAdmin
+      .from("fee_structures")
+      .upsert(parsed.data, { onConflict: "grade,term,academic_year" });
 
-  if (error) return { success: false, error: error.message };
-  revalidatePath("/admin/fees");
-  return { success: true };
+    if (error) throw error;
+    revalidatePath("/admin/fees");
+    return { success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to upsert structure";
+    return { success: false, error: msg };
+  }
 }
 
 export async function deleteFeeStructureAction(
   id: string,
 ): Promise<{ success: boolean; error?: string }> {
-  await requireAdmin();
-  const { error } = await supabaseAdmin
-    .from("fee_structures")
-    .delete()
-    .eq("id", id);
-  if (error) return { success: false, error: error.message };
-  revalidatePath("/admin/fees");
-  return { success: true };
+  try {
+    await requireAdmin();
+    const { error } = await supabaseAdmin
+      .from("fee_structures")
+      .delete()
+      .eq("id", id);
+    if (error) throw error;
+    revalidatePath("/admin/fees");
+    return { success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Deletion failed";
+    return { success: false, error: msg };
+  }
 }
 
 // ── Fee Payments ──────────────────────────────────────────────────────────────
@@ -151,26 +189,24 @@ export async function fetchFeeRecords(
 
   let q = supabaseAdmin
     .from("fee_payments")
-    .select(
-      `
+    .select(`
       id, student_id, amount, status, term, academic_year,
       payment_method, reference_number, notes, paid_at, created_at,
       students ( full_name, current_grade )
-    `,
-    )
+    `)
     .eq("academic_year", academic_year)
     .order("created_at", { ascending: false });
 
   if (grade) q = q.eq("students.current_grade", grade);
   if (term) q = q.eq("term", term);
 
-  const { data, error } = await q;
+  const { data, error } = await q.returns<RawFeeRecordRow[]>();
   if (error) {
     console.error("[fetchFeeRecords]", error.message);
     return [];
   }
 
-  return (data ?? []).map((r: any) => ({
+  return (data ?? []).map((r) => ({
     id: r.id,
     student_id: r.student_id,
     student_name: r.students?.full_name ?? "Unknown",
@@ -197,65 +233,70 @@ export async function recordPaymentAction(input: {
   notes?: string;
   paid_at?: string;
 }): Promise<{ success: boolean; error?: string }> {
-  await requireAdmin();
+  try {
+    await requireAdmin();
+    const parsed = recordPaymentSchema.safeParse(input);
+    if (!parsed.success)
+      return { success: false, error: parsed.error.issues[0]?.message };
 
-  const parsed = recordPaymentSchema.safeParse(input);
-  if (!parsed.success)
-    return { success: false, error: parsed.error.issues[0]?.message };
-
-  const {
-    student_id,
-    term,
-    academic_year,
-    amount,
-    payment_method,
-    reference_number,
-    notes,
-    paid_at,
-  } = parsed.data;
-
-  // Upsert: if a record exists for this student+term+year, update it; else insert
-  const { error } = await supabaseAdmin.from("fee_payments").upsert(
-    {
+    const {
       student_id,
       term,
       academic_year,
       amount,
-      status: "paid",
-      payment_method: payment_method ?? "cash",
-      reference_number: reference_number ?? null,
-      notes: notes ?? null,
-      paid_at: paid_at ?? new Date().toISOString(),
-    },
-    { onConflict: "student_id,term,academic_year" },
-  );
+      payment_method,
+      reference_number,
+      notes,
+      paid_at,
+    } = parsed.data;
 
-  if (error) return { success: false, error: error.message };
-  revalidatePath("/admin/fees");
-  return { success: true };
+    const { error } = await supabaseAdmin.from("fee_payments").upsert(
+      {
+        student_id,
+        term,
+        academic_year,
+        amount,
+        status: "paid",
+        payment_method: payment_method ?? "cash",
+        reference_number: reference_number ?? null,
+        notes: notes ?? null,
+        paid_at: paid_at ?? new Date().toISOString(),
+      },
+      { onConflict: "student_id,term,academic_year" },
+    );
+
+    if (error) throw error;
+    revalidatePath("/admin/fees");
+    return { success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to record payment";
+    return { success: false, error: msg };
+  }
 }
 
 export async function updatePaymentStatusAction(
   paymentId: string,
   status: "paid" | "pending" | "partial" | "waived",
 ): Promise<{ success: boolean; error?: string }> {
-  await requireAdmin();
-  const { error } = await supabaseAdmin
-    .from("fee_payments")
-    .update({
-      status,
-      paid_at: status === "paid" ? new Date().toISOString() : null,
-    })
-    .eq("id", paymentId);
-  if (error) return { success: false, error: error.message };
-  revalidatePath("/admin/fees");
-  return { success: true };
+  try {
+    await requireAdmin();
+    const { error } = await supabaseAdmin
+      .from("fee_payments")
+      .update({
+        status,
+        paid_at: status === "paid" ? new Date().toISOString() : null,
+      })
+      .eq("id", paymentId);
+    if (error) throw error;
+    revalidatePath("/admin/fees");
+    return { success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Update failed";
+    return { success: false, error: msg };
+  }
 }
 
 // ── Bulk fee generation ───────────────────────────────────────────────────────
-// Creates a fee_payment record (status=pending) for every student in a grade
-// based on the fee structure for that grade/term/year.
-// Skips students who already have a record for that term.
 
 export async function bulkGenerateFeeRecordsAction(
   grade: string,
@@ -267,81 +308,73 @@ export async function bulkGenerateFeeRecordsAction(
   skipped: number;
   error?: string;
 }> {
-  await requireAdmin();
+  try {
+    await requireAdmin();
 
-  // 1. Get fee structure
-  const { data: structure } = await supabaseAdmin
-    .from("fee_structures")
-    .select("amount")
-    .eq("grade", grade)
-    .eq("term", term)
-    .eq("academic_year", academic_year)
-    .maybeSingle();
+    const { data: structure } = await supabaseAdmin
+      .from("fee_structures")
+      .select("amount")
+      .eq("grade", grade)
+      .eq("term", term)
+      .eq("academic_year", academic_year)
+      .maybeSingle();
 
-  if (!structure) {
-    return {
-      success: false,
-      created: 0,
-      skipped: 0,
-      error: `No fee structure found for ${grade} Term ${term} ${academic_year}. Create one first.`,
-    };
-  }
+    if (!structure) {
+      return {
+        success: false,
+        created: 0,
+        skipped: 0,
+        error: `No fee structure found for ${grade} Term ${term} ${academic_year}.`,
+      };
+    }
 
-  // 2. Get all students in grade
-  const { data: students } = await supabaseAdmin
-    .from("students")
-    .select("id")
-    .eq("current_grade", grade);
+    const { data: students } = await supabaseAdmin
+      .from("students")
+      .select("id")
+      .eq("current_grade", grade);
 
-  if (!students?.length) {
-    return {
-      success: false,
-      created: 0,
-      skipped: 0,
-      error: "No students found in this grade.",
-    };
-  }
+    if (!students?.length) {
+      return {
+        success: false,
+        created: 0,
+        skipped: 0,
+        error: "No students found in this grade.",
+      };
+    }
 
-  // 3. Get existing payment records to skip
-  const { data: existing } = await supabaseAdmin
-    .from("fee_payments")
-    .select("student_id")
-    .eq("term", term)
-    .eq("academic_year", academic_year)
-    .in(
-      "student_id",
-      students.map((s) => s.id),
+    const { data: existing } = await supabaseAdmin
+      .from("fee_payments")
+      .select("student_id")
+      .eq("term", term)
+      .eq("academic_year", academic_year)
+      .in("student_id", students.map((s) => s.id));
+
+    const existingIds = new Set((existing ?? []).map((e) => e.student_id));
+    const toCreate = students.filter((s) => !existingIds.has(s.id));
+
+    if (toCreate.length === 0) {
+      return { success: true, created: 0, skipped: students.length };
+    }
+
+    const { error } = await supabaseAdmin.from("fee_payments").insert(
+      toCreate.map((s) => ({
+        student_id: s.id,
+        term,
+        academic_year,
+        amount: structure.amount,
+        status: "pending",
+        payment_method: null,
+      })),
     );
 
-  const existingIds = new Set((existing ?? []).map((e: any) => e.student_id));
-  const toCreate = students.filter((s) => !existingIds.has(s.id));
+    if (error) throw error;
 
-  if (toCreate.length === 0) {
-    return { success: true, created: 0, skipped: students.length };
+    revalidatePath("/admin/fees");
+    return { success: true, created: toCreate.length, skipped: existingIds.size };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Bulk generation failed";
+    return { success: false, created: 0, skipped: 0, error: msg };
   }
-
-  // 4. Bulk insert
-  const { error } = await supabaseAdmin.from("fee_payments").insert(
-    toCreate.map((s) => ({
-      student_id: s.id,
-      term,
-      academic_year,
-      amount: structure.amount,
-      status: "pending",
-      payment_method: null,
-    })),
-  );
-
-  if (error)
-    return {
-      success: false,
-      created: 0,
-      skipped: existingIds.size,
-      error: error.message,
-    };
-
-  revalidatePath("/admin/fees");
-  return { success: true, created: toCreate.length, skipped: existingIds.size };
 }
 
 // ── Dashboard stats ───────────────────────────────────────────────────────────
@@ -359,7 +392,8 @@ export async function fetchFeeDashboardStats(academic_year: number): Promise<{
   const { data: payments } = await supabaseAdmin
     .from("fee_payments")
     .select(`amount, status, term, students ( current_grade )`)
-    .eq("academic_year", academic_year);
+    .eq("academic_year", academic_year)
+    .returns<RawPaymentStatsRow[]>();
 
   const { data: structures } = await supabaseAdmin
     .from("fee_structures")
@@ -367,11 +401,8 @@ export async function fetchFeeDashboardStats(academic_year: number): Promise<{
     .eq("academic_year", academic_year);
 
   const structureMap = new Map<string, number>();
-  for (const s of structures ?? []) {
-    structureMap.set(
-      `${(s as any).grade}||${(s as any).term}`,
-      (s as any).amount,
-    );
+  for (const s of (structures ?? [])) {
+    structureMap.set(`${s.grade}||${s.term}`, s.amount);
   }
 
   const { data: allStudents } = await supabaseAdmin
@@ -384,10 +415,10 @@ export async function fetchFeeDashboardStats(academic_year: number): Promise<{
     pendingCount = 0;
   const gradeBuckets = new Map<string, GradeFeeStats>();
 
-  for (const p of (payments ?? []) as any[]) {
+  for (const p of (payments ?? [])) {
     const grade = p.students?.current_grade ?? "Unknown";
-    const feeAmt = structureMap.get(`${grade}||${p.term}`) ?? p.amount;
     const key = `${grade}||${p.term}`;
+    const feeAmt = structureMap.get(key) ?? p.amount;
 
     if (!gradeBuckets.has(key)) {
       gradeBuckets.set(key, {
@@ -425,13 +456,12 @@ export async function fetchFeeDashboardStats(academic_year: number): Promise<{
     paidCount,
     pendingCount,
     gradeBreakdown: Array.from(gradeBuckets.values()).sort((a, b) =>
-      a.grade.localeCompare(b.grade),
+      a.grade.localeCompare(b.grade) || a.term - b.term,
     ),
   };
 }
 
 // ── Student fee lookup ────────────────────────────────────────────────────────
-// Used by record-payment modal to find a student
 
 export async function searchStudentsForFees(query: string) {
   await requireAdmin();

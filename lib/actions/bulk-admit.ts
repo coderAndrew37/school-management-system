@@ -7,11 +7,14 @@ import { z } from "zod";
 import { supabaseAdmin } from "../supabase/admin";
 import { normalizeKenyanPhone } from "../utils/phone";
 
+// ── 1. Validation Schema ──────────────────────────────────────────────────────
+
 const rowSchema = z.object({
   studentName: z.string().min(2, "Name too short").max(100),
   dateOfBirth: z.string().min(1, "DOB required"),
   gender: z.enum(["Male", "Female"]),
   currentGrade: z.string().min(1).max(30),
+  classId: z.string().uuid("Invalid Class ID"), // New requirement for class architecture
   parentName: z.string().min(2, "Parent name too short").max(100),
   parentEmail: z.string().email("Invalid email"),
   parentPhone: z.string().min(9, "Phone too short").max(15),
@@ -26,6 +29,8 @@ export interface BulkAdmitResult {
   message: string;
   studentId?: string;
 }
+
+// ── 2. Bulk Action ─────────────────────────────────────────────────────────────
 
 export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
   results: BulkAdmitResult[];
@@ -50,7 +55,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
   const results: BulkAdmitResult[] = [];
 
   for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]!;
+    const row = rows[i];
     const parsed = rowSchema.safeParse(row);
 
     if (!parsed.success) {
@@ -68,6 +73,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
       dateOfBirth,
       gender,
       currentGrade,
+      classId,
       parentName,
       parentEmail,
       parentPhone,
@@ -77,7 +83,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
       const email = parentEmail.toLowerCase();
       const phone = normalizeKenyanPhone(parentPhone);
 
-      // ── 1. Parent Handling ─────────────────────────────────────────────────
+      // ── 1. Parent Handling ──
       let parentId: string;
       let isNewParent = false;
 
@@ -103,9 +109,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
         isNewParent = true;
       }
 
-      // UPSERT the parent record. This fixes the "NA" phone number issue and
-      // solves the "Duplicate Key" error by updating the record if the trigger
-      // created it first.
+      // UPSERT parent to ensure the phone number and name are correctly synced
       const { error: pErr } = await supabaseAdmin.from("parents").upsert({
         id: parentId,
         full_name: parentName,
@@ -115,7 +119,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
 
       if (pErr) throw new Error(`Parent Record: ${pErr.message}`);
 
-      // ── 2. Student Creation ────────────────────────────────────────────────
+      // ── 2. Student Creation (with class_id) ──
       const { data: student, error: sErr } = await supabaseAdmin
         .from("students")
         .insert({
@@ -123,13 +127,14 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
           date_of_birth: dateOfBirth,
           gender,
           current_grade: currentGrade,
+          class_id: classId, // Mapping to new structure
         })
         .select("id")
         .single();
 
-      if (sErr || !student) throw new Error(`Student: ${sErr?.message}`);
+      if (sErr || !student) throw new Error(`Student: ${sErr?.message ?? "Insert failed"}`);
 
-      // ── 3. Linking ─────────────────────────────────────────────────────────
+      // ── 3. Linking ──
       const { error: linkErr } = await supabaseAdmin
         .from("student_parents")
         .insert({
@@ -140,11 +145,12 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
         });
 
       if (linkErr) {
+        // Cleanup student if link fails
         await supabaseAdmin.from("students").delete().eq("id", student.id);
         throw new Error(`Linking: ${linkErr.message}`);
       }
 
-      // ── 4. Welcome Email ───────────────────────────────────────────────────
+      // ── 4. Welcome Email ──
       if (isNewParent) {
         const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
           type: "recovery",
@@ -155,13 +161,17 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
         });
 
         if (linkData?.properties?.action_link) {
-          await sendWelcomeEmail({
-            parentEmail: email,
-            parentName,
-            studentName,
-            grade: currentGrade,
-            setupLink: linkData.properties.action_link,
-          });
+          try {
+            await sendWelcomeEmail({
+              parentEmail: email,
+              parentName,
+              studentName,
+              grade: currentGrade,
+              setupLink: linkData.properties.action_link,
+            });
+          } catch (e) {
+            console.error(`Email failed for ${studentName}:`, e);
+          }
         }
       }
 
@@ -172,12 +182,13 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
         message: "Success",
         studentId: student.id,
       });
-    } catch (err: any) {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Admission failed";
       results.push({
         index: i,
         studentName: studentName || "Unknown",
         success: false,
-        message: err.message,
+        message: msg,
       });
     }
   }

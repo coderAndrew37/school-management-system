@@ -8,13 +8,15 @@ import { sendWelcomeEmail } from "@/lib/mail";
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "../supabase/admin";
 
+// ── 1. Types & Row Interfaces ─────────────────────────────────────────────────
+
 export interface ParentInviteRow {
   id: string;
   full_name: string;
   email: string;
   phone_number: string | null;
   last_invite_sent: string | null;
-  confirmed: boolean; // whether auth user has confirmed email
+  confirmed: boolean;
   children: {
     id: string;
     full_name: string;
@@ -22,7 +24,26 @@ export interface ParentInviteRow {
   }[];
 }
 
-// ── Fetch all parents with invite status ──────────────────────────────────────
+interface RawInviteStatusRow {
+  id: string;
+  full_name: string;
+  email: string;
+  phone_number: string | null;
+  last_invite_sent: string | null;
+  student_parents: {
+    students: { id: string; full_name: string; current_grade: string } | null;
+  }[] | null;
+}
+
+interface RawResendInviteRow {
+  email: string;
+  full_name: string;
+  student_parents: {
+    students: { full_name: string; current_grade: string } | null;
+  }[] | null;
+}
+
+// ── 2. Fetch all parents with invite status ──────────────────────────────────────
 
 export async function fetchParentsInviteStatus(): Promise<{
   parents: ParentInviteRow[];
@@ -36,15 +57,14 @@ export async function fetchParentsInviteStatus(): Promise<{
   // Fetch parents with their children
   const { data: parents, error } = await supabaseAdmin
     .from("parents")
-    .select(
-      `
+    .select(`
       id, full_name, email, phone_number, last_invite_sent,
       student_parents (
         students ( id, full_name, current_grade )
       )
-    `,
-    )
-    .order("full_name");
+    `)
+    .order("full_name")
+    .returns<RawInviteStatusRow[]>();
 
   if (error) return { parents: [], error: error.message };
 
@@ -52,13 +72,14 @@ export async function fetchParentsInviteStatus(): Promise<{
   const { data: authList } = await supabaseAdmin.auth.admin.listUsers({
     perPage: 1000,
   });
+  
   const confirmedSet = new Set<string>(
     (authList?.users ?? [])
       .filter((u) => u.email_confirmed_at)
-      .map((u) => u.email!),
+      .map((u) => u.email!)
   );
 
-  const rows: ParentInviteRow[] = (parents ?? []).map((p: any) => ({
+  const rows: ParentInviteRow[] = (parents ?? []).map((p) => ({
     id: p.id,
     full_name: p.full_name,
     email: p.email,
@@ -66,14 +87,14 @@ export async function fetchParentsInviteStatus(): Promise<{
     last_invite_sent: p.last_invite_sent,
     confirmed: confirmedSet.has(p.email),
     children: (p.student_parents ?? [])
-      .map((sp: any) => sp.students)
-      .filter(Boolean),
+      .map((sp) => sp.students)
+      .filter((s): s is NonNullable<typeof s> => !!s),
   }));
 
   return { parents: rows };
 }
 
-// ── Resend invite to a single parent ─────────────────────────────────────────
+// ── 3. Resend invite to a single parent ─────────────────────────────────────────
 
 export async function resendParentInviteAction(parentId: string): Promise<{
   success: boolean;
@@ -87,21 +108,21 @@ export async function resendParentInviteAction(parentId: string): Promise<{
   try {
     const { data: parent, error: pErr } = await supabaseAdmin
       .from("parents")
-      .select(
-        `
+      .select(`
         email, full_name,
         student_parents ( students ( full_name, current_grade ) )
-      `,
-      )
+      `)
       .eq("id", parentId)
       .single();
 
     if (pErr || !parent) throw new Error("Parent not found");
+    
+    const typedParent = parent as unknown as RawResendInviteRow;
 
     const { data: linkData, error: linkErr } =
       await supabaseAdmin.auth.admin.generateLink({
         type: "recovery",
-        email: (parent as any).email,
+        email: typedParent.email,
         options: {
           redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
         },
@@ -109,12 +130,11 @@ export async function resendParentInviteAction(parentId: string): Promise<{
 
     if (linkErr) throw linkErr;
 
-    const firstChild = ((parent as any).student_parents as any[])?.[0]
-      ?.students;
+    const firstChild = typedParent.student_parents?.[0]?.students;
 
     await sendWelcomeEmail({
-      parentEmail: (parent as any).email,
-      parentName: (parent as any).full_name,
+      parentEmail: typedParent.email,
+      parentName: typedParent.full_name,
       studentName: firstChild?.full_name ?? "your child",
       grade: firstChild?.current_grade ?? "—",
       setupLink: linkData.properties.action_link,
@@ -128,12 +148,13 @@ export async function resendParentInviteAction(parentId: string): Promise<{
 
     revalidatePath("/admin/invites");
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to resend invite";
+    return { success: false, error: msg };
   }
 }
 
-// ── Bulk resend to all pending (unconfirmed) parents ─────────────────────────
+// ── 4. Bulk resend to specific parents ─────────────────────────
 
 export async function bulkResendInvitesAction(parentIds: string[]): Promise<{
   success: boolean;
@@ -157,12 +178,13 @@ export async function bulkResendInvitesAction(parentIds: string[]): Promise<{
 
   for (const parentId of parentIds) {
     const result = await resendParentInviteAction(parentId);
-    if (result.success) sent++;
-    else {
+    if (result.success) {
+      sent++;
+    } else {
       failed++;
-      if (result.error) errors.push(result.error);
+      if (result.error) errors.push(`${parentId}: ${result.error}`);
     }
-    // Rate-limit: small delay between emails
+    // Rate-limit to prevent hitting SMTP or Auth API limits
     await new Promise((r) => setTimeout(r, 200));
   }
 

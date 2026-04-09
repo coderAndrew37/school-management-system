@@ -2,11 +2,10 @@
 
 // lib/actions/subjects.ts
 
+import { getSession } from "@/lib/actions/auth";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
-import { getSession } from "@/lib/actions/auth";
 import { z } from "zod";
-import type { SubjectLevel } from "@/lib/types/allocation";
 
 export interface SubjectActionResult {
   success: boolean;

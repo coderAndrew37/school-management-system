@@ -9,10 +9,12 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { supabaseAdmin } from "../supabase/admin";
 
+// ── 1. Validation Schema ──────────────────────────────────────────────────────
+
 const rowSchema = z.object({
-  fullName: z.string().min(2).max(100),
-  email: z.string().email(),
-  phone: z.string().min(9).max(15),
+  fullName: z.string().min(2, "Name too short").max(100),
+  email: z.string().email("Invalid email"),
+  phone: z.string().min(9, "Phone too short").max(15),
   tscNumber: z.string().max(30).optional().default(""),
 });
 
@@ -25,12 +27,15 @@ export interface BulkTeacherResult {
   message: string;
 }
 
+// ── 2. Bulk Action ─────────────────────────────────────────────────────────────
+
 export async function bulkAddTeachersAction(rows: BulkTeacherRow[]): Promise<{
   results: BulkTeacherResult[];
   successCount: number;
   failCount: number;
 }> {
   const session = await getSession();
+  
   if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
     return {
       results: rows.map((r, i) => ({
@@ -47,13 +52,13 @@ export async function bulkAddTeachersAction(rows: BulkTeacherRow[]): Promise<{
   const results: BulkTeacherResult[] = [];
 
   for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]!;
+    const row = rows[i];
     const parsed = rowSchema.safeParse(row);
 
     if (!parsed.success) {
       results.push({
         index: i,
-        fullName: row.fullName,
+        fullName: row.fullName || `Row ${i + 1}`,
         success: false,
         message: parsed.error.issues.map((e) => e.message).join("; "),
       });
@@ -69,8 +74,12 @@ export async function bulkAddTeachersAction(rows: BulkTeacherRow[]): Promise<{
           email,
           phone,
           email_confirm: true,
-          user_metadata: { full_name: fullName, role: "teacher" },
+          user_metadata: { 
+            full_name: fullName, 
+            role: "teacher" 
+          },
         });
+
       if (authErr) throw new Error(`Auth: ${authErr.message}`);
       const userId = authData.user.id;
 
@@ -83,18 +92,26 @@ export async function bulkAddTeachersAction(rows: BulkTeacherRow[]): Promise<{
         tsc_number: tscNumber || null,
         last_invite_sent: new Date().toISOString(),
       });
+
       if (tErr) {
+        // Rollback Auth user if DB record fails
         await supabaseAdmin.auth.admin.deleteUser(userId);
         throw new Error(`Teacher record: ${tErr.message}`);
       }
 
-      // 3. Link profile
-      await supabaseAdmin
+      // 3. Link profile (The profile is usually created by a trigger on auth.users)
+      const { error: pErr } = await supabaseAdmin
         .from("profiles")
         .update({ teacher_id: userId })
         .eq("id", userId);
 
-      // 4. Generate setup link + send email
+      if (pErr) {
+        console.error(`[bulkAddTeachers] Profile link failed for ${userId}:`, pErr.message);
+        // We don't necessarily roll back here as the core record exists, 
+        // but we should log it for manual fixing if the trigger missed it.
+      }
+
+      // 4. Generate setup link + send welcome email
       const { data: linkData, error: linkErr } =
         await supabaseAdmin.auth.admin.generateLink({
           type: "recovery",
@@ -103,13 +120,19 @@ export async function bulkAddTeachersAction(rows: BulkTeacherRow[]): Promise<{
             redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
           },
         });
+
       if (linkErr) throw linkErr;
 
-      await sendTeacherWelcomeEmail({
-        teacherEmail: email,
-        teacherName: fullName,
-        setupLink: linkData.properties.action_link,
-      });
+      try {
+        await sendTeacherWelcomeEmail({
+          teacherEmail: email,
+          teacherName: fullName,
+          setupLink: linkData.properties.action_link,
+        });
+      } catch (mailErr) {
+        console.error(`[bulkAddTeachers] Email delivery failed for ${email}:`, mailErr);
+        // Non-fatal error for the process, but worth noting
+      }
 
       results.push({
         index: i,
@@ -117,13 +140,19 @@ export async function bulkAddTeachersAction(rows: BulkTeacherRow[]): Promise<{
         success: true,
         message: "Added successfully",
       });
-    } catch (err: any) {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Process failed";
       results.push({
         index: i,
         fullName: row.fullName,
         success: false,
-        message: err.message,
+        message: msg,
       });
+    }
+    
+    // Optional: Add a tiny delay to avoid hitting rate limits on rapid Auth/Mail calls
+    if (rows.length > 5) {
+      await new Promise((r) => setTimeout(r, 150));
     }
   }
 

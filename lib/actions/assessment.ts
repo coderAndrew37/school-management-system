@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getSession } from "@/lib/actions/auth";
 import {
   resolveGradeLevel,
@@ -10,6 +11,8 @@ import {
   SCORE_LABELS,
 } from "@/lib/types/assessment";
 import type { CbcScore } from "@/lib/types/assessment";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface AssessmentActionResult {
   success: boolean;
@@ -21,6 +24,16 @@ export interface NarrativeResult {
   success: boolean;
   narrative?: string;
   message: string;
+}
+
+interface AnthropicResponse {
+  content: Array<{
+    text: string;
+    type: string;
+  }>;
+  id: string;
+  model: string;
+  role: string;
 }
 
 // ── Guard: teachers only ──────────────────────────────────────────────────────
@@ -95,36 +108,40 @@ export async function batchUpsertAssessmentsAction(
 
   let savedCount = 0;
 
-  if (upsertRows.length > 0) {
-    const { error } = await supabase.from("assessments").upsert(upsertRows, {
-      onConflict: "student_id,subject_name,strand_id,term,academic_year",
-      ignoreDuplicates: false,
-    });
+  try {
+    if (upsertRows.length > 0) {
+      const { error } = await supabase.from("assessments").upsert(upsertRows, {
+        onConflict: "student_id,subject_name,strand_id,term,academic_year",
+        ignoreDuplicates: false,
+      });
 
-    if (error) {
-      console.error("[batchUpsertAssessments]", error);
-      return { success: false, message: "Database error: " + error.message };
+      if (error) throw error;
+      savedCount = upsertRows.length;
     }
-    savedCount = upsertRows.length;
-  }
 
-  // Clear null scores
-  for (const r of clearRows) {
-    await supabase.from("assessments").delete().match({
-      student_id: r.studentId,
-      subject_name: r.subjectName,
-      strand_id: r.strandId,
-      term: r.term,
-      academic_year: r.academicYear,
-    });
-  }
+    // Clear deleted/null scores
+    for (const r of clearRows) {
+      const { error: deleteError } = await supabase.from("assessments").delete().match({
+        student_id: r.studentId,
+        subject_name: r.subjectName,
+        strand_id: r.strandId,
+        term: r.term,
+        academic_year: r.academicYear,
+      });
+      if (deleteError) console.error("[batchUpsert] Delete error:", deleteError.message);
+    }
 
-  revalidatePath("/teacher/assess");
-  return {
-    success: true,
-    message: `Saved ${savedCount} assessment${savedCount !== 1 ? "s" : ""}.`,
-    savedCount,
-  };
+    revalidatePath("/teacher/assess");
+    return {
+      success: true,
+      message: `Saved ${savedCount} assessment${savedCount !== 1 ? "s" : ""}.`,
+      savedCount,
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Database error";
+    console.error("[batchUpsertAssessments]", msg);
+    return { success: false, message: msg };
+  }
 }
 
 // ── 2. Generate AI narrative remark ──────────────────────────────────────────
@@ -138,7 +155,7 @@ export async function generateNarrativeAction(
   const studentId = fd.get("student_id") as string;
   const studentName = fd.get("student_name") as string;
   const subjectName = fd.get("subject_name") as string;
-  const gradeLabel = fd.get("grade") as string; // Likely "Grade 4-North"
+  const gradeLabel = fd.get("grade") as string; 
   const term = parseInt(fd.get("term") as string, 10);
   const academicYear = parseInt(
     (fd.get("academic_year") as string) || "2026",
@@ -169,7 +186,6 @@ export async function generateNarrativeAction(
     )
     .join("\n");
 
-  // Dynamically resolve level (e.g. "Grade 4-North" -> "upper_primary")
   const level = resolveGradeLevel(gradeLabel);
   const gradeContext = NARRATIVE_CONTEXT[level];
 
@@ -190,7 +206,6 @@ Do not mention letter codes like EE/ME/AE/BE — describe performance naturally.
 Respond with ONLY the narrative remark text, no preamble.`;
 
   try {
-    // Note: Model name updated to a valid Gemini/Claude identifier if needed
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -206,19 +221,19 @@ Respond with ONLY the narrative remark text, no preamble.`;
     });
 
     if (!response.ok) {
-      const err = await response.text();
-      console.error("[generateNarrative] API error:", err);
+      const errText = await response.text();
+      console.error("[generateNarrative] API error:", errText);
       return { success: false, message: "AI service error. Please try again." };
     }
 
-    const data = (await response.json()) as any;
-    const narrative = data.content?.[0]?.text?.trim();
+    const data = (await response.json()) as AnthropicResponse;
+    const narrative = data.content[0]?.text?.trim();
 
     if (!narrative) {
-      return { success: false, message: "No narrative returned." };
+      return { success: false, message: "No narrative returned from AI." };
     }
 
-    await supabase.from("assessment_narratives").upsert(
+    const { error: upsertError } = await supabase.from("assessment_narratives").upsert(
       {
         student_id: studentId,
         subject_name: subjectName,
@@ -230,6 +245,8 @@ Respond with ONLY the narrative remark text, no preamble.`;
       { onConflict: "student_id,subject_name,term,academic_year" },
     );
 
+    if (upsertError) throw upsertError;
+
     revalidatePath("/teacher/assess");
     return {
       success: true,
@@ -237,8 +254,9 @@ Respond with ONLY the narrative remark text, no preamble.`;
       message: "Narrative generated successfully.",
     };
   } catch (err) {
-    console.error("[generateNarrative]", err);
-    return { success: false, message: "Failed to generate narrative." };
+    const msg = err instanceof Error ? err.message : "Failed to generate narrative";
+    console.error("[generateNarrative]", msg);
+    return { success: false, message: msg };
   }
 }
 
@@ -274,7 +292,11 @@ export async function saveNarrativeAction(
     { onConflict: "student_id,subject_name,term,academic_year" },
   );
 
-  if (error) return { success: false, message: "Failed to save." };
+  if (error) {
+    console.error("[saveNarrativeAction] Error:", error.message);
+    return { success: false, message: "Failed to save record." };
+  }
+
   revalidatePath("/teacher/assess");
   return { success: true, narrative, message: "Saved successfully." };
 }

@@ -6,6 +6,16 @@ import { z } from "zod";
 import { supabaseAdmin } from "../supabase/admin";
 import { ActionResult } from "@/lib/types/dashboard";
 
+// ── Types & Interfaces ────────────────────────────────────────────────────────
+
+interface MyAssignmentRow {
+  academic_year: number;
+  classes: {
+    grade: string;
+    stream: string;
+  } | null;
+}
+
 // ── Validation ────────────────────────────────────────────────────────────────
 
 const assignSchema = z.object({
@@ -16,7 +26,7 @@ const assignSchema = z.object({
 
 // ── Guard ─────────────────────────────────────────────────────────────────────
 
-async function ensureAdmin() {
+async function ensureAdmin(): Promise<string> {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -98,11 +108,12 @@ export async function assignClassTeacherAction(
       success: true,
       message: "Class teacher assigned successfully.",
     };
-  } catch (err: any) {
-    console.error("[assignClassTeacherAction] Error:", err.message);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to assign teacher";
+    console.error("[assignClassTeacherAction] Error:", msg);
     return {
       success: false,
-      message: err.message || "Failed to assign teacher.",
+      message: msg,
     };
   }
 }
@@ -129,8 +140,9 @@ export async function relieveClassTeacherAction(
     revalidatePath("/admin/class-teachers");
 
     return { success: true, message: "Teacher relieved of duties." };
-  } catch (err: any) {
-    console.error("[relieveClassTeacherAction] Error:", err.message);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Process failed";
+    console.error("[relieveClassTeacherAction] Error:", msg);
     return { success: false, message: "Failed to relieve teacher." };
   }
 }
@@ -149,27 +161,26 @@ export async function fetchMyClassTeacherAssignments() {
 
   const { data, error } = await supabase
     .from("class_teacher_assignments")
-    .select(
-      `
+    .select(`
       academic_year,
       classes (
         grade,
         stream
       )
-    `,
-    )
+    `)
     .eq("teacher_id", user.id)
     .eq("is_active", true)
-    .eq("academic_year", 2026);
+    .eq("academic_year", 2026)
+    .returns<MyAssignmentRow[]>();
 
   if (error) {
     console.error("[fetchMyClassTeacherAssignments] Error:", error.message);
-    return { isClassTeacher: false, classes: [] };
+    return { isClassTeacher: false, classes: [] as { grade: string; stream: string }[] };
   }
 
-  const formattedClasses = (data ?? []).map((r: any) => ({
-    grade: r.classes?.grade,
-    stream: r.classes?.stream,
+  const formattedClasses = (data ?? []).map((r) => ({
+    grade: r.classes?.grade ?? "Unknown",
+    stream: r.classes?.stream ?? "Unknown",
   }));
 
   return {

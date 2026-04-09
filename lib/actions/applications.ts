@@ -8,7 +8,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getSession } from "@/lib/actions/auth";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── 1. Types ──────────────────────────────────────────────────────────────────
 
 export type ApplicationStatus =
   | "pending"
@@ -49,7 +49,7 @@ export interface ApplicationsResult {
   count: number;
 }
 
-// ── Fetch list ────────────────────────────────────────────────────────────────
+// ── 2. Fetch list ────────────────────────────────────────────────────────────────
 
 export async function fetchApplications(
   status?: ApplicationStatus | "all",
@@ -71,14 +71,14 @@ export async function fetchApplications(
   const { data, error, count } = await query;
 
   if (error) {
-    console.error("fetchApplications error:", error.message);
+    console.error("[fetchApplications] error:", error.message);
     return { data: [], count: 0 };
   }
 
   return { data: (data ?? []) as PublicApplication[], count: count ?? 0 };
 }
 
-// ── Fetch single ──────────────────────────────────────────────────────────────
+// ── 3. Fetch single ──────────────────────────────────────────────────────────────
 
 export async function fetchApplication(
   id: string,
@@ -89,11 +89,12 @@ export async function fetchApplication(
     .select("*")
     .eq("id", id)
     .single();
+    
   if (error) return null;
   return data as PublicApplication;
 }
 
-// ── Update status ─────────────────────────────────────────────────────────────
+// ── 4. Update status ─────────────────────────────────────────────────────────────
 
 export async function updateApplicationStatus(
   id: string,
@@ -123,11 +124,11 @@ export async function updateApplicationStatus(
   return { success: true, message: `Application marked as ${status}.` };
 }
 
-// ── Convert approved application → admitted student ───────────────────────────
-// Calls the existing admit flow via supabaseAdmin directly (skips form layer).
+// ── 5. Convert approved application → admitted student ───────────────────────────
 
 export async function convertApplicationToStudent(
   applicationId: string,
+  classId: string, // Required for new implementation
 ): Promise<{ success: boolean; message: string }> {
   const session = await getSession();
   if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
@@ -136,18 +137,20 @@ export async function convertApplicationToStudent(
 
   const app = await fetchApplication(applicationId);
   if (!app) return { success: false, message: "Application not found." };
+  
   if (app.status !== "approved") {
     return {
       success: false,
       message: "Only approved applications can be converted.",
     };
   }
+  
   if (app.converted_student_id) {
     return { success: false, message: "Already converted to a student." };
   }
 
   try {
-    // 1. Check for duplicate parent email
+    // 1. Resolve Parent
     const { data: existingParent } = await supabaseAdmin
       .from("parents")
       .select("id")
@@ -159,7 +162,7 @@ export async function convertApplicationToStudent(
     if (existingParent) {
       parentId = existingParent.id;
     } else {
-      // 2a. Create auth user
+      // Create auth user
       const { data: authData, error: authError } =
         await supabaseAdmin.auth.admin.createUser({
           email: app.parent_email,
@@ -169,10 +172,11 @@ export async function convertApplicationToStudent(
             role: "parent",
           },
         });
+        
       if (authError) throw new Error(authError.message);
       parentId = authData.user.id;
 
-      // 2b. Create parents row
+      // Create parents row
       const { error: parentError } = await supabaseAdmin
         .from("parents")
         .insert({
@@ -182,21 +186,23 @@ export async function convertApplicationToStudent(
           phone_number: app.parent_phone,
           invite_accepted: false,
         });
+        
       if (parentError) {
         await supabaseAdmin.auth.admin.deleteUser(parentId);
         throw new Error(parentError.message);
       }
 
-      // 2c. Generate & send welcome email (non-fatal)
+      // Generate & send welcome email
       try {
         const { sendWelcomeEmail } = await import("@/lib/mail");
         const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
-          type: "recovery",
+          type: "magiclink",
           email: app.parent_email,
           options: {
             redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
           },
         });
+        
         await sendWelcomeEmail({
           parentEmail: app.parent_email,
           parentName: `${app.parent_first_name} ${app.parent_last_name}`,
@@ -209,19 +215,18 @@ export async function convertApplicationToStudent(
       }
     }
 
-    // 3. Insert student
+    // 2. Insert student with new class_id
     const { data: newStudent, error: studentError } = await supabaseAdmin
       .from("students")
       .insert({
         full_name: `${app.student_first_name} ${app.student_last_name}`,
         date_of_birth: app.student_dob,
         gender:
-          app.student_gender === "male"
+          app.student_gender.toLowerCase() === "male"
             ? "Male"
-            : app.student_gender === "female"
-              ? "Female"
-              : "Male",
+            : "Female",
         current_grade: app.applying_for_grade,
+        class_id: classId,
       })
       .select("id")
       .single();
@@ -229,7 +234,7 @@ export async function convertApplicationToStudent(
     if (studentError || !newStudent)
       throw new Error(studentError?.message ?? "Student insert failed");
 
-    // 4. Link
+    // 3. Link Student & Parent
     const { error: linkError } = await supabaseAdmin
       .from("student_parents")
       .insert({
@@ -238,12 +243,14 @@ export async function convertApplicationToStudent(
         relationship_type: app.parent_relationship,
         is_primary_contact: true,
       });
+      
     if (linkError) {
+      // Rollback student if linking fails
       await supabaseAdmin.from("students").delete().eq("id", newStudent.id);
       throw new Error(linkError.message);
     }
 
-    // 5. Mark application as converted
+    // 4. Update the application with the student link
     await supabaseAdmin
       .from("public_applications")
       .update({ converted_student_id: newStudent.id })
@@ -251,11 +258,14 @@ export async function convertApplicationToStudent(
 
     revalidatePath("/admin/applications");
     revalidatePath("/admin/students");
+    
     return {
       success: true,
       message: "Student admitted and parent invited successfully.",
     };
-  } catch (err: any) {
-    return { success: false, message: err.message };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : "Conversion failed";
+    console.error("[convertApplicationToStudent] failed:", errorMessage);
+    return { success: false, message: errorMessage };
   }
 }
