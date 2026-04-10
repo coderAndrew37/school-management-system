@@ -1,5 +1,3 @@
-// app/parent/page.tsx
-
 import { getSession } from "@/lib/actions/auth";
 import { fetchAllChildData, fetchMyChildren } from "@/lib/data/parent";
 import type { ChildWithAssessments } from "@/lib/types/parent";
@@ -28,31 +26,44 @@ interface PageProps {
 }
 
 export default async function ParentDashboard({ searchParams }: PageProps) {
+  // 1. Verify Session & Role
   const session = await getSession();
-  if (!session || session.profile.role !== "parent") redirect("/login");
+  if (!session || session.profile.role !== "parent") {
+    redirect("/login");
+  }
+
+  // 2. Fetch Children linked to this specific parent email
+  const parentEmail = session.user.email;
+  if (!parentEmail) {
+    redirect("/login");
+  }
 
   const _sp = await searchParams;
-  const children: ChildWithAssessments[] = await fetchMyChildren();
+  const children: ChildWithAssessments[] = await fetchMyChildren(parentEmail);
 
+  // 3. Handle Empty State
   if (children.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen text-center px-4">
+      <div className="flex flex-col items-center justify-center min-h-screen text-center px-4 bg-[#f5f6fa]">
         <p className="text-6xl mb-4">🎒</p>
         <p className="text-slate-800 font-black text-xl">No children linked</p>
         <p className="text-slate-500 text-sm mt-2 max-w-sm leading-relaxed">
           Contact the school office to link your child&apos;s enrolment record
-          to this account.
+          to this account ({parentEmail}).
         </p>
       </div>
     );
   }
 
-  const activeChild =
-    children.find((c) => c.id === _sp?.child) ?? children[0]!;
+  // 4. Identify Active Child (from URL or default to first child)
+  const activeChild = children.find((c) => c.id === _sp?.child) ?? children[0]!;
+
+  // 5. Fetch all specific data for the active child
+  // Parameters: (studentId, classId, gradeLabel)
   const childData = await fetchAllChildData(
     activeChild.id,
-    activeChild.current_grade,
-    activeChild.grade_label,
+    activeChild.class_id ?? "", // Ensure your fetchMyChildren query includes class_id
+    activeChild.current_grade
   );
 
   // ── Attendance stats (this month) ─────────────────────────────────────────
@@ -65,12 +76,15 @@ export default async function ParentDashboard({ searchParams }: PageProps) {
       d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
     );
   });
+
   const presentCount = thisMonthAttend.filter(
     (r) => r.status === "Present" || r.status === "Late",
   ).length;
+
   const absentCount = thisMonthAttend.filter(
     (r) => r.status === "Absent",
   ).length;
+
   const attendRate =
     thisMonthAttend.length > 0
       ? Math.round((presentCount / thisMonthAttend.length) * 100)
@@ -80,7 +94,7 @@ export default async function ParentDashboard({ searchParams }: PageProps) {
     childData.attendance.find((a) => a.date.slice(0, 10) === todayStr)
       ?.status ?? null;
 
-  // ── Derived data ──────────────────────────────────────────────────────────
+  // ── Announcements & Events ──────────────────────────────────────────────────
   const urgentAnn = childData.announcements.filter(
     (a) => a.priority === "urgent",
   );
@@ -91,9 +105,8 @@ export default async function ParentDashboard({ searchParams }: PageProps) {
 
   const upcomingEvents = childData.events
     .filter((e) => {
-      const diff =
-        new Date(e.start_date + "T00:00:00").getTime() -
-        new Date().setHours(0, 0, 0, 0);
+      const eventDate = new Date(e.start_date + "T00:00:00");
+      const diff = eventDate.getTime() - new Date().setHours(0, 0, 0, 0);
       return diff >= 0 && diff <= 30 * 86400000;
     })
     .slice(0, 3);

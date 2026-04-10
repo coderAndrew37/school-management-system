@@ -1,4 +1,3 @@
-// app/parent/announcements/page.tsx
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/actions/auth";
 import { fetchMyChildren, fetchAllChildData } from "@/lib/data/parent";
@@ -9,21 +8,38 @@ export const revalidate = 0;
 
 export default async function ParentAnnouncementsPage() {
   const session = await getSession();
-  if (!session || session.profile.role !== "parent") redirect("/login");
 
-  const children = await fetchMyChildren();
-  if (children.length === 0) redirect("/parent");
+  // Guard: Ensure session exists, role is parent, and email is present
+  if (
+    !session || 
+    !session.user?.email || 
+    session.profile.role !== "parent"
+  ) {
+    redirect("/login");
+  }
+
+  // Pass the session email to fix the toLowerCase() error
+  const children = await fetchMyChildren(session.user.email);
+  
+  // If no children linked, send back to parent dashboard
+  if (children.length === 0) {
+    redirect("/parent");
+  }
 
   /** * REFACTOR NOTE: 
    * We now use 'class_id' (the UUID) instead of 'current_grade' (text).
    * This aligns with the new schema constraints in public.classes.
    */
-  if (!children[0]!.class_id) redirect("/parent");
+  const primaryChild = children[0];
+  if (!primaryChild?.class_id) {
+    redirect("/parent");
+  }
 
+  // Fetch all specific portal data for the primary child
   const childData = await fetchAllChildData(
-    children[0]!.id,
-    children[0]!.class_id,
-    children[0]!.grade_label,
+    primaryChild.id,
+    primaryChild.class_id,
+    primaryChild.grade_label
   );
 
   return (

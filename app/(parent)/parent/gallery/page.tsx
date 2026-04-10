@@ -1,12 +1,7 @@
-// app/parent/gallery/page.tsx
 import { getSession } from "@/lib/actions/auth";
 import { fetchAllChildData, fetchMyChildren } from "@/lib/data/parent";
 import { redirect } from "next/navigation";
 import { TalentGallery } from "../_components/TalentGallery";
-// Named import — the component lives at app/parent/_components/TalentGallery.tsx
-// Adjust path to match your actual folder structure:
-//   "@/components/TalentGallery"  if it's in components/
-//   "../_components/TalentGallery" if it's in app/parent/_components/
 
 export const metadata = { title: "Gallery | Kibali Parent Portal" };
 export const revalidate = 0;
@@ -17,17 +12,30 @@ interface PageProps {
 
 export default async function GalleryPage({ searchParams }: PageProps) {
   const session = await getSession();
-  if (!session || session.profile.role !== "parent") redirect("/login");
+
+  // Guard: Ensure session and user email exist
+  if (!session || !session.user?.email || session.profile.role !== "parent") {
+    redirect("/login");
+  }
 
   const _sp = await searchParams;
   const childParam = _sp?.child;
-  const children = await fetchMyChildren();
+
+  // Pass session email to fetcher
+  const children = await fetchMyChildren(session.user.email);
   if (children.length === 0) redirect("/parent");
 
   const activeChild = children.find((c) => c.id === childParam) ?? children[0]!;
+
+  /**
+   * REFACTOR: Use 'class_id' (UUID) for data fetching.
+   * This aligns with the database schema for gallery/talent records.
+   */
+  if (!activeChild.class_id) redirect("/parent");
+
   const childData = await fetchAllChildData(
     activeChild.id,
-    activeChild.current_grade,
+    activeChild.class_id,
     activeChild.grade_label
   );
 

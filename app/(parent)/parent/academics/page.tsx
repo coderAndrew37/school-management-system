@@ -1,4 +1,3 @@
-// app/parent/academics/page.tsx
 import { getSession } from "@/lib/actions/auth";
 import { fetchMyChildren } from "@/lib/data/parent";
 import { redirect } from "next/navigation";
@@ -13,13 +12,28 @@ interface PageProps {
 
 export default async function AcademicsPage({ searchParams }: PageProps) {
   const session = await getSession();
-  if (!session || session.profile.role !== "parent") redirect("/login");
+
+  // Guard: Ensure session and user email exist
+  if (!session || !session.user?.email || session.profile.role !== "parent") {
+    redirect("/login");
+  }
 
   const { child: childParam } = await searchParams;
-  const children = await fetchMyChildren();
-  if (children.length === 0) redirect("/parent");
 
+  // Pass session email to fix the "Expected 1 argument" error
+  const children = await fetchMyChildren(session.user.email);
+  
+  if (children.length === 0) {
+    redirect("/parent");
+  }
+
+  // Find the selected child or default to the first one
   const activeChild = children.find((c) => c.id === childParam) ?? children[0]!;
 
-  return <AcademicsPageClient child={activeChild} allChildren={children} />;
+  return (
+    <AcademicsPageClient 
+      child={activeChild} 
+      allChildren={children} 
+    />
+  );
 }

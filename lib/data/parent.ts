@@ -118,10 +118,15 @@ type RawStudentRow = {
   date_of_birth: string;
   gender: "Male" | "Female" | null;
   current_grade: string;
-  current_stream: string;
   photo_url: string | null;
   status: string;
   created_at: string;
+  class_id: string | null;
+  classes: {
+    stream: string;
+    level: string;
+    academic_year: number;
+  } | null;
   student_parents: {
     is_primary_contact: boolean;
     relationship_type: string;
@@ -137,10 +142,26 @@ type RawStudentRow = {
 };
 
 const STUDENT_WITH_ASSESSMENTS_SELECT = `
-  id, readable_id, upi_number, full_name,
-  date_of_birth, gender, current_grade, current_stream, photo_url, status, created_at,
-  student_parents (
-    is_primary_contact, relationship_type,
+  id, 
+  readable_id, 
+  upi_number, 
+  full_name, 
+  date_of_birth, 
+  gender, 
+  current_grade, 
+  photo_url, 
+  status, 
+  created_at,
+  class_id,
+  classes (
+    stream,
+    level,
+    academic_year
+  ),
+  student_parents!inner ( 
+    parent_id,
+    is_primary_contact, 
+    relationship_type,
     parents ( id, full_name, phone_number, email, invite_accepted )
   ),
   assessments (
@@ -152,8 +173,14 @@ const STUDENT_WITH_ASSESSMENTS_SELECT = `
 
 // ── Mappers ───────────────────────────────────────────────────────────────────
 
+// ── Updated Mapper (Strict TypeScript) ─────────────────────────────────────────
+
 function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
-  const primaryParentLink = row.student_parents.find((l) => l.is_primary_contact) ?? row.student_parents[0] ?? null;
+  const primaryParentLink = 
+    row.student_parents.find((l) => l.is_primary_contact) ?? 
+    row.student_parents[0] ?? 
+    null;
+    
   const primaryParent = primaryParentLink?.parents ?? null;
 
   const allParents: StudentParentLink[] = row.student_parents
@@ -175,9 +202,9 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
     full_name: row.full_name,
     date_of_birth: row.date_of_birth,
     gender: row.gender,
-    class_id: null,
+    class_id: row.class_id, // Now strictly typed in RawStudentRow
     current_grade: row.current_grade,
-    current_stream: row.current_stream || "Main",
+    current_stream: row.classes?.stream || "Main",
     grade_label: row.current_grade,
     parent_id: primaryParent?.id ?? null,
     created_at: row.created_at,
@@ -198,7 +225,7 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
         teacher_id: r.teacher_id,
         subject_name: r.subject_name,
         strand_id: r.strand_id,
-        score: r.score,
+        score: r.score, // Removed 'as any' - matches Assessment score union
         evidence_url: r.evidence_url,
         teacher_remarks: r.teacher_remarks,
         term: r.term as 1 | 2 | 3,
@@ -206,7 +233,6 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
         created_at: r.created_at,
       }),
     ),
-    
   };
 }
 
@@ -254,13 +280,28 @@ export async function fetchMyProfile(email: string): Promise<Parent | null> {
   return data as Parent;
 }
 
-export async function fetchMyChildren(): Promise<ChildWithAssessments[]> {
-  const { data, error } = await supabaseAdmin
+export async function fetchMyChildren(email: string): Promise<ChildWithAssessments[]> {
+  const supabase = supabaseAdmin;
+
+  const { data: parentRecord, error: pError } = await supabase
+    .from("parents")
+    .select("id")
+    .eq("email", email.toLowerCase())
+    .single();
+
+  if (pError || !parentRecord) return [];
+
+  const { data, error } = await supabase
     .from("students")
     .select(STUDENT_WITH_ASSESSMENTS_SELECT)
+    .eq("student_parents.parent_id", parentRecord.id)
     .order("full_name", { ascending: true });
 
-  if (error || !data) return [];
+  if (error || !data) {
+    console.error("[fetchMyChildren] Error:", error?.message);
+    return [];
+  }
+
   return (data as unknown as RawStudentRow[]).map(mapStudentRow);
 }
 
@@ -345,7 +386,7 @@ export async function fetchAllChildData(
     { data: galleryStudent },
     { data: galleryClass },
     { data: gallerySchool },
-    { data: pathwayResult }, // Destructure the full result object
+    { data: pathwayResult },
     { data: announcements },
     { data: events },
     { data: feePayments },
@@ -358,19 +399,14 @@ export async function fetchAllChildData(
     supabaseAdmin.from("talent_gallery").select(GALLERY_SELECT).eq("audience", "student").eq("student_id", studentId).is("deleted_at", null).order("created_at", { ascending: false }).limit(60).returns<RawGalleryRow[]>(),
     supabaseAdmin.from("talent_gallery").select(GALLERY_SELECT).eq("audience", "class").eq("target_grade", gradeLabel).is("deleted_at", null).order("created_at", { ascending: false }).limit(40).returns<RawGalleryRow[]>(),
     supabaseAdmin.from("talent_gallery").select(GALLERY_SELECT).eq("audience", "school").is("deleted_at", null).order("created_at", { ascending: false }).limit(20).returns<RawGalleryRow[]>(),
-    
-    // FIX: Remove .returns here. maybeSingle() correctly returns JssPathway | null
     supabaseAdmin.from("jss_pathways").select("*").eq("student_id", studentId).maybeSingle(),
-    
     supabaseAdmin.from("announcements").select("*").order("created_at", { ascending: false }).limit(50).returns<Announcement[]>(),
     supabaseAdmin.from("school_events").select("*").gte("start_date", new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0]).order("start_date", { ascending: true }).limit(30).returns<SchoolEvent[]>(),
     supabaseAdmin.from("fee_payments").select("*").eq("student_id", studentId).order("created_at", { ascending: false }).returns<FeePayment[]>(),
     supabaseAdmin.from("report_cards").select("*").eq("student_id", studentId).eq("status", "published").order("academic_year", { ascending: false }).order("term", { ascending: false }).returns<ParentReportCard[]>(),
   ]);
 
-  // Cast the pathway specifically if inference is still being stubborn
   const pathway = pathwayResult as JssPathway | null;
-
   const seenIds = new Set<string>();
   const rawGallery: RawGalleryRow[] = [];
   const galleryCombined = [...(galleryStudent || []), ...(galleryClass || []), ...(gallerySchool || [])];
@@ -383,7 +419,6 @@ export async function fetchAllChildData(
   }
 
   const gallery: GalleryItem[] = await Promise.all(rawGallery.map(mapGalleryRow));
-
   const safeNotifications = notifications ?? [];
   const safeMessages = messages ?? [];
 
@@ -394,7 +429,7 @@ export async function fetchAllChildData(
     messages: safeMessages,
     competencies: [],
     gallery,
-    pathway: pathway, // Now matches JssPathway | null
+    pathway: pathway,
     announcements: announcements ?? [],
     events: events ?? [],
     feePayments: feePayments ?? [],

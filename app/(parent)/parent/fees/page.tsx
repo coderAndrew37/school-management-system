@@ -1,4 +1,3 @@
-// app/parent/fees/page.tsx
 import { getSession } from "@/lib/actions/auth";
 import { fetchAllChildData, fetchMyChildren } from "@/lib/data/parent";
 import { redirect } from "next/navigation";
@@ -13,17 +12,30 @@ interface PageProps {
 
 export default async function FeesPage({ searchParams }: PageProps) {
   const session = await getSession();
-  if (!session || session.profile.role !== "parent") redirect("/login");
+
+  // Guard: Ensure session and user email exist
+  if (!session || !session.user?.email || session.profile.role !== "parent") {
+    redirect("/login");
+  }
 
   const _sp = await searchParams;
   const childParam = _sp?.child;
-  const children = await fetchMyChildren();
+
+  // Fix: Pass session email to fetchMyChildren
+  const children = await fetchMyChildren(session.user.email);
   if (children.length === 0) redirect("/parent");
 
   const activeChild = children.find((c) => c.id === childParam) ?? children[0]!;
+
+  /**
+   * REFACTOR: Use 'class_id' instead of 'current_grade'
+   * This ensures the fee records are scoped correctly to the student's current class UUID.
+   */
+  if (!activeChild.class_id) redirect("/parent");
+
   const childData = await fetchAllChildData(
     activeChild.id,
-    activeChild.current_grade,
+    activeChild.class_id,
     activeChild.grade_label
   );
 

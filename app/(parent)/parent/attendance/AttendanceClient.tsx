@@ -17,7 +17,7 @@ import { useState } from "react";
 interface Props {
   attendance: AttendanceRecord[];
   child: ChildWithAssessments;
-  children: ChildWithAssessments[];
+  allChildren: ChildWithAssessments[];
 }
 
 const STATUS_EMOJI: Record<AttendanceStatus, string> = {
@@ -36,7 +36,7 @@ function getMonthDays(year: number, month: number) {
   return days;
 }
 
-export function AttendancePageClient({ attendance, child, children }: Props) {
+export function AttendancePageClient({ attendance, child, allChildren }: Props) {
   const now = new Date();
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
@@ -101,9 +101,9 @@ export function AttendancePageClient({ attendance, child, children }: Props) {
               {child.full_name}
             </p>
           </div>
-          {children.length > 1 && (
+          {allChildren.length > 1 && (
             <div className="flex gap-1.5">
-              {children.map((c) => (
+              {allChildren.map((c) => (
                 <a
                   key={c.id}
                   href={`/parent/attendance?child=${c.id}`}

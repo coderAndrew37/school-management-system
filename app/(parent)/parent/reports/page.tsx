@@ -1,7 +1,3 @@
-// app/parent/reports/page.tsx
-// Shows all published report cards for the active child.
-// Parent can view in a new tab (opens the PDF) or download.
-
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/actions/auth";
 import { fetchMyChildren } from "@/lib/data/parent";
@@ -19,9 +15,14 @@ interface Props {
 
 export default async function ParentReportsPage({ searchParams }: Props) {
   const session = await getSession();
-  if (!session || session.profile.role !== "parent") redirect("/login");
 
-  const children = await fetchMyChildren();
+  // Guard: Ensure session and email exist
+  if (!session || !session.user?.email || session.profile.role !== "parent") {
+    redirect("/login");
+  }
+
+  // Fix: Pass session email to fetchMyChildren
+  const children = await fetchMyChildren(session.user.email);
   if (children.length === 0) redirect("/parent");
 
   const sp = await searchParams;
@@ -49,7 +50,8 @@ export default async function ParentReportsPage({ searchParams }: Props) {
       allChildren={children}
       activeChildId={activeChild.id}
       activeChildName={activeChild.full_name}
-      activeChildGrade={activeChild.current_grade}
+      // Passing grade_label for better UI display (e.g., "Grade 4 East" vs "4")
+      activeChildGrade={activeChild.grade_label}
       reportCards={reportCards}
       currentTerm={currentTerm}
       currentYear={currentYear}
