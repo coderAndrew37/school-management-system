@@ -94,13 +94,20 @@ export async function admitStudentAction(
     studentName: formData.get("studentName"),
     dateOfBirth: formData.get("dateOfBirth"),
     gender: formData.get("gender"),
-    classId: formData.get("classId"), // Aligned with schema
+    classId: formData.get("classId"),
     relationshipType: formData.get("relationshipType") ?? "guardian",
     existingParentId: existingParentId,
-    parentName: formData.get("parentName") || null,
-    parentEmail: formData.get("parentEmail") || null,
-    parentPhone: formData.get("parentPhone") || null,
+    // FIX: Fallback to undefined instead of null
+    parentName: (formData.get("parentName") as string) || undefined,
+    parentEmail: (formData.get("parentEmail") as string) || undefined,
+    parentPhone: (formData.get("parentPhone") as string) || undefined,
   };
+
+  // // ADD THESE LOGS HERE
+  // console.log("--- DEBUG ADMISSION DATA ---");
+  // console.log("Raw Data:", JSON.stringify(raw, null, 2));
+  // console.log("existingParentId type:", typeof raw.existingParentId);
+  // console.log("----------------------------");
 
   const parsed = admissionSchema.safeParse(raw);
   if (!parsed.success) {
