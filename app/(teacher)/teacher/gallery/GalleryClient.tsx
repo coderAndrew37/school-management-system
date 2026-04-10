@@ -5,28 +5,30 @@ import {
   deleteGalleryItemAction,
   uploadGalleryImageAction,
 } from "@/lib/actions/gallery";
-import { useCallback, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
 import { ALLOWED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "./gallery.config";
-import { GalleryClientProps, Audience, PendingFile } from "./gallery.types";
+import { Audience, GalleryClientProps, GalleryItem, PendingFile } from "./gallery.types";
 import { GalleryGrid } from "./GalleryGrid";
 import { GalleryLightbox } from "./GalleryLightbox";
 import { GalleryToast } from "./GalleryToast";
 import { UploadPanel } from "./UploadPanel";
 
-
 export default function GalleryClient({
   teacherName,
-  grades,
-  studentsByGrade,
+  classes, // Updated from grades
+  studentsByClass, // Updated from studentsByGrade
   studentNameMap,
   initialItems,
   academicYear,
 }: GalleryClientProps) {
   // ── Upload form state ──────────────────────────────────────────────────────
   const [audience, setAudience] = useState<Audience>("class");
-  const [selectedGrade, setSelectedGrade] = useState<string>(grades[0] ?? "");
+  
+  // We now track the Class ID (UUID) instead of the grade string
+  const [selectedClassId, setSelectedClassId] = useState<string>(classes[0]?.id ?? "");
+  
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
   const [category, setCategory] = useState<string>("");
   const [term, setTerm] = useState<string>("");
@@ -35,39 +37,46 @@ export default function GalleryClient({
 
   // ── File queue state ───────────────────────────────────────────────────────
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
-  const [isDragging, setIsDragging] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
 
   // ── Gallery display state ──────────────────────────────────────────────────
-  const [items, setItems] = useState(initialItems);
+  const [items, setItems] = useState<GalleryItem[]>(initialItems);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
 
   const [isPending, startTransition] = useTransition();
 
-  const students = studentsByGrade[selectedGrade] ?? [];
+  // Memoize students based on the selected Class UUID
+  const students = useMemo(() => 
+    studentsByClass[selectedClassId] ?? [], 
+  [selectedClassId, studentsByClass]);
+
+ 
 
   // ── Toast ──────────────────────────────────────────────────────────────────
 
-  function showToast(msg: string, ok: boolean) {
+  function showToast(msg: string, ok: boolean): void {
     setToast({ msg, ok });
     setTimeout(() => setToast(null), 4000);
   }
 
   // ── File queue handlers ────────────────────────────────────────────────────
 
-  const addFiles = useCallback((files: FileList | File[]) => {
+  const addFiles = useCallback((files: FileList | File[]): void => {
     const arr = Array.from(files);
     const valid = arr.filter(
       (f) => ALLOWED_MIME_TYPES.includes(f.type) && f.size <= MAX_FILE_SIZE_BYTES,
     );
     const invalid = arr.length - valid.length;
+    
     if (invalid > 0)
       showToast(
         `${invalid} file(s) skipped — must be JPEG/PNG/WebP/GIF under 10 MB`,
         false,
       );
+
     setPendingFiles((prev) => [
       ...prev,
       ...valid.map((file) => ({
@@ -81,7 +90,7 @@ export default function GalleryClient({
   }, []);
 
   const handleDrop = useCallback(
-    (e: React.DragEvent) => {
+    (e: React.DragEvent<HTMLDivElement>): void => {
       e.preventDefault();
       setIsDragging(false);
       addFiles(e.dataTransfer.files);
@@ -89,7 +98,7 @@ export default function GalleryClient({
     [addFiles],
   );
 
-  const removePending = (id: string) => {
+  const removePending = (id: string): void => {
     setPendingFiles((prev) => {
       const item = prev.find((f) => f.id === id);
       if (item) URL.revokeObjectURL(item.preview);
@@ -97,28 +106,29 @@ export default function GalleryClient({
     });
   };
 
-  const updateTitle = (id: string, title: string) =>
+  const updateTitle = (id: string, title: string): void =>
     setPendingFiles((prev) =>
       prev.map((f) => (f.id === id ? { ...f, title } : f)),
     );
 
   // ── Upload ─────────────────────────────────────────────────────────────────
 
-  async function handleUpload() {
+  async function handleUpload(): Promise<void> {
     const toUpload = pendingFiles.filter((f) => f.status === "pending");
     if (toUpload.length === 0) { showToast("Please add at least one image.", false); return; }
     if (audience === "student" && !selectedStudentId) { showToast("Please select a student.", false); return; }
-    if (audience === "class" && !selectedGrade) { showToast("Please select a grade.", false); return; }
+    if (audience === "class" && !selectedClassId) { showToast("Please select a class.", false); return; }
 
     setIsUploading(true);
     setPendingFiles((prev) =>
       prev.map((f) => (f.status === "pending" ? { ...f, status: "uploading" } : f)),
     );
 
+    // Metadata now uses UUID for targetClassId
     const meta = {
       audience,
       studentId: audience === "student" ? selectedStudentId : null,
-      targetGrade: audience === "class" ? selectedGrade : null,
+      targetClassId: audience === "class" ? selectedClassId : null,
       title: sharedTitle || toUpload[0]?.title || "Gallery",
       caption: caption || null,
       category: category || null,
@@ -131,7 +141,7 @@ export default function GalleryClient({
       const fd = new FormData();
       fd.set("audience", meta.audience);
       fd.set("studentId", meta.studentId ?? "");
-      fd.set("targetGrade", meta.targetGrade ?? "");
+      fd.set("targetClassId", meta.targetClassId ?? ""); // Passing UUID
       fd.set("title", pf.title || meta.title);
       fd.set("caption", meta.caption ?? "");
       fd.set("category", meta.category ?? "");
@@ -161,7 +171,7 @@ export default function GalleryClient({
       );
       showToast(
         result.success
-          ? `${result.uploaded} image${result.uploaded !== 1 ? "s" : ""} uploaded successfully.`
+          ? `${result.uploaded} images uploaded successfully.`
           : `${result.uploaded} uploaded, ${result.failed} failed.`,
         result.success,
       );
@@ -176,7 +186,7 @@ export default function GalleryClient({
 
   // ── Delete ─────────────────────────────────────────────────────────────────
 
-  function handleDelete(id: string) {
+  function handleDelete(id: string): void {
     startTransition(async () => {
       const result = await deleteGalleryItemAction(id);
       if (result.success) {
@@ -189,8 +199,6 @@ export default function GalleryClient({
     });
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
-
   return (
     <div className="min-h-screen bg-[#F8F7F2]">
       {/* Header */}
@@ -201,7 +209,7 @@ export default function GalleryClient({
               Learning Gallery
             </h1>
             <p className="text-sm text-slate-500 mt-0.5">
-              {teacherName} · CBC Evidence &amp; Activities · {academicYear}
+              {teacherName} · CBC Evidence & Activities · {academicYear}
             </p>
           </div>
           <a
@@ -216,7 +224,6 @@ export default function GalleryClient({
         </div>
       </div>
 
-      {/* Overlays */}
       {toast && <GalleryToast msg={toast.msg} ok={toast.ok} />}
       {lightbox && <GalleryLightbox src={lightbox} onClose={() => setLightbox(null)} />}
       {confirmDelete && (
@@ -227,14 +234,14 @@ export default function GalleryClient({
         />
       )}
 
-      {/* Two-column layout */}
       <div className="max-w-6xl mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6">
         <UploadPanel
           audience={audience}
-          onAudienceChange={(a) => { setAudience(a); setSelectedStudentId(""); }}
-          grades={grades}
-          selectedGrade={selectedGrade}
-          onGradeChange={(g) => { setSelectedGrade(g); setSelectedStudentId(""); }}
+          onAudienceChange={(a: Audience) => { setAudience(a); setSelectedStudentId(""); }}
+          // Passing class objects now
+          classes={classes} 
+          selectedClassId={selectedClassId}
+          onClassChange={(id: string) => { setSelectedClassId(id); setSelectedStudentId(""); }}
           students={students}
           selectedStudentId={selectedStudentId}
           onStudentChange={setSelectedStudentId}
@@ -248,7 +255,7 @@ export default function GalleryClient({
           onCaptionChange={setCaption}
           pendingFiles={pendingFiles}
           isDragging={isDragging}
-          onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+          onDragOver={(e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); setIsDragging(true); }}
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleDrop}
           onFilesAdded={addFiles}

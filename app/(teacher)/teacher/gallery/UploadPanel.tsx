@@ -4,17 +4,17 @@ import type { ClassStudent } from "@/lib/data/assessment";
 import Image from "next/image";
 import { useRef } from "react";
 import { AUDIENCE_CONFIG, CATEGORIES } from "./gallery.config";
-import type { Audience, PendingFile } from "./gallery.types";
+import type { Audience, PendingFile, ClassMetadata } from "./gallery.types";
 
 interface Props {
   // Audience
   audience: Audience;
   onAudienceChange: (a: Audience) => void;
 
-  // Grade / student
-  grades: string[];
-  selectedGrade: string;
-  onGradeChange: (g: string) => void;
+  // Class / student
+  classes: ClassMetadata[]; // Updated from grades: string[]
+  selectedClassId: string; // Updated from selectedGrade: string
+  onClassChange: (id: string) => void; // Updated from onGradeChange
   students: ClassStudent[];
   selectedStudentId: string;
   onStudentChange: (id: string) => void;
@@ -32,9 +32,9 @@ interface Props {
   // File queue
   pendingFiles: PendingFile[];
   isDragging: boolean;
-  onDragOver: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
   onDragLeave: () => void;
-  onDrop: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent<HTMLDivElement>) => void;
   onFilesAdded: (files: FileList | File[]) => void;
   onRemovePending: (id: string) => void;
   onUpdateTitle: (id: string, title: string) => void;
@@ -48,9 +48,9 @@ interface Props {
 export function UploadPanel({
   audience,
   onAudienceChange,
-  grades,
-  selectedGrade,
-  onGradeChange,
+  classes,
+  selectedClassId,
+  onClassChange,
   students,
   selectedStudentId,
   onStudentChange,
@@ -91,6 +91,7 @@ export function UploadPanel({
             return (
               <button
                 key={a}
+                type="button"
                 onClick={() => onAudienceChange(a)}
                 className={`w-full p-3 rounded-xl border-2 text-left transition-all ${
                   isActive
@@ -113,20 +114,21 @@ export function UploadPanel({
         {(audience === "class" || audience === "student") && (
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1.5 uppercase tracking-wide">
-              Grade
+              Select Class
             </label>
             <div className="flex flex-wrap gap-2">
-              {grades.map((g) => (
+              {classes.map((c) => (
                 <button
-                  key={g}
-                  onClick={() => onGradeChange(g)}
+                  key={c.id}
+                  type="button"
+                  onClick={() => onClassChange(c.id)}
                   className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
-                    selectedGrade === g
-                      ? "bg-emerald-600 text-white border-emerald-600"
+                    selectedClassId === c.id
+                      ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
                       : "bg-white text-slate-600 border-slate-200 hover:border-emerald-300"
                   }`}
                 >
-                  {g}
+                  {c.grade} {c.stream}
                 </button>
               ))}
             </div>
@@ -193,6 +195,7 @@ export function UploadPanel({
             {["1", "2", "3"].map((t) => (
               <button
                 key={t}
+                type="button"
                 onClick={() => onTermChange(term === t ? "" : t)}
                 className={`px-4 py-1.5 rounded-lg border text-xs font-medium transition-all ${
                   term === t
@@ -241,11 +244,10 @@ export function UploadPanel({
           Drop images here or click to browse
         </p>
         <p className="text-xs text-slate-400 mt-1">
-          JPEG, PNG, WebP, GIF · Max 10 MB each · Multiple allowed
+          JPEG, PNG, WebP, GIF · Max 10 MB each
         </p>
         <input
-          id="file-input"
-          aria-label="file input"
+        aria-label="file input"
           ref={fileInputRef}
           type="file"
           accept="image/jpeg,image/png,image/webp,image/gif"
@@ -262,7 +264,7 @@ export function UploadPanel({
             <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">
               {pendingFiles.length} image{pendingFiles.length !== 1 ? "s" : ""} queued
             </p>
-            <button onClick={onClearAll} className="text-xs text-slate-400 hover:text-slate-600">
+            <button type="button" onClick={onClearAll} className="text-xs text-slate-400 hover:text-slate-600 font-medium">
               Clear all
             </button>
           </div>
@@ -270,32 +272,39 @@ export function UploadPanel({
           <div className="divide-y divide-slate-50 max-h-72 overflow-y-auto">
             {pendingFiles.map((pf) => (
               <div key={pf.id} className="flex items-center gap-3 px-4 py-2.5">
-                <Image
-                  src={pf.preview}
-                  alt=""
-                  className="w-10 h-10 rounded-lg object-cover shrink-0 bg-slate-100"
-                />
+                <div className="relative w-10 h-10 shrink-0">
+                  <Image
+                    src={pf.preview}
+                    alt=""
+                    fill
+                    className="rounded-lg object-cover bg-slate-100"
+                  />
+                </div>
                 <div className="flex-1 min-w-0">
                   <input
                     type="text"
                     value={pf.title}
                     onChange={(e) => onUpdateTitle(pf.id, e.target.value)}
                     placeholder="Image title"
-                    className="w-full text-xs text-slate-700 bg-transparent border-none focus:outline-none placeholder-slate-300"
+                    className="w-full text-xs font-medium text-slate-700 bg-transparent border-none focus:outline-none placeholder-slate-300"
                   />
                   {pf.status === "uploading" && (
-                    <p className="text-xs text-amber-500 mt-0.5">Uploading…</p>
+                    <p className="text-[10px] text-amber-500 font-bold uppercase">Uploading…</p>
                   )}
                   {pf.status === "done" && (
-                    <p className="text-xs text-emerald-500 mt-0.5">✓ Done</p>
+                    <p className="text-[10px] text-emerald-500 font-bold uppercase">✓ Done</p>
                   )}
                   {pf.status === "error" && (
-                    <p className="text-xs text-red-500 mt-0.5">{pf.errorMsg}</p>
+                    <p className="text-[10px] text-red-500 font-bold uppercase">{pf.errorMsg}</p>
                   )}
                 </div>
                 <button
+                  type="button"
                   aria-label="remove from queue"
-                  onClick={() => onRemovePending(pf.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemovePending(pf.id);
+                  }}
                   className="shrink-0 p-1 text-slate-300 hover:text-red-400 transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -308,9 +317,10 @@ export function UploadPanel({
 
           <div className="px-4 py-3 bg-slate-50 border-t border-slate-100">
             <button
+              type="button"
               onClick={onUpload}
               disabled={isUploading || pendingCount === 0}
-              className="w-full py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+              className="w-full py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2 shadow-sm"
             >
               {isUploading ? (
                 <>
@@ -318,7 +328,7 @@ export function UploadPanel({
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
-                  Uploading {pendingCount} image{pendingCount !== 1 ? "s" : ""}…
+                  Uploading {pendingCount}…
                 </>
               ) : (
                 <>Upload {pendingCount} image{pendingCount !== 1 ? "s" : ""}</>
@@ -329,9 +339,9 @@ export function UploadPanel({
       )}
 
       <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
-        <p className="text-xs text-amber-700 leading-relaxed">
+        <p className="text-xs text-amber-700 leading-relaxed font-medium">
           <strong>CBC Evidence:</strong> Images go live on the parent portal immediately after
-          upload. Use categories to link photos to specific CBC learning areas.
+          upload. Use categories to link photos to specific learning areas.
         </p>
       </div>
     </div>

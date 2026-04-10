@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   fetchTeacherAssessmentAllocations,
   fetchClassStudents,
+  type ClassStudent,
 } from "@/lib/data/assessment";
 import {
   fetchTeacherGallery,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/actions/gallery";
 import { getActiveTermYear } from "@/lib/utils/settings";
 import GalleryClient from "./GalleryClient";
+import type { ClassMetadata, GalleryItem } from "./gallery.types";
 
 export const metadata = { title: "Learning Gallery | Kibali Teacher" };
 export const revalidate = 0;
@@ -30,46 +32,59 @@ export default async function GalleryPage() {
     .single();
   if (!teacher) redirect("/login");
 
-  // Use school settings for year — no more hardcoded 2026
+  // Get current school year from settings
   const { academicYear } = await getActiveTermYear();
 
+  // 1. Get all allocations for this teacher to identify their classes
   const allocations = await fetchTeacherAssessmentAllocations(
     teacher.id,
     academicYear,
   );
-  const uniqueGrades = [...new Set(allocations.map((a) => a.grade))].sort();
 
-  // Fetch students for each grade in parallel
-  const studentsByGrade: Record<
-    string,
-    Awaited<ReturnType<typeof fetchClassStudents>>
-  > = {};
+  // 2. Fetch the actual class metadata for these allocations to get UUIDs, Grades, and Streams
+  const uniqueClassIds = [...new Set(allocations.map((a) => a.classId))];
+  
+  const { data: classData } = await supabase
+    .from("classes")
+    .select("id, grade, stream, level, academic_year")
+    .in("id", uniqueClassIds)
+    .order("grade", { ascending: true });
+
+  const classes: ClassMetadata[] = (classData || []) as ClassMetadata[];
+
+  // 3. Fetch students for each class UUID and store them in a Record
+  const studentsByClass: Record<string, ClassStudent[]> = {};
+
   await Promise.all(
-    uniqueGrades.map(async (grade) => {
-      studentsByGrade[grade] = await fetchClassStudents(grade);
-    }),
+    classes.map(async (cls) => {
+      const students = await fetchClassStudents(cls.id);
+      studentsByClass[cls.id] = students;
+    })
   );
 
-  // Fetch gallery + hydrate signed URLs in parallel
+  // 4. Fetch gallery items and hydrate with temporary signed URLs
   const rawItems = await fetchTeacherGallery(teacher.id, 80);
-  const galleryItems = await Promise.all(
+  const galleryItems: GalleryItem[] = await Promise.all(
     rawItems.map(async (item) => ({
       ...item,
       signedUrl: (await getSignedGalleryUrl(item.media_url, 3600)) ?? "",
     })),
   );
 
-  // Student name lookup map
+  // 5. Build a flat student name lookup map for the UI grid/lightbox
   const studentNameMap: Record<string, string> = {};
-  for (const students of Object.values(studentsByGrade))
-    for (const s of students) studentNameMap[s.id] = s.full_name;
+  Object.values(studentsByClass)
+    .flat()
+    .forEach((s) => {
+      studentNameMap[s.id] = s.full_name;
+    });
 
   return (
     <GalleryClient
       teacherName={teacher.full_name}
       teacherId={teacher.id}
-      grades={uniqueGrades}
-      studentsByGrade={studentsByGrade}
+      classes={classes}
+      studentsByClass={studentsByClass}
       studentNameMap={studentNameMap}
       initialItems={galleryItems}
       academicYear={academicYear}
