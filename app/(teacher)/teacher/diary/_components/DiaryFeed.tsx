@@ -5,6 +5,7 @@ import {
   type TeacherDiaryEntry, 
   isHomework 
 } from "@/lib/types/diary";
+import type { ClassOption } from "@/lib/data/diary";
 import { DiaryEntryCard } from "./DiaryEntryCard";
 import { Filter, Inbox } from "lucide-react";
 
@@ -47,12 +48,12 @@ function DiaryStats({ homework, notice, observation, pending }: DiaryStatsProps)
 
 interface DiaryFeedProps {
   entries: TeacherDiaryEntry[];
-  grades: string[];
-  filterGrade: string;
+  classOptions: ClassOption[]; // Updated to take full options (UUID + Labels)
+  filterClass: string; // This is now a classId (UUID) or "all"
   filterType: "all" | DiaryEntryType;
   deleteConfirmId: string | null;
   isPending: boolean;
-  onFilterGrade: (g: string) => void;
+  onFilterClass: (id: string) => void;
   onFilterType: (t: "all" | DiaryEntryType) => void;
   onEdit: (entry: TeacherDiaryEntry) => void;
   onToggleComplete: (id: string, completed: boolean) => void;
@@ -62,12 +63,12 @@ interface DiaryFeedProps {
 
 export function DiaryFeed({
   entries,
-  grades,
-  filterGrade,
+  classOptions,
+  filterClass,
   filterType,
   deleteConfirmId,
   isPending,
-  onFilterGrade,
+  onFilterClass,
   onFilterType,
   onEdit,
   onToggleComplete,
@@ -75,10 +76,15 @@ export function DiaryFeed({
   onCancelDelete,
 }: DiaryFeedProps) {
   
-  // FIX: Access grade via entry.classes?.label
+  // Filtering now happens by comparing class_id (UUID)
   const filtered = entries.filter((e) => {
-    const entryGrade = e.classes?.grade ?? "Unassigned";
-    if (filterGrade !== "all" && entryGrade !== filterGrade) return false;
+    // If it's a class-wide entry, check the class_id
+    if (filterClass !== "all" && e.class_id !== filterClass) {
+        // Special case: if filter is on, but this is an observation for a student in a DIFFERENT class
+        // (Note: Observations usually carry the student's current class context)
+        return false;
+    };
+    
     if (filterType !== "all" && e.entry_type !== filterType) return false;
     return true;
   });
@@ -102,14 +108,16 @@ export function DiaryFeed({
         </div>
 
         <select
-        aria-label="filter by grade"
-          value={filterGrade}
-          onChange={(e) => onFilterGrade(e.target.value)}
+          aria-label="filter by class"
+          value={filterClass}
+          onChange={(e) => onFilterClass(e.target.value)}
           className="h-9 px-3 rounded-xl border-none bg-slate-50 text-xs font-bold text-slate-600 focus:ring-2 focus:ring-emerald-500/20"
         >
           <option value="all">All Classes</option>
-          {grades.map((g) => (
-            <option key={g} value={g}>{g}</option>
+          {classOptions.map((cls) => (
+            <option key={cls.id} value={cls.id}>
+              {cls.label}
+            </option>
           ))}
         </select>
 

@@ -67,14 +67,16 @@ export function DiaryEntryCard({
   onCancelDelete,
 }: DiaryEntryCardProps) {
   const cls = isClassWide(entry) ? entry : null;
+  const obs = isObservation(entry) ? entry : null;
 
   const dot = MODE_DOT[entry.entry_type] ?? "bg-slate-400";
   const badge = MODE_BADGE[entry.entry_type] ?? "";
   const label = MODE_LABEL[entry.entry_type] ?? entry.entry_type;
 
-  // Derive display labels from joins if available
-  const classLabel = entry.classes?.stream || "No Class";
-  const studentLabel = entry.students?.full_name || "Individual Student";
+  // UPDATED: Safe display labels from Supabase Joins
+  // We check for 'classes' join which usually contains the grade/stream label
+  const classLabel = entry.classes?.grade || entry.classes?.stream || "General";
+  const studentLabel = obs?.students?.full_name || "Individual Student";
 
   return (
     <div className="group">
@@ -129,7 +131,7 @@ export function DiaryEntryCard({
                   )}
 
                   <span className="text-[10px] font-bold text-slate-400">
-                    {isObservation(entry) ? `Student: ${studentLabel}` : `Class: ${classLabel}`}
+                    {obs ? `Student: ${studentLabel}` : `Class: ${classLabel}`}
                   </span>
                 </div>
               </div>

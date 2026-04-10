@@ -31,9 +31,8 @@ import {
 
 interface DiaryClientProps {
   teacherName: string;
-  grades: string[];
-  classOptions: ClassOption[];
-  studentsByGrade: Record<string, ClassStudent[]>;
+  classOptions: ClassOption[]; // Contains both ID (UUID) and Label
+  studentsByClass: Record<string, ClassStudent[]>; // Key is classId (UUID)
   initialEntries: TeacherDiaryEntry[];
 }
 
@@ -72,7 +71,7 @@ function buildOptimisticEntry(
   return {
     ...base,
     entry_type: formState.mode as "homework" | "notice",
-    class_id: formState.grade, // Using grade as the class reference
+    class_id: formState.classId, // Now correctly using UUID
     student_id: null,
     due_date: formState.mode === "homework" ? formState.dueDate || null : null,
     is_completed: false,
@@ -81,10 +80,10 @@ function buildOptimisticEntry(
 
 // ── Default form state ────────────────────────────────────────────────────────
 
-function defaultFormState(firstGrade: string): DiaryFormState {
+function defaultFormState(firstClassId: string): DiaryFormState {
   return {
     mode: "homework",
-    grade: firstGrade,
+    classId: firstClassId,
     studentId: "",
     title: "",
     content: "",
@@ -97,19 +96,18 @@ function defaultFormState(firstGrade: string): DiaryFormState {
 
 export default function DiaryClient({
   teacherName,
-  grades,
   classOptions,
-  studentsByGrade,
+  studentsByClass,
   initialEntries,
 }: DiaryClientProps) {
-  const firstGrade = grades[0] ?? "";
+  const firstClassId = classOptions[0]?.id ?? "";
 
   // ── Shared state ──────────────────────────────────────────────────────────
   const [entries, setEntries] = useState<TeacherDiaryEntry[]>(initialEntries);
   const [formState, setFormState] = useState<DiaryFormState>(
-    defaultFormState(firstGrade),
+    defaultFormState(firstClassId),
   );
-  const [filterGrade, setFilterGrade] = useState("all");
+  const [filterClass, setFilterClass] = useState("all");
   const [filterType, setFilterType] = useState<"all" | DiaryEntryType>("all");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
@@ -173,12 +171,12 @@ export default function DiaryClient({
         }),
       );
     } else {
-      const students = studentsByGrade[formState.grade] ?? [];
+      const students = studentsByClass[formState.classId] ?? [];
       const newEntry = buildOptimisticEntry(formState, students);
       setEntries((prev) => [newEntry, ...prev]);
     }
 
-    setFormState(defaultFormState(firstGrade));
+    setFormState(defaultFormState(firstClassId));
   }
 
   // ── Start editing an entry ────────────────────────────────────────────────
@@ -188,7 +186,7 @@ export default function DiaryClient({
     
     setFormState({
       mode: entry.entry_type as DiaryMode,
-      grade: cls?.class_id ?? firstGrade,
+      classId: cls?.class_id ?? firstClassId,
       studentId: obs?.student_id ?? "",
       title: entry.title,
       content: entry.content ?? "",
@@ -203,7 +201,7 @@ export default function DiaryClient({
     );
   }
 
-  // ── Toggle homework completion (uses <form> submission) ───────────────────
+  // ── Toggle homework completion ───────────────────
   function handleToggleComplete(id: string, completed: boolean) {
     setEntries((prev) =>
       prev.map((e) =>
@@ -282,13 +280,12 @@ export default function DiaryClient({
         {/* Left: form */}
         <div ref={formRef} className="lg:sticky lg:top-[61px]">
           <DiaryForm
-            grades={grades}
             classOptions={classOptions}
-            studentsByGrade={studentsByGrade}
+            studentsByClass={studentsByClass}
             formState={formState}
             onFormChange={patchForm}
             onSuccess={handleFormSuccess}
-            onCancel={() => setFormState(defaultFormState(firstGrade))}
+            onCancel={() => setFormState(defaultFormState(firstClassId))}
           />
         </div>
 
@@ -296,12 +293,12 @@ export default function DiaryClient({
         <div className="space-y-6">
           <DiaryFeed
             entries={entries}
-            grades={grades}
-            filterGrade={filterGrade}
+            classOptions={classOptions}
+            filterClass={filterClass}
             filterType={filterType}
             deleteConfirmId={deleteConfirmId}
             isPending={isPending}
-            onFilterGrade={setFilterGrade}
+            onFilterClass={setFilterClass}
             onFilterType={setFilterType}
             onEdit={handleEdit}
             onToggleComplete={handleToggleComplete}

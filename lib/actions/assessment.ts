@@ -1,16 +1,15 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import { z } from "zod";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getSession } from "@/lib/actions/auth";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { CbcScore } from "@/lib/types/assessment";
 import {
-  resolveGradeLevel,
   NARRATIVE_CONTEXT,
+  resolveGradeLevel,
   SCORE_LABELS,
 } from "@/lib/types/assessment";
-import type { CbcScore } from "@/lib/types/assessment";
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -162,6 +161,11 @@ export async function generateNarrativeAction(
     10,
   );
 
+  // Validate UUID input to prevent syntax errors
+  if (!studentId || studentId === "undefined") {
+    return { success: false, message: "Invalid student identifier." };
+  }
+
   const { data: assessData } = await supabase
     .from("assessments")
     .select("strand_id, score")
@@ -279,6 +283,10 @@ export async function saveNarrativeAction(
 
   if (!narrative)
     return { success: false, message: "Narrative cannot be empty." };
+  
+  if (!studentId || studentId === "undefined") {
+    return { success: false, message: "Invalid student identifier." };
+  }
 
   const { error } = await supabase.from("assessment_narratives").upsert(
     {
@@ -299,4 +307,33 @@ export async function saveNarrativeAction(
 
   revalidatePath("/teacher/assess");
   return { success: true, narrative, message: "Saved successfully." };
+}
+
+// ── 4. Data Fetching Utilities (Refactored for class_id) ──────────────────────
+
+/**
+ * Fetches all active students linked to a specific class UUID.
+ * The system has been backfilled so class_id is now the source of truth.
+ */
+export async function fetchClassStudents(classId: string) {
+  if (!classId || classId === "undefined") {
+    console.warn("[fetchClassStudents] No valid Class ID provided.");
+    return [];
+  }
+
+  const supabase = await createSupabaseServerClient();
+
+  const { data, error } = await supabase
+    .from("students")
+    .select("id, full_name, admission_number, assessment_number, current_grade, class_id")
+    .eq("class_id", classId)
+    .eq("status", "active")
+    .order("full_name");
+
+  if (error) {
+    console.error("[fetchClassStudents] Error:", error.message);
+    return [];
+  }
+
+  return data;
 }

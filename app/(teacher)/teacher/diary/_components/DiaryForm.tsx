@@ -3,7 +3,7 @@
 /**
  * app/teacher/diary/_components/DiaryForm.tsx
  * Controlled form for creating and editing diary entries.
- * Uses useActionState for server action integration.
+ * Refactored to use classId (UUID) for database integrity.
  */
 
 import {
@@ -95,7 +95,7 @@ const QUICK_TITLES: Record<DiaryMode, string[]> = {
 
 export interface DiaryFormState {
   mode: DiaryMode;
-  grade: string;
+  classId: string; // Changed from grade to classId (UUID)
   studentId: string;
   title: string;
   content: string;
@@ -104,9 +104,8 @@ export interface DiaryFormState {
 }
 
 export interface DiaryFormProps {
-  grades: string[];
-  classOptions: ClassOption[];
-  studentsByGrade: Record<string, ClassStudent[]>;
+  classOptions: ClassOption[]; // Using classOptions for both IDs and Labels
+  studentsByClass: Record<string, ClassStudent[]>; // Key is now classId (UUID)
   formState: DiaryFormState;
   onFormChange: (patch: Partial<DiaryFormState>) => void;
   onSuccess: (state: DiaryActionState) => void;
@@ -116,18 +115,19 @@ export interface DiaryFormProps {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function DiaryForm({
-  grades,
   classOptions,
-  studentsByGrade,
+  studentsByClass,
   formState,
   onFormChange,
   onSuccess,
   onCancel,
 }: DiaryFormProps) {
-  const { mode, grade, studentId, title, content, dueDate, editEntry } = formState;
+  const { mode, classId, studentId, title, content, dueDate, editEntry } = formState;
   const isEditing = !!editEntry;
   const cfg = MODE_CONFIG[mode];
-  const students = studentsByGrade[grade] ?? [];
+  
+  // Logic updated to use classId (UUID) to pull the correct student list
+  const students = studentsByClass[classId] ?? [];
   const Icon = cfg.icon;
 
   const serverAction = isEditing
@@ -199,19 +199,18 @@ export function DiaryForm({
           {isEditing && <input type="hidden" name="entry_id" value={editEntry.id} />}
           <input type="hidden" name="entry_type" value={mode} />
 
-          {/* Grade Selector */}
+          {/* Grade/Class Selector (UUID based) */}
           <div className="space-y-2">
             <label id="grade-label" className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Target Class</label>
             <div className="flex flex-wrap gap-2" role="group" aria-labelledby="grade-label">
-              {grades.map((g) => {
-                const label = classOptions.find((c) => c.grade === g)?.label ?? g;
-                const isSelected = grade === g;
+              {classOptions.map((cls) => {
+                const isSelected = classId === cls.id;
                 return (
                   <button
-                    key={g}
+                    key={cls.id}
                     type="button"
-                    aria-label={`Select class ${label}`}
-                    onClick={() => onFormChange({ grade: g, studentId: "" })}
+                    aria-label={`Select class ${cls.label}`}
+                    onClick={() => onFormChange({ classId: cls.id, studentId: "" })}
                     disabled={isEditing}
                     className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
                       isSelected
@@ -219,12 +218,13 @@ export function DiaryForm({
                         : "bg-slate-50 text-slate-500 hover:bg-slate-100"
                     }`}
                   >
-                    {label}
+                    {cls.label}
                   </button>
                 );
               })}
             </div>
-            <input type="hidden" name="grade" value={grade} />
+            {/* The hidden input now sends the UUID to the Server Action */}
+            <input type="hidden" name="class_id" value={classId} />
           </div>
 
           {/* Student picker — observations only */}
@@ -238,6 +238,7 @@ export function DiaryForm({
                 value={studentId}
                 onChange={(e) => onFormChange({ studentId: e.target.value })}
                 className={inpBase}
+                required={mode === "observation"}
               >
                 <option value="">Select individual student...</option>
                 {students.map((s) => (
@@ -260,6 +261,7 @@ export function DiaryForm({
               onChange={(e) => onFormChange({ title: e.target.value })}
               placeholder="Give this entry a clear heading..."
               className={inpBase}
+              required
             />
             <div className="flex flex-wrap gap-1.5 mt-2" aria-label="Quick title suggestions">
               {QUICK_TITLES[mode].map((t) => (
@@ -326,7 +328,7 @@ export function DiaryForm({
 
           {/* Submit Button */}
           <button
-          aria-label="submit diary"
+            aria-label="submit diary"
             type="submit"
             disabled={isPending}
             className="w-full py-4 rounded-2xl bg-emerald-600 text-white text-xs font-black uppercase tracking-[0.2em] shadow-lg shadow-emerald-200 hover:bg-emerald-700 hover:shadow-emerald-300 disabled:opacity-50 transition-all active:scale-[0.98] flex items-center justify-center gap-3"

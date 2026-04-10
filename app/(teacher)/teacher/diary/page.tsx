@@ -27,35 +27,43 @@ export default async function DiaryPage() {
 
   const { academicYear } = await getActiveTermYear();
 
-  // Grades from subject allocations
+  // 1. Get allocations to find exactly which classes (UUIDs) this teacher handles
   const allocations = await fetchTeacherAssessmentAllocations(
     teacher.id,
     academicYear,
   );
-  const uniqueGrades = [...new Set(allocations.map((a) => a.grade))].sort();
+  
+  // Extract unique class IDs (UUIDs) the teacher is assigned to
+  const teacherClassIds = [...new Set(allocations.map((a) => a.classId))].filter(Boolean) as string[];
 
-  // Class options for grade display (stream-aware labels)
-  const classOptions = await fetchClassOptions(academicYear);
+  // 2. Fetch Class Options (The labels/metadata for those UUIDs)
+  const allClassOptions = await fetchClassOptions(academicYear);
+  
+  // Filter options to only show classes this teacher actually teaches
+  const teacherClassOptions = allClassOptions.filter(opt => 
+    teacherClassIds.includes(opt.id)
+  );
 
-  // Students per grade for the observation picker
-  const studentsByGrade: Record<
+  // 3. Fetch students grouped by Class UUID for the observation picker
+  const studentsByClass: Record<
     string,
     Awaited<ReturnType<typeof fetchClassStudents>>
   > = {};
+
   await Promise.all(
-    uniqueGrades.map(async (grade) => {
-      studentsByGrade[grade] = await fetchClassStudents(grade);
+    teacherClassIds.map(async (classId) => {
+      studentsByClass[classId] = await fetchClassStudents(classId);
     }),
   );
 
-  const initialEntries = await fetchTeacherDiaryEntries(uniqueGrades, 60);
+  // 4. Fetch the existing diary entries using the UUID array
+  const initialEntries = await fetchTeacherDiaryEntries(teacherClassIds, 60);
 
   return (
     <DiaryClient
       teacherName={teacher.full_name}
-      grades={uniqueGrades}
-      classOptions={classOptions}
-      studentsByGrade={studentsByGrade}
+      classOptions={teacherClassOptions}
+      studentsByClass={studentsByClass}
       initialEntries={initialEntries}
     />
   );
