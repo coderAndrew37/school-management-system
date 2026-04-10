@@ -58,7 +58,6 @@ export function ClassAttendanceClient({
   const [tab, setTab] = useState<"register" | "trends">(initialTab);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
   
-  // Track the version of data we are looking at to handle "prop syncing" without useEffect
   const [prevSyncKey, setPrevSyncKey] = useState(`${classId}-${selectedDate}`);
   const [saved, setSaved] = useState(Object.keys(preFill).length > 0);
 
@@ -74,9 +73,7 @@ export function ClassAttendanceClient({
     })),
   );
 
-  // ── Sync Logic (The "Right" way for local state) ──────────────────────────
-  // If the class or date changes, we reset the local rows to the new server data.
-  // This happens DURING render, avoiding the "cascading effect" warning.
+  // ── Sync Logic (Rendering Phase Reset) ──────────────────────────
   const currentSyncKey = `${classId}-${selectedDate}`;
   if (currentSyncKey !== prevSyncKey) {
     setPrevSyncKey(currentSyncKey);
@@ -262,7 +259,7 @@ export function ClassAttendanceClient({
               })}
             </div>
             <button
-            aria-label="next week "
+              aria-label="next week"
               onClick={() => navTo(shiftWeek(selectedDate, 1))}
               disabled={nextWeekDisabled}
               className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors shrink-0"
@@ -317,7 +314,9 @@ export function ClassAttendanceClient({
 
         {tab === "register" ? (
           <RegisterTab
-            grade={`${gradeName} ${streamName}`}
+            classId={classId}
+            gradeName={gradeName}
+            streamName={streamName}
             students={students}
             studentsWithParents={studentsWithParents}
             rows={rows}
@@ -335,15 +334,17 @@ export function ClassAttendanceClient({
             onSave={handleSave}
           />
         ) : (
-          <TrendsTab
-            grade={`${gradeName} ${streamName}`}
-            students={students}
-            studentsWithParents={studentsWithParents}
-            attendanceHistory={attendanceHistory}
-            classWeeklyTrend={classWeeklyTrend}
-            todayCounts={todayCounts}
-            totalStudents={rows.length}
-          />
+    <TrendsTab
+  classId={classId} 
+  gradeName={gradeName}
+  streamName={streamName}
+  students={students}
+  studentsWithParents={studentsWithParents}
+  attendanceHistory={attendanceHistory}
+  classWeeklyTrend={classWeeklyTrend}
+  todayCounts={todayCounts}
+  totalStudents={rows.length}
+/>
         )}
       </main>
     </div>

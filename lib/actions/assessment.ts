@@ -1,3 +1,4 @@
+// lib/actions/assessment.ts
 "use server";
 
 import { getSession } from "@/lib/actions/auth";
@@ -33,6 +34,16 @@ interface AnthropicResponse {
   id: string;
   model: string;
   role: string;
+}
+
+interface AssessmentRow {
+  student_id: string;
+  subject_name: string;
+  strand_id: string;
+  score: CbcScore;
+  term: number;
+  academic_year: number;
+  teacher_id: string | null;
 }
 
 // ── Guard: teachers only ──────────────────────────────────────────────────────
@@ -80,30 +91,37 @@ export async function batchUpsertAssessmentsAction(
     return { success: true, message: "Nothing to save.", savedCount: 0 };
   }
 
+  // Ensure no "undefined" strings leaked into the batch
+  const hasInvalidIds = rows.some(r => r.studentId === "undefined");
+  if (hasInvalidIds) {
+    return { success: false, message: "Batch contains invalid student identifiers." };
+  }
+
   const validated = rows.map((r) => rowSchema.safeParse(r));
   const invalid = validated.filter((v) => !v.success);
   if (invalid.length > 0) {
     return { success: false, message: "Some rows failed validation." };
   }
 
-  const upsertRows = validated
-    .filter((v) => v.success && v.data.score !== null)
-    .map((v) => {
-      const d = v.data!;
-      return {
-        student_id: d.studentId,
-        subject_name: d.subjectName,
-        strand_id: d.strandId,
-        score: d.score,
-        term: d.term,
-        academic_year: d.academicYear,
-        teacher_id: teacherId || null,
-      };
-    });
+  const upsertRows: AssessmentRow[] = validated
+    .filter((v): v is { success: true; data: z.infer<typeof rowSchema> & { score: CbcScore } } => 
+      v.success && v.data.score !== null
+    )
+    .map((v) => ({
+      student_id: v.data.studentId,
+      subject_name: v.data.subjectName,
+      strand_id: v.data.strandId,
+      score: v.data.score,
+      term: v.data.term,
+      academic_year: v.data.academicYear,
+      teacher_id: teacherId || null,
+    }));
 
   const clearRows = validated
-    .filter((v) => v.success && v.data.score === null)
-    .map((v) => v.data!);
+    .filter((v): v is { success: true; data: z.infer<typeof rowSchema> } => 
+      v.success && v.data.score === null
+    )
+    .map((v) => v.data);
 
   let savedCount = 0;
 
@@ -119,15 +137,17 @@ export async function batchUpsertAssessmentsAction(
     }
 
     // Clear deleted/null scores
-    for (const r of clearRows) {
-      const { error: deleteError } = await supabase.from("assessments").delete().match({
-        student_id: r.studentId,
-        subject_name: r.subjectName,
-        strand_id: r.strandId,
-        term: r.term,
-        academic_year: r.academicYear,
-      });
-      if (deleteError) console.error("[batchUpsert] Delete error:", deleteError.message);
+    if (clearRows.length > 0) {
+      for (const r of clearRows) {
+        const { error: deleteError } = await supabase.from("assessments").delete().match({
+          student_id: r.studentId,
+          subject_name: r.subjectName,
+          strand_id: r.strandId,
+          term: r.term,
+          academic_year: r.academicYear,
+        });
+        if (deleteError) console.error("[batchUpsert] Delete error:", deleteError.message);
+      }
     }
 
     revalidatePath("/teacher/assess");
@@ -161,7 +181,6 @@ export async function generateNarrativeAction(
     10,
   );
 
-  // Validate UUID input to prevent syntax errors
   if (!studentId || studentId === "undefined") {
     return { success: false, message: "Invalid student identifier." };
   }
@@ -204,7 +223,7 @@ Strand Performance:
 ${scoreSummary}
 
 Write a narrative remark for ${studentName}'s ${subjectName} performance this term. 
-Do not include the student's name in the remark — it will be prefixed automatically.
+Do not include the student's name in the remark.
 Do not use bullet points or lists. Write in flowing prose.
 Do not mention letter codes like EE/ME/AE/BE — describe performance naturally.
 Respond with ONLY the narrative remark text, no preamble.`;
@@ -309,12 +328,8 @@ export async function saveNarrativeAction(
   return { success: true, narrative, message: "Saved successfully." };
 }
 
-// ── 4. Data Fetching Utilities (Refactored for class_id) ──────────────────────
+// ── 4. Data Fetching Utilities (Refactored) ──────────────────────────────────
 
-/**
- * Fetches all active students linked to a specific class UUID.
- * The system has been backfilled so class_id is now the source of truth.
- */
 export async function fetchClassStudents(classId: string) {
   if (!classId || classId === "undefined") {
     console.warn("[fetchClassStudents] No valid Class ID provided.");

@@ -24,7 +24,6 @@ const STATUS_ICONS: Record<Status, React.ReactNode> = {
 };
 
 interface Props {
-  // Swapped legacy grade string for specific class metadata
   classId: string;
   gradeName: string;
   streamName: string;
@@ -43,6 +42,7 @@ interface Props {
 }
 
 export function RegisterTab({
+  classId,
   gradeName,
   streamName,
   studentsWithParents,
@@ -215,8 +215,9 @@ export function RegisterTab({
                       <ContactPopover
                         studentName={row.full_name}
                         parents={parents}
-                        // Passing the combined class name to the popover
-                        grade={fullClassName}
+                        classId={classId}
+                        gradeName={gradeName}
+                        streamName={streamName}
                         onClose={() => setContactId(null)}
                       />
                     )}

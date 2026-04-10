@@ -5,9 +5,9 @@ import { Mail, MessageSquare, Phone } from "lucide-react";
 
 interface Props {
   studentName: string;
-  classId: string; // The UUID from AttendanceClientProps
-  gradeName: string; // e.g., "Grade 4"
-  streamName: string; // e.g., "North"
+  classId: string;
+  gradeName: string; // Changed from 'grade' to be explicit
+  streamName: string; // Added to match architecture
   parents: ParentContact[];
   onClose: () => void;
 }
@@ -72,36 +72,26 @@ export function ContactPopover({
                       className="flex flex-col items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 py-2 hover:bg-emerald-100 transition-colors"
                     >
                       <Phone className="h-3.5 w-3.5 text-emerald-600" />
-                      <span className="text-[9px] font-bold text-emerald-700">
-                        Call
-                      </span>
+                      <span className="text-[9px] font-bold text-emerald-700">Call</span>
                     </a>
                     <a
                       href={`sms:${p.phone_number}?body=${encodeURIComponent(
-                        `Dear Parent, this is a follow-up regarding ${studentName}'s attendance at ${schoolName}. Please contact the class teacher of ${fullClassName} at your earliest convenience. Thank you.`
+                        `Dear Parent, this is a follow-up regarding ${studentName}'s attendance at ${schoolName}. Please contact the class teacher of ${fullClassName}.`
                       )}`}
                       className="flex flex-col items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 py-2 hover:bg-sky-100 transition-colors"
                     >
                       <MessageSquare className="h-3.5 w-3.5 text-sky-600" />
-                      <span className="text-[9px] font-bold text-sky-700">
-                        SMS
-                      </span>
+                      <span className="text-[9px] font-bold text-sky-700">SMS</span>
                     </a>
                   </>
                 )}
                 {p.email && (
                   <a
-                    href={`mailto:${p.email}?subject=${encodeURIComponent(
-                      `Attendance Follow-up — ${studentName}`
-                    )}&body=${encodeURIComponent(
-                      `Dear ${p.full_name},\n\nWe are writing regarding ${studentName}'s attendance in ${fullClassName}. We would appreciate your assistance in ensuring regular attendance.\n\nPlease contact the school office if you have any concerns.\n\nKind regards,\n${schoolName}`
-                    )}`}
+                    href={`mailto:${p.email}?subject=Attendance Follow-up — ${studentName}`}
                     className="flex flex-col items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 py-2 hover:bg-violet-100 transition-colors"
                   >
                     <Mail className="h-3.5 w-3.5 text-violet-600" />
-                    <span className="text-[9px] font-bold text-violet-700">
-                      Email
-                    </span>
+                    <span className="text-[9px] font-bold text-violet-700">Email</span>
                   </a>
                 )}
               </div>

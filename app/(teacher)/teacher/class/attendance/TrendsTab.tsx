@@ -39,7 +39,6 @@ export function TrendsTab({
   const [contactId, setContactId] = useState<string | null>(null);
 
   // Combine names for UI display consistent with RegisterTab
-  const fullClassName = `${gradeName} ${streamName}`;
 
   // Compute individual stats for all students
   const stats = computeStats(students, attendanceHistory);
@@ -226,11 +225,13 @@ export function TrendsTab({
                     </button>
                     {isOpen && (
                       <ContactPopover
-                        studentName={student.full_name}
-                        parents={parents}
-                        grade={fullClassName}
-                        onClose={() => setContactId(null)}
-                      />
+  studentName={student.full_name}
+  parents={parents}
+  classId={classId}
+  gradeName={gradeName}
+  streamName={streamName}
+  onClose={() => setContactId(null)}
+/>
                     )}
                   </div>
                 </div>
@@ -309,12 +310,14 @@ export function TrendsTab({
                       <Phone className="h-3.5 w-3.5" />
                     </button>
                     {isOpen && (
-                      <ContactPopover
-                        studentName={student.full_name}
-                        parents={parents}
-                        grade={fullClassName}
-                        onClose={() => setContactId(null)}
-                      />
+                    <ContactPopover
+  studentName={student.full_name}
+  parents={parents}
+  classId={classId}
+  gradeName={gradeName}
+  streamName={streamName}
+  onClose={() => setContactId(null)}
+/>
                     )}
                   </div>
                 </div>
