@@ -24,8 +24,10 @@ const STATUS_ICONS: Record<Status, React.ReactNode> = {
 };
 
 interface Props {
-  // Updated to match full class string (e.g., "Grade 4 North")
-  grade: string;
+  // Swapped legacy grade string for specific class metadata
+  classId: string;
+  gradeName: string;
+  streamName: string;
   students: ClassStudent[];
   studentsWithParents: (ClassStudent & { parents: ParentContact[] })[];
   rows: StudentRow[];
@@ -41,14 +43,12 @@ interface Props {
 }
 
 export function RegisterTab({
-  grade,
-  students,
+  gradeName,
+  streamName,
   studentsWithParents,
   rows,
   isFuture,
   isPending,
-  saved,
-  selectedDate,
   onSetStatus,
   onSetRemarks,
   onToggleRemarks,
@@ -56,6 +56,9 @@ export function RegisterTab({
   onSave,
 }: Props) {
   const [contactId, setContactId] = useState<string | null>(null);
+
+  // Combine names for UI display (e.g., "Grade 4 North")
+  const fullClassName = `${gradeName} ${streamName}`;
 
   const counts = rows.reduce<Record<Status, number>>(
     (acc, r) => {
@@ -196,6 +199,7 @@ export function RegisterTab({
                   </button>
                   <div className="relative">
                     <button
+                    aria-label='set contact id'
                       onClick={() =>
                         setContactId(isOpen ? null : row.studentId)
                       }
@@ -211,7 +215,8 @@ export function RegisterTab({
                       <ContactPopover
                         studentName={row.full_name}
                         parents={parents}
-                        grade={grade}
+                        // Passing the combined class name to the popover
+                        grade={fullClassName}
                         onClose={() => setContactId(null)}
                       />
                     )}
@@ -267,7 +272,7 @@ export function RegisterTab({
             </div>
           ))}
           <p className="text-[10px] text-slate-400 pt-1">
-            Parent notifications are queued and sent upon clicking "Save".
+            Parent notifications are queued and sent upon clicking &quot;Save&quot;.
           </p>
         </div>
       )}
@@ -280,7 +285,7 @@ export function RegisterTab({
           className="w-full py-3.5 rounded-2xl bg-sky-600 text-white font-black text-sm hover:bg-sky-700 disabled:opacity-40 transition-colors shadow-lg shadow-sky-200/50 flex items-center justify-center gap-2"
         >
           <Save className="h-4 w-4" />
-          {isPending ? "Saving…" : `Save ${grade} Register`}
+          {isPending ? "Saving…" : `Save ${fullClassName} Register`}
         </button>
         <p className="text-center text-[10px] text-slate-400 mt-2">
           Automated SMS/Email alerts will be sent to parents of absent students.

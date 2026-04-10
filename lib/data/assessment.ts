@@ -7,9 +7,9 @@ import type { CbcScore, AssessmentGridState } from "@/lib/types/assessment";
 
 export interface TeacherAllocationSummary {
   id: string;
-  classId: string; // Changed from grade
-  grade: string; // e.g., "Grade 4"
-  stream: string; // e.g., "North"
+  classId: string;
+  grade: string;
+  stream: string;
   subjectName: string;
   subjectCode: string;
   subjectLevel: SubjectLevel;
@@ -22,7 +22,7 @@ export interface ClassStudent {
   full_name: string;
   readable_id: string | null;
   gender: "Male" | "Female" | null;
-  class_id: string; // Changed from current_grade
+  class_id: string;
 }
 
 export interface ClassAssessmentData {
@@ -40,6 +40,27 @@ export interface AttendanceRecord {
   remarks: string | null;
 }
 
+// Internal interface for Supabase Joins
+interface JoinedAllocationRow {
+  id: string;
+  teacher_id: string;
+  subject_id: string;
+  class_id: string;
+  academic_year: number;
+  subjects: {
+    id: string;
+    name: string;
+    code: string;
+    level: SubjectLevel;
+    weekly_lessons: number;
+  } | null;
+  classes: {
+    id: string;
+    grade: string;
+    stream: string;
+  } | null;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function fetchStudentCountsByClass(
@@ -48,7 +69,6 @@ async function fetchStudentCountsByClass(
   if (classIds.length === 0) return {};
   const supabase = await createSupabaseServerClient();
 
-  // Note: This assumes your 'students' table now has a 'class_id' foreign key
   const { data } = await supabase
     .from("students")
     .select("class_id")
@@ -56,8 +76,9 @@ async function fetchStudentCountsByClass(
     .eq("status", "active");
 
   const counts: Record<string, number> = {};
-  for (const row of (data ?? []) as { class_id: string }[])
+  for (const row of (data ?? []) as { class_id: string }[]) {
     counts[row.class_id] = (counts[row.class_id] ?? 0) + 1;
+  }
   return counts;
 }
 
@@ -85,24 +106,24 @@ export async function fetchTeacherAssessmentAllocations(
 
   const { data, error } = await supabase
     .from("teacher_subject_allocations")
-    .select(
-      `
+    .select(`
       id, teacher_id, subject_id, class_id, academic_year,
       subjects ( id, name, code, level, weekly_lessons ),
       classes ( id, grade, stream )
-    `,
-    )
+    `)
     .eq("teacher_id", teacherId)
     .eq("academic_year", academicYear);
 
   if (error || !data) return [];
 
-  const classIds = [...new Set(data.map((r) => r.class_id))];
+  const typedData = data as unknown as JoinedAllocationRow[];
+  const classIds = [...new Set(typedData.map((r) => r.class_id))];
   const studentCounts = await fetchStudentCountsByClass(classIds);
 
-  return data.map((row: any): TeacherAllocationSummary => {
+  return typedData.map((row): TeacherAllocationSummary => {
     const sub = row.subjects;
     const cls = row.classes;
+    
     return {
       id: row.id,
       classId: row.class_id,
@@ -118,7 +139,7 @@ export async function fetchTeacherAssessmentAllocations(
 }
 
 export async function fetchClassAssessments(
-  classId: string, // Now using classId
+  classId: string,
   subjectName: string,
   term: 1 | 2 | 3,
   academicYear = 2026,
@@ -199,7 +220,6 @@ export async function fetchClassAttendance(
 ): Promise<AttendanceRecord[]> {
   const supabase = await createSupabaseServerClient();
 
-  // 1. Get students for this class first
   const { data: students } = await supabase
     .from("students")
     .select("id")
@@ -210,7 +230,6 @@ export async function fetchClassAttendance(
 
   const studentIds = students.map((s) => s.id);
 
-  // 2. Get attendance records
   const { data, error } = await supabase
     .from("attendance")
     .select("id, student_id, status, date, remarks")

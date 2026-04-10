@@ -1,4 +1,3 @@
-// app/teacher/class/attendance/TrendsTab.tsx
 "use client";
 
 import type { ClassStudent } from "@/lib/data/assessment";
@@ -14,7 +13,10 @@ import { DonutChart, Sparkline, WeeklyBarChart } from "./AttendanceCharts";
 import { ContactPopover } from "./ContactPopover";
 
 interface Props {
-  grade: string; // This should be the full string like "Grade 4 North"
+  // Swapped legacy grade string for specific class metadata
+  classId: string; 
+  gradeName: string; 
+  streamName: string;
   students: ClassStudent[];
   studentsWithParents: (ClassStudent & { parents: ParentContact[] })[];
   attendanceHistory: Record<string, { date: string; status: Status }[]>;
@@ -24,7 +26,9 @@ interface Props {
 }
 
 export function TrendsTab({
-  grade,
+  classId,
+  gradeName,
+  streamName,
   students,
   studentsWithParents,
   attendanceHistory,
@@ -33,6 +37,9 @@ export function TrendsTab({
   totalStudents,
 }: Props) {
   const [contactId, setContactId] = useState<string | null>(null);
+
+  // Combine names for UI display consistent with RegisterTab
+  const fullClassName = `${gradeName} ${streamName}`;
 
   // Compute individual stats for all students
   const stats = computeStats(students, attendanceHistory);
@@ -213,6 +220,7 @@ export function TrendsTab({
                           ? "bg-violet-100 border-violet-200 text-violet-700"
                           : "bg-rose-50 border-rose-200 text-rose-600"
                       }`}
+                      aria-label="contact button"
                     >
                       <Phone className="h-3.5 w-3.5" />
                     </button>
@@ -220,7 +228,7 @@ export function TrendsTab({
                       <ContactPopover
                         studentName={student.full_name}
                         parents={parents}
-                        grade={grade}
+                        grade={fullClassName}
                         onClose={() => setContactId(null)}
                       />
                     )}
@@ -288,6 +296,7 @@ export function TrendsTab({
                   </div>
                   <div className="relative">
                     <button
+                    aria-label="contact button"
                       onClick={() =>
                         setContactId(isOpen ? null : stat.studentId)
                       }
@@ -303,7 +312,7 @@ export function TrendsTab({
                       <ContactPopover
                         studentName={student.full_name}
                         parents={parents}
-                        grade={grade}
+                        grade={fullClassName}
                         onClose={() => setContactId(null)}
                       />
                     )}

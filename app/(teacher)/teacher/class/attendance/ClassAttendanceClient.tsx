@@ -1,9 +1,6 @@
 "use client";
 
 // app/teacher/class/attendance/ClassAttendanceClient.tsx
-// Thin orchestrator — owns shared state, header, week nav, tab routing.
-// Fully refactored for Class-based (Grade + Stream) architecture.
-
 import {
   AlertTriangle,
   CalendarCheck,
@@ -16,7 +13,6 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
-  useEffect,
   useMemo,
   useState,
   useTransition,
@@ -26,7 +22,7 @@ import { bulkRecordAttendanceAction } from "@/lib/actions/teacher";
 import type {
   AttendanceClientProps,
   Status,
-  StudentRow,
+  StudentRow
 } from "./attendance-types";
 import {
   DAY_NAMES,
@@ -40,11 +36,11 @@ import { RegisterTab } from "./RegisterTab";
 import { TrendsTab } from "./TrendsTab";
 
 export function ClassAttendanceClient({
-  classId, // UUID from classes table
-  gradeName, // e.g., "Grade 4"
-  streamName, // e.g., "North"
-  availableClasses, // Array of { id, grade, stream } for switcher
-  students, // ClassStudent[] from your assessment data layer
+  classId,
+  gradeName,
+  streamName,
+  availableClasses,
+  students,
   studentsWithParents,
   selectedDate,
   today,
@@ -61,9 +57,11 @@ export function ClassAttendanceClient({
   // ── State ──────────────────────────────────────────────────────────────────
   const [tab, setTab] = useState<"register" | "trends">(initialTab);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+  
+  // Track the version of data we are looking at to handle "prop syncing" without useEffect
+  const [prevSyncKey, setPrevSyncKey] = useState(`${classId}-${selectedDate}`);
   const [saved, setSaved] = useState(Object.keys(preFill).length > 0);
 
-  // Rows state: mapped from ClassStudent
   const [rows, setRows] = useState<StudentRow[]>(() =>
     students.map((s) => ({
       studentId: s.id,
@@ -76,27 +74,31 @@ export function ClassAttendanceClient({
     })),
   );
 
-  // Sync rows if students/preFill props change via server navigation
-  useEffect(() => {
-    setRows(
-      students.map((s) => ({
-        studentId: s.id,
-        full_name: s.full_name,
-        readable_id: s.readable_id,
-        gender: s.gender,
-        status: (preFill[s.id]?.status as Status) ?? "Present",
-        remarks: preFill[s.id]?.remarks ?? "",
-        remarksOpen: false,
-      })),
-    );
+  // ── Sync Logic (The "Right" way for local state) ──────────────────────────
+  // If the class or date changes, we reset the local rows to the new server data.
+  // This happens DURING render, avoiding the "cascading effect" warning.
+  const currentSyncKey = `${classId}-${selectedDate}`;
+  if (currentSyncKey !== prevSyncKey) {
+    setPrevSyncKey(currentSyncKey);
+    setRows(students.map((s) => ({
+      studentId: s.id,
+      full_name: s.full_name,
+      readable_id: s.readable_id,
+      gender: s.gender,
+      status: (preFill[s.id]?.status as Status) ?? "Present",
+      remarks: preFill[s.id]?.remarks ?? "",
+      remarksOpen: false,
+    })));
     setSaved(Object.keys(preFill).length > 0);
-  }, [students, preFill]);
+  }
 
-  // ── Derived Data (Memoized) ────────────────────────────────────────────────
+  // ── Derived Data ────────────────────────────────────────────────────────────
   const { isFuture, weekDays, recorded, nextWeekDisabled } = useMemo(() => {
     const days = getWeekDays(selectedDate);
-    const nextMon = new Date(days[4]! + "T00:00:00");
+    const lastDay = days[4];
+    const nextMon = lastDay ? new Date(lastDay + "T00:00:00") : new Date();
     nextMon.setDate(nextMon.getDate() + 3);
+    
     return {
       isFuture: selectedDate > today,
       weekDays: days,
@@ -180,7 +182,6 @@ export function ClassAttendanceClient({
 
   return (
     <div className="min-h-screen bg-[#f5f6fa]">
-      {/* ── Sticky Header ─────────────────────────────────────────────────── */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
         <div className="max-w-3xl mx-auto px-4 sm:px-6">
           <div className="h-14 flex items-center gap-3">
@@ -220,11 +221,10 @@ export function ClassAttendanceClient({
             </div>
           </div>
 
-          {/* Week Strip */}
           <div className="pb-2 flex items-center gap-2">
             <button
+              aria-label="previous week"
               onClick={() => navTo(shiftWeek(selectedDate, -1))}
-              aria-label="Previous week"
               className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -249,37 +249,28 @@ export function ClassAttendanceClient({
                           : "bg-white border-slate-200 text-slate-600 hover:border-sky-300 hover:bg-sky-50",
                     ].join(" ")}
                   >
-                    <span
-                      className={`text-[9px] font-black uppercase tracking-widest ${isSel ? "text-sky-200" : "text-slate-400"}`}
-                    >
+                    <span className={`text-[9px] font-black uppercase tracking-widest ${isSel ? "text-sky-200" : "text-slate-400"}`}>
                       {DAY_NAMES[i]}
                     </span>
-                    <span
-                      className={`text-sm font-black leading-none ${isSel ? "text-white" : isToday ? "text-sky-600" : "text-slate-700"}`}
-                    >
+                    <span className={`text-sm font-black leading-none ${isSel ? "text-white" : isToday ? "text-sky-600" : "text-slate-700"}`}>
                       {new Date(date + "T00:00:00").getDate()}
                     </span>
-                    {hasRec && !isSel && (
-                      <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-emerald-500" />
-                    )}
-                    {isToday && !isSel && (
-                      <span className="absolute top-1 right-1 w-1 h-1 rounded-full bg-sky-400" />
-                    )}
+                    {hasRec && !isSel && <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-emerald-500" />}
+                    {isToday && !isSel && <span className="absolute top-1 right-1 w-1 h-1 rounded-full bg-sky-400" />}
                   </button>
                 );
               })}
             </div>
             <button
+            aria-label="next week "
               onClick={() => navTo(shiftWeek(selectedDate, 1))}
               disabled={nextWeekDisabled}
-              aria-label="Next week"
               className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors shrink-0"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
 
-          {/* Tabs + Class Switcher */}
           <div className="pb-2 flex items-center gap-3 flex-wrap">
             <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 gap-0.5">
               {(["register", "trends"] as const).map((t) => (
@@ -288,22 +279,18 @@ export function ClassAttendanceClient({
                   onClick={() => setTab(t)}
                   className={`px-3.5 py-1.5 rounded-md text-xs font-bold transition-all ${tab === t ? "bg-white text-slate-800 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}
                 >
-                  {t === "trends"
-                    ? `Trends${atRiskCount > 0 ? ` (${atRiskCount})` : ""}`
-                    : "Register"}
+                  {t === "trends" ? `Trends${atRiskCount > 0 ? ` (${atRiskCount})` : ""}` : "Register"}
                 </button>
               ))}
             </div>
             {availableClasses.length > 1 && (
               <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
-                {availableClasses.map((cls: any) => (
+                {availableClasses.map((cls) => (
                   <button
                     key={cls.id}
                     onClick={() => navTo(selectedDate, cls.id)}
                     className={`whitespace-nowrap text-[10px] font-bold px-3 py-1 rounded-full border transition-all ${
-                      cls.id === classId
-                        ? "bg-slate-800 text-white border-slate-800 shadow-sm"
-                        : "bg-white text-slate-500 border-slate-200 hover:border-sky-300"
+                      cls.id === classId ? "bg-slate-800 text-white border-slate-800 shadow-sm" : "bg-white text-slate-500 border-slate-200 hover:border-sky-300"
                     }`}
                   >
                     {cls.grade} {cls.stream}
@@ -315,11 +302,8 @@ export function ClassAttendanceClient({
         </div>
       </header>
 
-      {/* Toast Overlay */}
       {toast && (
-        <div
-          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-bold shadow-xl animate-in fade-in slide-in-from-top-2 ${toast.ok ? "bg-emerald-600 text-white" : "bg-rose-500 text-white"}`}
-        >
+        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-bold shadow-xl animate-in fade-in slide-in-from-top-2 ${toast.ok ? "bg-emerald-600 text-white" : "bg-rose-500 text-white"}`}>
           {toast.msg}
         </div>
       )}
@@ -327,8 +311,7 @@ export function ClassAttendanceClient({
       <main className="max-w-3xl mx-auto px-4 sm:px-6 py-4 space-y-4">
         {isFuture && tab === "register" && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700 font-semibold flex items-center gap-2">
-            <Clock className="h-4 w-4 shrink-0" /> Future date — attendance
-            cannot be recorded yet.
+            <Clock className="h-4 w-4 shrink-0" /> Future date — attendance cannot be recorded yet.
           </div>
         )}
 
