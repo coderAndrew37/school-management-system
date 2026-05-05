@@ -18,6 +18,17 @@ const teacherUpdateSchema = z.object({
   avatarUrl: z.string().optional().nullable(),
 });
 
+// Define allowed archive reasons based on your school logic
+const archiveReasonSchema = z.enum([
+  "transferred",
+  "terminated",
+  "resigned",
+  "deceased",
+  "retired",
+]);
+
+type ArchiveReason = z.infer<typeof archiveReasonSchema>;
+
 // ── 2. Guard ──────────────────────────────────────────────────────────────────
 
 /**
@@ -100,11 +111,11 @@ export async function updateTeacherAction(fd: FormData): Promise<ActionResult> {
   }
 }
 
-// ── 4. Change Status ──────────────────────────────────────────────────────────
+// ── 4. Change Status (Active/On Leave) ──────────────────────────────────────────
 
 /**
- * Updates teacher status and automatically relieves them of active
- * class assignments if they are no longer 'active'.
+ * Handles toggling between active and temporary leave.
+ * Note: Use archiveTeacherAction for permanent exits.
  */
 export async function changeTeacherStatusAction(
   teacherId: string,
@@ -121,7 +132,7 @@ export async function changeTeacherStatusAction(
 
     if (error) throw error;
 
-    // 2. If status is NOT 'active', perform a "Soft Relieve" on active class assignments
+    // 2. If status is NOT 'active', relieve from primary class teacher duties
     if (status !== "active") {
       await supabaseAdmin
         .from("class_teacher_assignments")
@@ -195,48 +206,80 @@ export async function resendTeacherInviteAction(
   }
 }
 
-// ── 6. Delete Teacher ─────────────────────────────────────────────────────────
 
-export async function deleteTeacherAction(
+// ── 6. Archive Staff (Permanent Exits) ──────────────────────────────────────────
+
+/**
+ * Handles transfers, resignations, sackings, etc.
+ * Preserves history while removing them from active duty.
+ */
+export async function archiveTeacherAction(
   teacherId: string,
-  academicYear: number,
+  reason: ArchiveReason
 ): Promise<ActionResult> {
   try {
     await ensureAdmin();
 
-    // 1. Check for active subject allocations for safety
-    const { data: allocations } = await supabaseAdmin
+    // 1. Check for active subject allocations 
+    // Removed 'is_active' filter because it's not in your schema
+    const { data: activeAllocations } = await supabaseAdmin
       .from("teacher_subject_allocations")
       .select("id")
       .eq("teacher_id", teacherId)
-      .eq("academic_year", academicYear)
       .limit(1);
 
-    if (allocations?.length) {
+    if (activeAllocations?.length) {
       return {
         success: false,
-        message: "Cannot delete: Teacher has active subject allocations. Clear them first.",
+        message: `Teacher has active subject allocations. Please reassign their subjects before ${reason === 'transferred' ? 'transferring' : 'archiving'}.`,
       };
     }
 
-    // 2. Cleanup Class Teacher roles
+    // 2. Perform the Archive (Soft Delete)
+    const { error } = await supabaseAdmin
+      .from("teachers")
+      .update({
+        status: reason, // e.g., 'transferred', 'terminated'
+        archived_at: new Date().toISOString(),
+      })
+      .eq("id", teacherId);
+
+    if (error) {
+       // If this throws a 400, ensure you updated the DB constraint 
+       // to include the reason words.
+       throw error;
+    }
+
+    // 3. Deactivate current primary class assignments (keep history)
     await supabaseAdmin
       .from("class_teacher_assignments")
-      .delete()
-      .eq("teacher_id", teacherId);
+      .update({ 
+        is_active: false, 
+        relieved_at: new Date().toISOString() 
+      })
+      .eq("teacher_id", teacherId)
+      .eq("is_active", true);
 
-    // 3. Delete from Auth (Cascades to public.teachers and public.profiles)
-    const { error } = await supabaseAdmin.auth.admin.deleteUser(teacherId);
-
-    if (error) throw error;
+    // 4. Disable Auth Access
+    // We update metadata so the UI can show they are inactive, 
+    // and we could optionally ban the user.
+    await supabaseAdmin.auth.admin.updateUserById(teacherId, {
+      user_metadata: { status: reason, is_archived: true },
+      // app_metadata: { role: 'inactive' }
+    });
 
     revalidatePath("/admin/teachers");
+    revalidatePath(`/admin/teachers/${teacherId}`);
     revalidatePath("/admin/dashboard");
 
-    return { success: true, message: "Teacher removed from Kibali Academy." };
+    return { 
+      success: true, 
+      message: `Teacher has been marked as ${reason} successfully.` 
+    };
+
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Deletion failed";
-    console.error("[deleteTeacherAction] Error:", msg);
-    return { success: false, message: "Deletion failed: " + msg };
+    const msg = err instanceof Error ? err.message : "Archive failed";
+    console.error("[archiveTeacherAction] Error:", msg);
+    return { success: false, message: "Failed to archive teacher. Verify database constraints." };
   }
 }
