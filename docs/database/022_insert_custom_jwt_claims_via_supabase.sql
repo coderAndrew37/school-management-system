@@ -1,32 +1,30 @@
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
+DECLARE
+  initial_role text;
 BEGIN
-  -- 1. Insert into Profiles
-  INSERT INTO public.profiles (id, full_name, role, roles)
+  initial_role := COALESCE(NEW.raw_user_meta_data->>'role', 'parent');
+
+  INSERT INTO public.profiles (
+    id,
+    full_name,
+    role,
+    roles
+  )
   VALUES (
     NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email),
-    'parent'::public.user_role,
-    ARRAY['parent'::public.user_role]
-  );
+    COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
+    initial_role::public.user_role,
+    ARRAY[initial_role::public.user_role]
+  )
+  ON CONFLICT (id) DO NOTHING;
 
-  -- 2. Insert into Parents
-  INSERT INTO public.parents (id, full_name, email, phone_number)
-  VALUES (
-    NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'full_name', 'Parent'),
-    NEW.email,
-    COALESCE(NEW.phone, 'N/A')
+  -- Sync app metadata
+  NEW.raw_app_meta_data := jsonb_set(
+    COALESCE(NEW.raw_app_meta_data, '{}'::jsonb),
+    '{role}',
+    to_jsonb(initial_role)
   );
-
-  -- 3. FIX: Set the metadata DIRECTLY on the NEW record 
-  -- This avoids the UPDATE auth.users deadlock entirely.
-  NEW.raw_app_meta_data := 
-    jsonb_set(
-      COALESCE(NEW.raw_app_meta_data, '{}'::jsonb),
-      '{role}',
-      '"parent"'
-    );
 
   RETURN NEW;
 END;

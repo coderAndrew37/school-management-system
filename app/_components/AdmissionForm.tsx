@@ -9,7 +9,6 @@ import {
   admissionSchema,
   type AdmissionFormValues,
 } from "@/lib/schemas/admission";
-import Image from "next/image";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   CalendarDays,
@@ -25,16 +24,17 @@ import {
   UserRoundPlus,
   Users,
 } from "lucide-react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useCallback, useRef, useState, useTransition } from "react";
 import { SubmitHandler, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import {
+  ClassSelect,
   Divider,
   FieldError,
   Label,
   ParentSearchBox,
-  ClassSelect,
 } from "./AdmissionFormUtils";
 
 const RELATIONSHIP_TYPES = [
@@ -54,46 +54,59 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [photoUploading, setPhotoUploading] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
-const {
-  register,
-  handleSubmit,
-  reset,
-  setValue,
-  watch,
-  formState: { errors },
-} = useForm<AdmissionFormValues>({
-  resolver: zodResolver(admissionSchema),
-  defaultValues: {
-    studentName: "",
-    dateOfBirth: "",
-    // Use 'as const' or ensure the value exactly matches the Zod enum
-    gender: "Male", 
-    classId: "",
-    relationshipType: "guardian", 
-    existingParentId: null,
-    parentName: "",
-    parentEmail: "",
-    parentPhone: "",
-  },
-});
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setValue,
+    watch,
+    formState: { errors, isSubmitting },
+  } = useForm<AdmissionFormValues>({
+    resolver: zodResolver(admissionSchema),
+    defaultValues: {
+      studentName: "",
+      dateOfBirth: "",
+      gender: "Male",
+      classId: "",
+      relationshipType: "guardian",
+      existingParentId: null,
+      parentName: "",
+      parentEmail: "",
+      parentPhone: "",
+    },
+    mode: "onBlur",
+  });
 
   const selectedClassId = watch("classId");
+  const existingParentId = watch("existingParentId");
+
+  const isNewParent = useCallback(() => !existingParentId, [existingParentId])();
 
   function handleParentSelect(parent: ParentSearchResult | null) {
     setSelectedParent(parent);
     setValue("existingParentId", parent?.id || null, { shouldValidate: true });
+
+    // Clear new parent fields when selecting existing parent
+    if (parent) {
+      setValue("parentName", "");
+      setValue("parentEmail", "");
+      setValue("parentPhone", "");
+    }
   }
 
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+
     if (file.size > 2 * 1024 * 1024) {
-      toast.error("Photo too large", { description: "Max 2 MB." });
+      toast.error("Photo too large", { description: "Maximum size is 2 MB." });
       return;
     }
+
     setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
   }
@@ -104,11 +117,11 @@ const {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  const onSubmit: SubmitHandler<AdmissionFormValues> = (values) => {
+  const onSubmit: SubmitHandler<AdmissionFormValues> = async (values) => {
     startTransition(async () => {
       const fd = new FormData();
 
-      fd.append("studentName", values.studentName);
+      fd.append("studentName", values.studentName.trim());
       fd.append("dateOfBirth", values.dateOfBirth);
       fd.append("gender", values.gender);
       fd.append("classId", values.classId);
@@ -117,33 +130,43 @@ const {
       if (values.existingParentId) {
         fd.append("existingParentId", values.existingParentId);
       } else {
-        fd.append("parentName", values.parentName ?? "");
-        fd.append("parentEmail", values.parentEmail ?? "");
-        fd.append("parentPhone", values.parentPhone ?? "");
+        fd.append("parentName", values.parentName?.trim() || "");
+        fd.append("parentEmail", values.parentEmail?.trim() || "");
+        fd.append("parentPhone", values.parentPhone?.trim() || "");
       }
 
       const result = await admitStudentAction(fd);
 
       if (!result.success) {
-        toast.error("Admission Failed", { description: result.message });
+        toast.error("Admission Failed", {
+          description: result.message || "Please check your inputs and try again.",
+        });
         return;
       }
 
+      // Upload photo if provided
       if (photoFile && result.studentId) {
         setPhotoUploading(true);
         const photoFd = new FormData();
         photoFd.set("photo", photoFile);
+
         const photoResult = await uploadStudentPhotoAction(result.studentId, photoFd);
         setPhotoUploading(false);
-        if (!photoResult.success) console.warn("Photo upload failed:", photoResult.message);
+
+        if (!photoResult.success) {
+          toast.warning("Student admitted but photo upload failed", {
+            description: photoResult.message,
+          });
+        }
       }
 
-      toast.success("Admission Successful 🎓", {
+      toast.success("Student Admitted Successfully 🎉", {
         description: selectedParent
-          ? `${values.studentName} added to ${selectedParent.full_name}'s account.`
-          : `${values.studentName} admitted — parent invite sent.`,
+          ? `${values.studentName} has been added to ${selectedParent.full_name}'s account.`
+          : `New parent account created. Invite sent to ${values.parentEmail}.`,
       });
 
+      // Reset form
       reset();
       setSelectedParent(null);
       setPhotoFile(null);
@@ -152,7 +175,8 @@ const {
     });
   };
 
-  const inputBase = "w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/25 outline-none transition-all duration-200 focus:border-amber-400/60 focus:bg-white/10 focus:ring-2 focus:ring-amber-400/20 disabled:opacity-50 disabled:cursor-not-allowed";
+  const inputBase =
+    "w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/30 outline-none transition-all focus:border-amber-400/60 focus:bg-white/10 focus:ring-2 focus:ring-amber-400/20 disabled:opacity-50";
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] flex items-center justify-center p-4 font-[family-name:var(--font-body)]">
@@ -167,47 +191,68 @@ const {
             <GraduationCap className="h-5 w-5 text-amber-400" />
           </div>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-amber-400/70">Kibali Academy · Admin</p>
-            <h1 className="text-xl font-bold tracking-tight text-white">New Student Admission</h1>
+            <p className="text-xs font-semibold uppercase tracking-widest text-amber-400/70">Kibali Academy • Admin</p>
+            <h1 className="text-2xl font-bold tracking-tight text-white">Admit New Student</h1>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.04] backdrop-blur-xl shadow-2xl shadow-black/40">
-          <div className="h-px w-full bg-gradient-to-r from-transparent via-amber-400/40 to-transparent" />
+        <div className="rounded-3xl border border-white/[0.08] bg-white/[0.04] backdrop-blur-2xl shadow-2xl shadow-black/50">
+          <div className="h-px w-full bg-gradient-to-r from-transparent via-amber-400/50 to-transparent" />
 
-          <form onSubmit={handleSubmit(onSubmit)} noValidate className="p-7 space-y-6">
-            <div className="space-y-5">
+          <form onSubmit={handleSubmit(onSubmit)} noValidate className="p-8 space-y-8">
+            {/* Student Information */}
+            <div className="space-y-6">
               <div>
-                <Label htmlFor="studentName" icon={<UserRoundPlus className="h-3.5 w-3.5" />}>Student Full Name</Label>
-                <input id="studentName" type="text" placeholder="e.g. Amani Wanjiku Otieno" className={inputBase} {...register("studentName")} disabled={isPending} />
+                <Label htmlFor="studentName" icon={<UserRoundPlus className="h-4 w-4" />}>
+                  Student Full Name
+                </Label>
+                <input
+                  id="studentName"
+                  type="text"
+                  placeholder="e.g. Amani Wanjiku Otieno"
+                  className={inputBase}
+                  {...register("studentName")}
+                  disabled={isPending}
+                />
                 <FieldError message={errors.studentName?.message} />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="dateOfBirth" icon={<CalendarDays className="h-3.5 w-3.5" />}>Date of Birth</Label>
-                  <input id="dateOfBirth" type="date" className={`${inputBase} [color-scheme:dark]`} {...register("dateOfBirth")} disabled={isPending} />
+                  <Label htmlFor="dateOfBirth" icon={<CalendarDays className="h-4 w-4" />}>
+                    Date of Birth
+                  </Label>
+                  <input
+                    id="dateOfBirth"
+                    type="date"
+                    className={`${inputBase} [color-scheme:dark]`}
+                    {...register("dateOfBirth")}
+                    disabled={isPending}
+                  />
                   <FieldError message={errors.dateOfBirth?.message} />
                 </div>
 
                 <div>
-                  <Label htmlFor="gender" icon={<Users className="h-3.5 w-3.5" />}>Gender</Label>
+                  <Label htmlFor="gender" icon={<Users className="h-4 w-4" />}>
+                    Gender
+                  </Label>
                   <select id="gender" className={`${inputBase} cursor-pointer`} {...register("gender")} disabled={isPending}>
-                    <option value="" disabled className="bg-[#0c0f1a] text-white/40">Select…</option>
-                    <option value="Male" className="bg-[#0c0f1a] text-white">Male</option>
-                    <option value="Female" className="bg-[#0c0f1a] text-white">Female</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
                   </select>
                   <FieldError message={errors.gender?.message} />
                 </div>
               </div>
 
               <div>
-                <Label htmlFor="classId" icon={<GraduationCap className="h-3.5 w-3.5" />}>Assigned Class ({new Date().getFullYear()})</Label>
-                <ClassSelect 
-                  value={selectedClassId} 
+                <Label htmlFor="classId" icon={<GraduationCap className="h-4 w-4" />}>
+                  Assigned Class
+                </Label>
+                <ClassSelect
+                  value={selectedClassId}
                   options={availableClasses}
                   onChange={(val) => setValue("classId", val, { shouldValidate: true })}
-                  disabled={isPending} 
+                  disabled={isPending}
                 />
                 <FieldError message={errors.classId?.message} />
               </div>
@@ -215,84 +260,142 @@ const {
 
             <Divider label="Passport Photo (Optional)" />
 
-            <div className="flex items-start gap-4">
-              <div 
+            {/* Photo Upload */}
+            <div className="flex gap-5">
+              <div
                 onClick={() => !isPending && fileInputRef.current?.click()}
-                className="relative w-20 h-24 rounded-xl border-2 border-dashed border-white/15 bg-white/[0.04] flex items-center justify-center flex-shrink-0 cursor-pointer hover:border-amber-400/40 overflow-hidden group transition-all"
+                className="relative w-28 h-32 rounded-2xl border-2 border-dashed border-white/20 bg-white/5 flex items-center justify-center cursor-pointer hover:border-amber-400/50 overflow-hidden transition-all active:scale-95"
               >
                 {photoPreview ? (
-                  <Image src={photoPreview} alt="Preview" width={80} height={96} className="w-full h-full object-cover" />
+                  <Image src={photoPreview} alt="Preview" fill className="object-cover" />
                 ) : (
-                  <div className="flex flex-col items-center gap-1 text-white/20 group-hover:text-white/40">
-                    <Camera className="h-6 w-6" />
-                    <span className="text-[9px] font-bold uppercase">Upload</span>
+                  <div className="flex flex-col items-center text-white/30">
+                    <Camera className="h-8 w-8 mb-1" />
+                    <span className="text-xs font-medium">Upload Photo</span>
                   </div>
                 )}
+
                 {photoUploading && (
-                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                    <Loader2 className="h-5 w-5 text-amber-400 animate-spin" />
+                  <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
+                    <Loader2 className="h-6 w-6 animate-spin text-amber-400" />
                   </div>
                 )}
               </div>
 
-              <div className="flex-1">
-                <input aria-label="student image" ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} disabled={isPending} />
+              <div className="flex-1 text-sm">
+                <input
+                aria-label="Student passport photo"
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handlePhotoChange}
+                  disabled={isPending}
+                />
+
                 {photoFile ? (
-                  <div className="space-y-1">
-                    <p className="text-xs text-white/60 truncate">{photoFile.name}</p>
-                    <button type="button" onClick={handleRemovePhoto} className="text-[10px] font-semibold text-rose-400/60 hover:text-rose-400 flex items-center gap-1">
-                      <ImageOff className="h-3 w-3" /> Remove
+                  <div>
+                    <p className="font-medium text-white/80">{photoFile.name}</p>
+                    <button
+                      type="button"
+                      onClick={handleRemovePhoto}
+                      className="mt-2 text-rose-400 hover:text-rose-500 text-xs flex items-center gap-1"
+                    >
+                      <ImageOff className="h-3.5 w-3.5" /> Remove Photo
                     </button>
                   </div>
                 ) : (
-                  <p className="text-[10px] text-white/25 leading-relaxed">
-                    JPEG or PNG · Max 2 MB <br /> Clear face photo for school records.
+                  <p className="text-white/40 text-sm leading-relaxed">
+                    Recommended: Clear face photo.<br />
+                    JPEG or PNG • Max 2MB
                   </p>
                 )}
               </div>
             </div>
 
-            <Divider label="Parent / Guardian" />
+            <Divider label="Parent / Guardian Information" />
 
-            <div className="space-y-5">
+            {/* Parent Section */}
+            <div className="space-y-6">
               <div>
-                <Label htmlFor="relationshipType" icon={<Users className="h-3.5 w-3.5" />}>Relationship</Label>
+                <Label htmlFor="relationshipType" icon={<Users className="h-4 w-4" />}>
+                  Relationship to Student
+                </Label>
                 <div className="relative">
-                  <select id="relationshipType" className={`${inputBase} appearance-none pr-9`} {...register("relationshipType")} disabled={isPending}>
-                    {RELATIONSHIP_TYPES.map((r) => <option key={r.value} value={r.value} className="bg-[#0c0f1a]">{r.label}</option>)}
+                  <select
+                    id="relationshipType"
+                    className={`${inputBase} appearance-none pr-10`}
+                    {...register("relationshipType")}
+                    disabled={isPending}
+                  >
+                    {RELATIONSHIP_TYPES.map((r) => (
+                      <option key={r.value} value={r.value}>
+                        {r.label}
+                      </option>
+                    ))}
                   </select>
-                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30" />
+                  <ChevronDown className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-white/40" />
                 </div>
               </div>
 
               <div>
-                <Label htmlFor="parentSearch" icon={<Search className="h-3.5 w-3.5" />}>Search Existing Parents</Label>
+                <Label htmlFor="parentSearch" icon={<Search className="h-4 w-4" />}>
+                  Search Existing Parent
+                </Label>
                 <ParentSearchBox onSelect={handleParentSelect} selected={selectedParent} disabled={isPending} />
               </div>
 
-              {!selectedParent && (
-                <div className="space-y-5 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <div className="rounded-xl border border-amber-400/10 bg-amber-400/[0.04] px-4 py-3">
-                    <p className="text-[11px] text-amber-400/60">No parent selected — a new account will be created.</p>
+              {isNewParent && (
+                <div className="space-y-6 pt-2 border-t border-white/10">
+                  <div className="bg-amber-400/10 border border-amber-400/20 rounded-xl p-4">
+                    <p className="text-amber-400 text-sm">New parent account will be created and invited.</p>
                   </div>
-                  
+
                   <div>
-                    <Label htmlFor="parentName" icon={<User className="h-3.5 w-3.5" />}>Parent Full Name</Label>
-                    <input id="parentName" type="text" placeholder="Full Name" className={inputBase} {...register("parentName")} disabled={isPending} />
+                    <Label htmlFor="parentName" icon={<User className="h-4 w-4" />}>
+                      Parent Full Name
+                    </Label>
+                    <input
+                      id="parentName"
+                      type="text"
+                      placeholder="e.g. Jane Wanjiku Otieno"
+                      className={inputBase}
+                      {...register("parentName")}
+                      disabled={isPending}
+                    />
                     <FieldError message={errors.parentName?.message} />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="parentEmail" icon={<Mail className="h-3.5 w-3.5" />}>Email Address</Label>
-                      <input id="parentEmail" type="email" placeholder="email@example.com" className={inputBase} {...register("parentEmail")} disabled={isPending} />
+                      <Label htmlFor="parentEmail" icon={<Mail className="h-4 w-4" />}>
+                        Email Address
+                      </Label>
+                      <input
+                        id="parentEmail"
+                        type="email"
+                        placeholder="parent@email.com"
+                        className={inputBase}
+                        {...register("parentEmail")}
+                        disabled={isPending}
+                      />
                       <FieldError message={errors.parentEmail?.message} />
                     </div>
+
                     <div>
-                      <Label htmlFor="parentPhone" icon={<Phone className="h-3.5 w-3.5" />}>Phone Number</Label>
+                      <Label htmlFor="parentPhone" icon={<Phone className="h-4 w-4" />}>
+                        Phone Number
+                      </Label>
                       <div className="relative">
-                        <span className="absolute inset-y-0 left-4 flex items-center text-sm">🇰🇪</span>
-                        <input id="parentPhone" type="tel" placeholder="07xx xxx xxx" className={`${inputBase} pl-12`} {...register("parentPhone")} disabled={isPending} />
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg">🇰🇪</span>
+                        <input
+                          id="parentPhone"
+                          type="tel"
+                          placeholder="0712 345 678"
+                          className={`${inputBase} pl-12`}
+                          {...register("parentPhone")}
+                          disabled={isPending}
+                        />
                       </div>
                       <FieldError message={errors.parentPhone?.message} />
                     </div>
@@ -304,17 +407,19 @@ const {
             <button
               type="submit"
               disabled={isPending}
-              className="group relative w-full overflow-hidden rounded-xl bg-amber-400 px-6 py-3.5 text-sm font-bold text-[#0c0f1a] transition-all hover:bg-amber-300 active:scale-[0.98] disabled:opacity-60"
+              className="mt-4 w-full rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 py-4 text-lg font-bold text-[#0c0f1a] hover:brightness-110 active:scale-[0.985] transition-all disabled:opacity-60 flex items-center justify-center gap-3 shadow-lg shadow-amber-500/30"
             >
               {isPending ? (
-                <span className="flex items-center justify-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Processing...</span>
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Processing Admission...
+                </>
               ) : (
-                <span className="flex items-center justify-center gap-2">
-                  <UserRoundPlus className="h-4 w-4" />
-                  {selectedParent ? `Add to ${selectedParent.full_name}` : "Admit & Create Account"}
-                </span>
+                <>
+                  <UserRoundPlus className="h-5 w-5" />
+                  {selectedParent ? `Add Student to ${selectedParent.full_name.split(" ")[0]}` : "Admit Student & Send Invite"}
+                </>
               )}
-              <span className="absolute inset-0 -skew-x-12 translate-x-[-200%] bg-white/20 transition-transform duration-500 group-hover:translate-x-[200%]" />
             </button>
           </form>
         </div>

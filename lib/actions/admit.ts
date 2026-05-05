@@ -89,25 +89,18 @@ export async function admitStudentAction(
   formData: FormData,
 ): Promise<AdmissionActionResult> {
   const existingParentId = (formData.get("existingParentId") as string | null) || null;
-  
+
   const raw = {
     studentName: formData.get("studentName"),
     dateOfBirth: formData.get("dateOfBirth"),
     gender: formData.get("gender"),
     classId: formData.get("classId"),
     relationshipType: formData.get("relationshipType") ?? "guardian",
-    existingParentId: existingParentId,
-    // FIX: Fallback to undefined instead of null
+    existingParentId,
     parentName: (formData.get("parentName") as string) || undefined,
     parentEmail: (formData.get("parentEmail") as string) || undefined,
     parentPhone: (formData.get("parentPhone") as string) || undefined,
   };
-
-  // // ADD THESE LOGS HERE
-  // console.log("--- DEBUG ADMISSION DATA ---");
-  // console.log("Raw Data:", JSON.stringify(raw, null, 2));
-  // console.log("existingParentId type:", typeof raw.existingParentId);
-  // console.log("----------------------------");
 
   const parsed = admissionSchema.safeParse(raw);
   if (!parsed.success) {
@@ -119,19 +112,8 @@ export async function admitStudentAction(
 
   const d = parsed.data;
 
-  // Validation for new parents
-  if (!existingParentId) {
-    if (!d.parentName?.trim() || !d.parentEmail?.trim() || !d.parentPhone?.trim()) {
-      return { success: false, message: "Parent details are required." };
-    }
-    if (!KENYAN_PHONE_REGEX.test(d.parentPhone.replace(/\s/g, ""))) {
-      return { success: false, message: "Enter a valid Kenyan phone number." };
-    }
-  }
-
   try {
-    // ── 1. Resolve Class ID ──
-    // Fetching the grade string from the classes table to keep logic robust
+    // ── 1. Resolve Class ──
     const { data: classRecord, error: classError } = await supabaseAdmin
       .from("classes")
       .select("id, grade")
@@ -139,72 +121,93 @@ export async function admitStudentAction(
       .single();
 
     if (classError || !classRecord) {
-      return { 
-        success: false, 
-        message: "The selected class record was not found. Please ensure classes are initialized." 
+      return {
+        success: false,
+        message: "The selected class record was not found. Please ensure classes are initialized.",
       };
     }
 
     let parentId: string;
     let isNewParent = false;
 
-    // ── 2. Resolve Parent ──
+    // ── 2. Resolve / Create Parent ──
     if (existingParentId) {
       parentId = existingParentId;
     } else {
-      const email = d.parentEmail!.toLowerCase();
+      const email = d.parentEmail!.toLowerCase().trim();
       const phone = normalizeKenyanPhone(d.parentPhone!);
 
-      const { data: existing } = await supabaseAdmin
+      // Extra safety: Check both parents table and auth.users
+      const { data: existingParent } = await supabaseAdmin
         .from("parents")
         .select("id")
         .or(`email.eq.${email},phone_number.eq.${phone}`)
         .maybeSingle();
 
-      if (existing) {
+      if (existingParent) {
         return {
           success: false,
           message: "A parent with this email or phone already exists.",
         };
       }
 
-      const { data: authUser, error: authError } =
-        await supabaseAdmin.auth.admin.createUser({
-          email,
-          phone,
-          email_confirm: true,
-          user_metadata: { full_name: d.parentName, role: "parent" },
-        });
+      // Check if auth user already exists (important when parent was previously deleted)
+      const { data: existingAuth } = await supabaseAdmin.auth.admin.listUsers();
 
-      if (authError) throw new Error(`Auth failed: ${authError.message}`);
+      if (existingAuth?.users && existingAuth.users.some(user => user.email === email)) {
+        return {
+          success: false,
+          message: "A user with this email already exists in the system. Please use a different email.",
+        };
+      }
+
+      // Create Auth User
+      const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
+        email,
+        phone,
+        email_confirm: true,
+        phone_confirm: true,
+        user_metadata: { full_name: d.parentName, role: "parent" },
+      });
+
+      if (authError) throw new Error(`Auth creation failed: ${authError.message}`);
+
       parentId = authUser.user.id;
       isNewParent = true;
 
-      const { error: upsertErr } = await supabaseAdmin.from("parents").upsert({
+      // Create Parent Record
+      const { error: parentErr } = await supabaseAdmin.from("parents").insert({
         id: parentId,
-        full_name: d.parentName,
+        full_name: d.parentName!,
         email,
         phone_number: phone,
+        invite_accepted: false,
+        last_invite_sent: new Date().toISOString(),
       });
 
-      if (upsertErr) throw new Error(`Parent setup failed: ${upsertErr.message}`);
+      if (parentErr) {
+        await supabaseAdmin.auth.admin.deleteUser(parentId).catch(console.error);
+        throw new Error(`Parent record creation failed: ${parentErr.message}`);
+      }
     }
 
-    // ── 3. Register Student ──
+    // ── 3. Create Student ──
     const { data: newStudent, error: studentError } = await supabaseAdmin
       .from("students")
       .insert({
         full_name: d.studentName,
         date_of_birth: d.dateOfBirth,
         gender: d.gender,
-        current_grade: classRecord.grade, // Using the string from class lookup
+        current_grade: classRecord.grade,
         class_id: classRecord.id,
         status: "active",
       })
       .select("id")
       .single();
 
-    if (studentError || !newStudent) throw new Error(`Student registration failed: ${studentError?.message}`);
+    if (studentError || !newStudent) {
+      throw new Error(`Student registration failed: ${studentError?.message}`);
+    }
 
     // ── 4. Handle Passport Photo ──
     const photoFile = formData.get("passportPhoto") as File | null;
@@ -222,10 +225,12 @@ export async function admitStudentAction(
           .from("students")
           .update({ photo_url: path })
           .eq("id", newStudent.id);
+      } else {
+        console.error("Photo upload failed:", uploadError.message);
       }
     }
 
-    // ── 5. Link Student & Parent ──
+    // ── 5. Link Student to Parent ──
     const { error: linkErr } = await supabaseAdmin
       .from("student_parents")
       .insert({
@@ -240,10 +245,10 @@ export async function admitStudentAction(
       throw new Error("Failed to link student to parent.");
     }
 
-    // ── 6. Welcome Email ──
+    // ── 6. Send Welcome Email (New Parents Only) ──
     if (isNewParent) {
       const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
-        type: "magiclink",
+        type: "recovery",
         email: d.parentEmail!.toLowerCase(),
         options: { redirectTo: getAuthConfirmUrl() },
       });
@@ -258,7 +263,7 @@ export async function admitStudentAction(
             setupLink: linkData.properties.action_link,
           });
         } catch (e) {
-          console.error("Email send failed:", e);
+          console.error("Welcome email failed:", e);
         }
       }
     }
@@ -271,6 +276,7 @@ export async function admitStudentAction(
       message: "Student admitted successfully.",
       studentId: newStudent.id,
     };
+
   } catch (err) {
     const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
     console.error("[AdmitStudent] Error:", msg);
@@ -294,31 +300,39 @@ export async function resendInviteAction(parentId: string) {
       .single();
 
     if (pError || !parent) throw new Error("Parent record not found.");
-    
+
     const rawParent = parent as unknown as RawResendInviteRow;
 
     const { data: linkData, error: linkError } =
       await supabaseAdmin.auth.admin.generateLink({
-        type: "magiclink",
+        type: "recovery",
         email: rawParent.email,
         options: { redirectTo: getAuthConfirmUrl() },
       });
 
     if (linkError) throw linkError;
 
-    const firstChild = rawParent.student_parents?.[0]?.students;
+    // Improved: Support multiple children
+    const children = rawParent.student_parents
+      ?.map((sp) => sp.students)
+      .filter((s): s is NonNullable<typeof s> => !!s) || [];
+
+    const studentName = children.length > 0
+      ? children.map(c => c.full_name).join(", ")
+      : "your child";
 
     await sendWelcomeEmail({
       parentEmail: rawParent.email,
       parentName: rawParent.full_name,
-      studentName: firstChild?.full_name ?? "your child",
-      grade: firstChild?.current_grade ?? "—",
+      studentName,
+      grade: children[0]?.current_grade ?? "—",
       setupLink: linkData.properties.action_link,
     });
 
     return { success: true, message: "A new secure invite has been sent." };
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Resend failed";
+    console.error("[ResendInvite] Error:", msg);
     return { success: false, message: msg };
   }
 }
