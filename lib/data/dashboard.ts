@@ -111,6 +111,7 @@ export async function fetchStudents(limit?: number): Promise<Student[]> {
 export async function fetchAllStudents({
   search = "",
   grade = "",
+  stream = "",           // ← Added
   gender = "",
   status = "active",
   sortBy = "created_at",
@@ -118,12 +119,14 @@ export async function fetchAllStudents({
 }: {
   search?: string;
   grade?: string;
+  stream?: string;       // ← Added
   gender?: string;
   status?: string;
   sortBy?: string;
   sortDir?: "asc" | "desc";
 } = {}): Promise<Student[]> {
   const supabase = await createSupabaseServerClient();
+
   let query = supabase
     .from("students")
     .select(STUDENT_SELECT)
@@ -131,14 +134,17 @@ export async function fetchAllStudents({
 
   if (search) {
     query = query.or(
-      `full_name.ilike.%${search}%,readable_id.ilike.%${search}%`,
+      `full_name.ilike.%${search}%,readable_id.ilike.%${search}%`
     );
   }
+
   if (grade) query = query.eq("current_grade", grade);
+  if (stream) query = query.eq("current_stream", stream);   // ← Added filtering
   if (gender) query = query.eq("gender", gender);
   if (status && status !== "all") query = query.eq("status", status);
 
   const { data, error } = await query;
+
   if (error) {
     console.error("[fetchAllStudents] error:", error.message);
     return [];

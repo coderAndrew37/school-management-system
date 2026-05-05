@@ -35,7 +35,7 @@ export default async function StudentsPage({
     sortBy,
     sortDir,
     // Ensure your fetchAllStudents helper is updated to accept stream
-    // @ts-ignore (if stream property isn't added to types yet)
+   
     stream,
   });
 
