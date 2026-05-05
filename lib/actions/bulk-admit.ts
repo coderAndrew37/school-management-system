@@ -5,23 +5,23 @@ import { getSession } from "@/lib/actions/auth";
 import { sendWelcomeEmail } from "@/lib/mail";
 import { z } from "zod";
 import { supabaseAdmin } from "../supabase/admin";
-import { normalizeKenyanPhone } from "../utils/phone";
+import { normalizeKenyanPhone, KENYAN_PHONE_REGEX } from "../utils/phone";
 
-// ── 1. Validation Schema ──────────────────────────────────────────────────────
+// ── Validation Schema ──────────────────────────────────────────────────────
 
-const rowSchema = z.object({
-  studentName: z.string().min(2, "Name too short").max(100),
-  dateOfBirth: z.string().min(1, "DOB required"),
+const bulkAdmitRowSchema = z.object({
+  studentName: z.string().min(2, "Student name is too short").max(100),
+  dateOfBirth: z.string().min(1, "Date of birth is required"),
   gender: z.enum(["Male", "Female"]),
-  currentGrade: z.string().min(1).max(30),
-  stream: z.string().min(1).default("Main"), // Explicitly handle stream
-  academicYear: z.number().default(2026),     // Default for the current cycle
-  parentName: z.string().min(2, "Parent name too short").max(100),
-  parentEmail: z.string().email("Invalid email"),
-  parentPhone: z.string().min(9, "Phone too short").max(15),
+  currentGrade: z.string().min(1, "Grade is required").max(30),
+  stream: z.string().min(1, "Stream is required").default("Main"),
+  academicYear: z.number().default(2026),           // Made optional with default
+  parentName: z.string().min(2, "Parent name is too short").max(100),
+  parentEmail: z.string().email("Invalid parent email"),
+  parentPhone: z.string().min(9, "Phone number is too short").max(15),
 });
 
-export type BulkAdmitRow = z.infer<typeof rowSchema>;
+export type BulkAdmitRow = z.infer<typeof bulkAdmitRowSchema>;
 
 export interface BulkAdmitResult {
   index: number;
@@ -31,7 +31,7 @@ export interface BulkAdmitResult {
   studentId?: string;
 }
 
-// ── 2. Bulk Action ─────────────────────────────────────────────────────────────
+// ── Bulk Admit Students Action ─────────────────────────────────────────────
 
 export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
   results: BulkAdmitResult[];
@@ -44,9 +44,9 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
     return {
       results: rows.map((r, i) => ({
         index: i,
-        studentName: r.studentName,
+        studentName: r.studentName || `Row ${i + 1}`,
         success: false,
-        message: "Unauthorized",
+        message: "Unauthorized access",
       })),
       successCount: 0,
       failCount: rows.length,
@@ -54,157 +54,154 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
   }
 
   const results: BulkAdmitResult[] = [];
+  let successCount = 0;
 
   for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const parsed = rowSchema.safeParse(row);
+    const rawRow = rows[i];
 
+    const parsed = bulkAdmitRowSchema.safeParse(rawRow);
     if (!parsed.success) {
       results.push({
         index: i,
-        studentName: row.studentName || `Row ${i + 1}`,
+        studentName: rawRow.studentName || `Row ${i + 1}`,
         success: false,
-        message: parsed.error.issues.map((e) => e.message).join(", "),
+        message: parsed.error.issues.map((e) => e.message).join("; "),
       });
       continue;
     }
 
-    const {
-      studentName,
-      dateOfBirth,
-      gender,
-      currentGrade,
-      stream,
-      academicYear,
-      parentName,
-      parentEmail,
-      parentPhone,
-    } = parsed.data;
+    const row = parsed.data;
 
     try {
-      const email = parentEmail.toLowerCase();
-      const phone = normalizeKenyanPhone(parentPhone);
+      const email = row.parentEmail.toLowerCase().trim();
+      const phone = normalizeKenyanPhone(row.parentPhone);
 
-      // ── 1. Class Lookup ──
-      // This step converts the human-readable Grade + Stream into the DB class_id
-      const { data: classRecord, error: classErr } = await supabaseAdmin
-        .from("classes")
-        .select("id")
-        .eq("grade", currentGrade)
-        .eq("stream", stream)
-        .eq("academic_year", academicYear)
-        .maybeSingle();
-
-      if (classErr) throw new Error(`Class Query: ${classErr.message}`);
-      if (!classRecord) {
-        throw new Error(`Class not found: ${currentGrade} - ${stream} (${academicYear})`);
+      if (!KENYAN_PHONE_REGEX.test(phone.replace(/\s/g, ""))) {
+        throw new Error("Invalid Kenyan phone number format");
       }
 
-      // ── 2. Parent Handling ──
+      // 1. Find Class
+      const { data: classRecord, error: classErr } = await supabaseAdmin
+        .from("classes")
+        .select("id, grade")
+        .eq("grade", row.currentGrade)
+        .eq("stream", row.stream)
+        .eq("academic_year", row.academicYear)
+        .maybeSingle();
+
+      if (classErr) throw new Error(`Class lookup failed: ${classErr.message}`);
+      if (!classRecord) throw new Error(`Class not found: ${row.currentGrade} - ${row.stream}`);
+
+      // 2. Parent Handling
       let parentId: string;
       let isNewParent = false;
 
       const { data: existingParent } = await supabaseAdmin
         .from("parents")
         .select("id")
-        .eq("email", email)
+        .or(`email.eq.${email},phone_number.eq.${phone}`)
         .maybeSingle();
 
       if (existingParent) {
         parentId = existingParent.id;
       } else {
-        const { data: authData, error: authErr } =
-          await supabaseAdmin.auth.admin.createUser({
-            email,
-            phone,
-            email_confirm: true,
-            user_metadata: { full_name: parentName, role: "parent" },
-          });
+        const { data: authUser, error: authErr } = await supabaseAdmin.auth.admin.createUser({
+          email,
+          phone,
+          email_confirm: true,
+          phone_confirm: true,
+          user_metadata: { full_name: row.parentName, role: "parent" },
+        });
 
-        if (authErr) throw new Error(`Auth: ${authErr.message}`);
-        parentId = authData.user.id;
+        if (authErr) throw new Error(`Auth creation failed: ${authErr.message}`);
+
+        parentId = authUser.user.id;
         isNewParent = true;
+
+        const { error: parentErr } = await supabaseAdmin.from("parents").insert({
+          id: parentId,
+          full_name: row.parentName,
+          email,
+          phone_number: phone,
+          invite_accepted: false,
+          last_invite_sent: new Date().toISOString(),
+        });
+
+        if (parentErr) {
+          await supabaseAdmin.auth.admin.deleteUser(parentId).catch(() => {});
+          throw new Error(`Parent record failed: ${parentErr.message}`);
+        }
       }
 
-      // UPSERT parent details to ensure consistency
-      const { error: pErr } = await supabaseAdmin.from("parents").upsert({
-        id: parentId,
-        full_name: parentName,
-        email: email,
-        phone_number: phone,
-      });
-
-      if (pErr) throw new Error(`Parent Record: ${pErr.message}`);
-
-      // ── 3. Student Creation (Mapping to the found classRecord.id) ──
-      const { data: student, error: sErr } = await supabaseAdmin
+      // 3. Create Student
+      const { data: student, error: studentErr } = await supabaseAdmin
         .from("students")
         .insert({
-          full_name: studentName,
-          date_of_birth: dateOfBirth,
-          gender,
-          current_grade: currentGrade,
-          class_id: classRecord.id, // Linked via lookup
+          full_name: row.studentName,
+          date_of_birth: row.dateOfBirth,
+          gender: row.gender,
+          current_grade: row.currentGrade,
+          class_id: classRecord.id,
+          status: "active",
         })
         .select("id")
         .single();
 
-      if (sErr || !student) throw new Error(`Student: ${sErr?.message ?? "Insert failed"}`);
+      if (studentErr || !student) throw new Error(`Student creation failed: ${studentErr?.message}`);
 
-      // ── 4. Linking Parent & Student ──
-      const { error: linkErr } = await supabaseAdmin
-        .from("student_parents")
-        .insert({
-          student_id: student.id,
-          parent_id: parentId,
-          relationship_type: "guardian",
-          is_primary_contact: true,
-        });
+      // 4. Link Student to Parent
+      const { error: linkErr } = await supabaseAdmin.from("student_parents").insert({
+        student_id: student.id,
+        parent_id: parentId,
+        relationship_type: "guardian",
+        is_primary_contact: true,
+      });
 
       if (linkErr) {
         await supabaseAdmin.from("students").delete().eq("id", student.id);
-        throw new Error(`Linking: ${linkErr.message}`);
+        throw new Error(`Failed to link parent: ${linkErr.message}`);
       }
 
-      // ── 5. Welcome Email & Recovery Link ──
+      // 5. Send Welcome Email (for new parents)
       if (isNewParent) {
         const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
           type: "recovery",
           email,
-          options: {
-            redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
-          },
+          options: { redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm` },
         });
 
         if (linkData?.properties?.action_link) {
           try {
             await sendWelcomeEmail({
               parentEmail: email,
-              parentName,
-              studentName,
-              grade: `${currentGrade} (${stream})`,
+              parentName: row.parentName,
+              studentName: row.studentName,
+              grade: `${row.currentGrade} (${row.stream})`,
               setupLink: linkData.properties.action_link,
             });
-          } catch (e) {
-            console.error(`Email failed for ${studentName}:`, e);
+          } catch (emailErr) {
+            console.error("Welcome email failed:", emailErr);
           }
         }
       }
 
       results.push({
         index: i,
-        studentName,
+        studentName: row.studentName,
         success: true,
-        message: "Success",
+        message: "Student admitted successfully",
         studentId: student.id,
       });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Admission failed";
+      successCount++;
+
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Unknown error occurred";
+
       results.push({
         index: i,
-        studentName: studentName || "Unknown",
+        studentName: row.studentName || `Row ${i + 1}`,
         success: false,
-        message: msg,
+        message,
       });
     }
   }
@@ -212,6 +209,9 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
   revalidatePath("/admin/students");
   revalidatePath("/admin/dashboard");
 
-  const successCount = results.filter((r) => r.success).length;
-  return { results, successCount, failCount: rows.length - successCount };
+  return {
+    results,
+    successCount,
+    failCount: rows.length - successCount,
+  };
 }
