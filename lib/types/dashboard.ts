@@ -143,3 +143,14 @@ export interface ParentNotificationSummary {
   created_at: string;
   is_read: boolean;
 }
+
+// lib/types/dashboard.ts
+export type SortKey = 
+  | "full_name" 
+  | "readable_id" 
+  | "current_grade" 
+  | "gender" 
+  | "date_of_birth" 
+  | "created_at";
+
+export type SortDir = "asc" | "desc";

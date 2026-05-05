@@ -25,16 +25,17 @@ async function requireAdmin() {
 const updateStudentSchema = z.object({
   studentId: z.string().uuid(),
   fullName: z.string().min(2).max(120),
-  gender: z.enum(["Male", "Female"]).optional(),
+  gender: z.enum(["Male", "Female"]).optional().nullable(),
   currentGrade: z.string().min(1, "Grade is required"),
-  currentStream: z.string().min(1, "Stream is required"), // Added for North/South streams
-  upiNumber: z.string().max(30).optional(),
+  currentStream: z.string().optional().nullable(),           // Made optional (column may not exist yet)
+  upiNumber: z.string().max(30).optional().nullable(),
+  dateOfBirth: z.string().optional().nullable(),             // Added support for DOB update
 });
 
 const changeGradeSchema = z.object({
   studentId: z.string().uuid(),
   newGrade: z.string().min(1),
-  newStream: z.string().min(1), // Added for quick stream changes
+  newStream: z.string().optional().nullable(),               // Made optional
 });
 
 const linkParentSchema = z.object({
@@ -69,17 +70,20 @@ export async function updateStudentAction(
   const parsed = updateStudentSchema.safeParse({
     studentId: formData.get("studentId"),
     fullName: formData.get("fullName"),
-    gender: formData.get("gender") || undefined,
+    gender: formData.get("gender") || null,
     currentGrade: formData.get("currentGrade"),
-    currentStream: formData.get("currentStream"),
-    upiNumber: formData.get("upiNumber") || undefined,
+    currentStream: formData.get("currentStream") || null,
+    upiNumber: formData.get("upiNumber") || null,
+    dateOfBirth: formData.get("dateOfBirth") || null,
   });
 
-  if (!parsed.success)
+  if (!parsed.success) {
+    console.error("[updateStudentAction] Validation errors:", parsed.error.issues);
     return {
       success: false,
       message: parsed.error.issues[0]?.message ?? "Validation error",
     };
+  }
 
   const {
     studentId,
@@ -88,7 +92,9 @@ export async function updateStudentAction(
     currentGrade,
     currentStream,
     upiNumber,
+    dateOfBirth,
   } = parsed.data;
+
   const supabase = await createSupabaseServerClient();
 
   const { error } = await supabase
@@ -97,13 +103,14 @@ export async function updateStudentAction(
       full_name: fullName,
       gender: gender ?? null,
       current_grade: currentGrade,
-      current_stream: currentStream, // Updated to handle stream
+      // current_stream: currentStream,   // Removed - column does not exist in your table
       upi_number: upiNumber ?? null,
+      date_of_birth: dateOfBirth ?? undefined,
     })
     .eq("id", studentId);
 
   if (error) {
-    console.error("[updateStudentAction]", error.message);
+    console.error("[updateStudentAction] Database error:", error.message);
     return {
       success: false,
       message: "Failed to update student: " + error.message,
@@ -126,21 +133,26 @@ export async function changeStudentGradeAction(
   const parsed = changeGradeSchema.safeParse({
     studentId: formData.get("studentId"),
     newGrade: formData.get("newGrade"),
-    newStream: formData.get("newStream"),
+    newStream: formData.get("newStream") || null,
   });
 
-  if (!parsed.success) return { success: false, message: "Invalid data" };
+  if (!parsed.success) {
+    return { success: false, message: "Invalid data" };
+  }
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("students")
     .update({
       current_grade: parsed.data.newGrade,
-      current_stream: parsed.data.newStream,
+      // current_stream removed - column does not exist
     })
     .eq("id", parsed.data.studentId);
 
-  if (error) return { success: false, message: error.message };
+  if (error) {
+    console.error("[changeStudentGradeAction]", error.message);
+    return { success: false, message: error.message };
+  }
 
   revalidatePath("/admin/students");
   revalidatePath("/admin/dashboard");
