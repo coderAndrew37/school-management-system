@@ -78,6 +78,7 @@ export async function proxy(request: NextRequest) {
       "/auth/confirm",
       "/auth/reset-password",
       "/auth/forgot-password",
+        "/auth/choose-role",
     ].some((p) => pathname.startsWith(p));
 
     if (!bypass) {

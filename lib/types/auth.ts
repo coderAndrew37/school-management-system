@@ -1,8 +1,9 @@
-export type UserRole = "admin" | "teacher" | "parent";
+export type UserRole = "admin" | "teacher" | "parent" ;
 
 export interface Profile {
   id: string;
   role: UserRole;
+  roles: UserRole[] | null;       // ← add this
   full_name: string | null;
   avatar_url: string | null;
   teacher_id: string | null;
@@ -21,6 +22,7 @@ export const ROLE_ROUTES: Record<UserRole, string> = {
   admin: "/admin/dashboard",
   teacher: "/teacher",
   parent: "/parent",
+
 };
 
 export const PROTECTED_PREFIXES: Record<string, UserRole[]> = {
