@@ -29,10 +29,10 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
   const [summary, setSummary] = useState<{ success: number; failed: number } | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  // ── Single source of truth for row data ───────────────────────────────
   const firstGrade = classes[0]?.grade ?? "Grade 1";
   const firstStream = classes.find((c) => c.grade === firstGrade)?.stream ?? "Main";
 
+  // ── Single source of truth ──────────────────────────────────────────────
   const [studentRows, setStudentRows] = useState<BulkAdmitRow[]>([
     {
       studentName: "",
@@ -41,6 +41,9 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
       currentGrade: firstGrade,
       stream: firstStream,
       academicYear: 2026,
+      relationshipType: "guardian",
+      parentMode: "new",
+      existingParentId: null,
       parentName: "",
       parentEmail: "",
       parentPhone: "",
@@ -51,23 +54,17 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
     { fullName: "", email: "", phone: "", tscNumber: "" },
   ]);
 
-  // ── CSV Handling ───────────────────────────────────────────────────────
+  // ── CSV ─────────────────────────────────────────────────────────────────
   const handleFileUpload = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
       if (mode === "students") {
         const parsed = parseStudentCSV(text);
-        if (parsed.length > 0) {
-          setStudentRows(parsed);
-          toast.success(`Loaded ${parsed.length} student records`);
-        }
+        if (parsed.length > 0) { setStudentRows(parsed); toast.success(`Loaded ${parsed.length} student records`); }
       } else {
         const parsed = parseTeacherCSV(text);
-        if (parsed.length > 0) {
-          setTeacherRows(parsed);
-          toast.success(`Loaded ${parsed.length} teacher records`);
-        }
+        if (parsed.length > 0) { setTeacherRows(parsed); toast.success(`Loaded ${parsed.length} teacher records`); }
       }
     };
     reader.readAsText(file);
@@ -84,14 +81,14 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
     URL.revokeObjectURL(url);
   };
 
-  // ── Submit — reads directly from shared state ──────────────────────────
+  // ── Submit ───────────────────────────────────────────────────────────────
   const handleSubmit = () => {
     setResults(null);
     setSummary(null);
 
     startTransition(async () => {
       if (mode === "students") {
-        // Filter rows that have at least a student name
+        // Only submit rows that have a student name
         const validRows = studentRows.filter((r) => r.studentName.trim());
         if (validRows.length === 0) {
           toast.error("Please fill in at least one student name");
@@ -103,11 +100,9 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
         setSummary({ success: res.successCount, failed: res.failCount });
 
         if (res.failCount === 0) {
-          toast.success(`Successfully admitted ${res.successCount} students!`);
+          toast.success(`Successfully admitted ${res.successCount} student${res.successCount > 1 ? "s" : ""}!`);
         } else {
-          toast(`Admitted ${res.successCount}, ${res.failCount} failed`, {
-            description: "Check the results panel below",
-          });
+          toast(`Admitted ${res.successCount}, ${res.failCount} failed`, { description: "See results below for details" });
         }
       } else {
         const validRows = teacherRows.filter((r) => r.fullName.trim() && r.email.trim());
@@ -121,7 +116,7 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
         setSummary({ success: res.successCount, failed: res.failCount });
 
         if (res.failCount === 0) {
-          toast.success(`Successfully added ${res.successCount} teachers!`);
+          toast.success(`Successfully added ${res.successCount} teacher${res.successCount > 1 ? "s" : ""}!`);
         } else {
           toast(`Added ${res.successCount}, ${res.failCount} failed`);
         }
@@ -142,40 +137,36 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
           </Link>
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Bulk Admission</h1>
-            <p className="text-white/50">Import multiple records efficiently</p>
+            <p className="text-white/40 text-sm mt-0.5">Import multiple students and staff efficiently</p>
           </div>
         </div>
 
         {/* Mode Toggle */}
-        <div className="inline-flex bg-white/5 border border-white/10 rounded-2xl p-1 mb-8">
+        <div className="inline-flex bg-white/[0.04] border border-white/[0.07] rounded-2xl p-1 mb-8">
           <button
             onClick={() => setMode("students")}
-            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all ${
-              mode === "students" ? "bg-amber-400 text-black" : "text-white/70 hover:text-white"
+            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all text-sm ${
+              mode === "students" ? "bg-amber-400 text-[#0c0f1a]" : "text-white/50 hover:text-white"
             }`}
           >
-            <GraduationCap className="h-5 w-5" />
+            <GraduationCap className="h-4.5 w-4.5" />
             Students
           </button>
           <button
             onClick={() => setMode("teachers")}
-            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all ${
-              mode === "teachers" ? "bg-amber-400 text-black" : "text-white/70 hover:text-white"
+            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all text-sm ${
+              mode === "teachers" ? "bg-amber-400 text-[#0c0f1a]" : "text-white/50 hover:text-white"
             }`}
           >
-            <Users className="h-5 w-5" />
+            <Users className="h-4.5 w-4.5" />
             Teachers
           </button>
         </div>
 
-        {/* Upload Zone */}
-        <UploadZone
-          mode={mode}
-          onFileUpload={handleFileUpload}
-          onDownloadTemplate={downloadTemplate}
-        />
+        {/* CSV Upload */}
+        <UploadZone mode={mode} onFileUpload={handleFileUpload} onDownloadTemplate={downloadTemplate} />
 
-        {/* Editor — receives rows + setRows so it's fully controlled */}
+        {/* Editor */}
         <div className="mt-8">
           {mode === "students" ? (
             <BulkAdmitStudentEditor
@@ -197,7 +188,9 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
 
         {/* Results */}
         {results && summary && (
-          <BulkResultsPanel results={results} summary={summary} />
+          <div className="mt-8">
+            <BulkResultsPanel results={results} summary={summary} />
+          </div>
         )}
       </div>
     </div>

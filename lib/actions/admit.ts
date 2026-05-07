@@ -7,8 +7,8 @@ import {
   type AdmissionActionResult,
 } from "../schemas/admission";
 import { supabaseAdmin } from "../supabase/admin";
+import { normalizeKenyanPhone } from "../utils/phone";
 import { getAuthConfirmUrl } from "../utils/site-url";
-import { normalizeKenyanPhone, KENYAN_PHONE_REGEX } from "../utils/phone";
 
 // ── 1. Types & Row Interfaces ─────────────────────────────────────────────────
 
