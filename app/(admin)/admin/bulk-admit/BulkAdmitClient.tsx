@@ -136,7 +136,7 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
             <ChevronLeft className="h-5 w-5" />
           </Link>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Bulk Admission</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-white">Bulk Admission</h1>
             <p className="text-white/40 text-sm mt-0.5">Import multiple students and staff efficiently</p>
           </div>
         </div>

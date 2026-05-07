@@ -97,7 +97,7 @@ export function BulkAdmitStudentEditor({ classes, rows, setRows, isPending, onSu
         })
       );
     },
-    [streamsFor]
+    [streamsFor, setRows]
   );
 
   const updateMeta = useCallback((i: number, patch: Partial<RowMeta>) => {
@@ -123,7 +123,7 @@ export function BulkAdmitStudentEditor({ classes, rows, setRows, isPending, onSu
         })
       );
     },
-    [updateMeta]
+    [updateMeta, setRows]
   );
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -229,10 +229,7 @@ export function BulkAdmitStudentEditor({ classes, rows, setRows, isPending, onSu
           <div
             className="h-0.5 rounded-full bg-white/[0.05] overflow-hidden"
             role="progressbar"
-            aria-valuenow={completedCount}
-            aria-valuemin={0}
-            aria-valuemax={rows.length}
-            aria-label={`${completedCount} of ${rows.length} students complete`}
+           aria-label={`${completedCount} of ${rows.length} students complete`}
           >
             <div
               className="h-full rounded-full bg-gradient-to-r from-amber-400 to-amber-300 transition-all duration-500"
@@ -253,7 +250,6 @@ export function BulkAdmitStudentEditor({ classes, rows, setRows, isPending, onSu
           type="button"
           onClick={onSubmit}
           disabled={isPending || completedCount === 0}
-          aria-disabled={isPending || completedCount === 0 ? "true" : "false"}
           aria-label={
             isPending
               ? "Processing admission"
