@@ -1,105 +1,51 @@
 "use client";
 
-/**
- * LoginForm.tsx
- *
- * School portal login. Three roles: Admin, Teacher, Parent.
- * - Role pills switch which portal context is shown (UI only — server validates role)
- * - loginAction fetches the real role from profiles and redirects accordingly
- * - Parents who haven't completed setup (invite_accepted=false) get a helpful message
- * - Demo quick-access buttons for testing (remove in production)
- */
-
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useTransition, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import {
-  Loader2,
-  GraduationCap,
-  ShieldCheck,
-  BookOpen,
-  Users,
-  Eye,
-  EyeOff,
-} from "lucide-react";
+import { Loader2, GraduationCap, ShieldCheck, BookOpen, Users, Eye, EyeOff } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { loginSchema, type LoginFormValues } from "@/lib/types/auth";
 import Link from "next/link";
 import { loginAction } from "@/lib/actions/auth";
 import { AuthLayout } from "./AuthLayout";
-import { AuthFragmentForwarder } from "./AuthFragmentForwader";
-
-// ── Types ──────────────────────────────────────────────────────────────────────
-
-type Role = "admin" | "teacher" | "parent";
 
 interface LoginFormProps {
   redirectTo?: string;
   errorParam?: string;
 }
 
-// ── Role config ────────────────────────────────────────────────────────────────
-
-const ROLES: {
-  id: Role;
-  label: string;
-  description: string;
-  icon: React.ReactNode;
-  accent: string;
-  inputRing: string;
-  btnCls: string;
-}[] = [
+const PORTAL_INFO = [
   {
-    id: "admin",
-    label: "Administrator",
-    description: "School management & reports",
-    icon: <ShieldCheck className="h-4 w-4" />,
-    accent: "border-amber-500 bg-amber-500 text-white",
-    inputRing: "focus:border-amber-400 focus:ring-amber-100",
-    btnCls: "bg-amber-500 hover:bg-amber-600 shadow-amber-200",
+    icon: ShieldCheck,
+    label: "Administrators",
+    description: "Management, Reports & Analytics",
+    color: "text-amber-600",
   },
   {
-    id: "teacher",
-    label: "Teacher",
-    description: "CBC assessments & timetable",
-    icon: <BookOpen className="h-4 w-4" />,
-    accent: "border-emerald-600 bg-emerald-600 text-white",
-    inputRing: "focus:border-emerald-400 focus:ring-emerald-100",
-    btnCls: "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200",
+    icon: BookOpen,
+    label: "Teachers",
+    description: "Assessments, Timetable & CBC",
+    color: "text-emerald-600",
   },
   {
-    id: "parent",
-    label: "Parent / Guardian",
-    description: "Child results & communication",
-    icon: <Users className="h-4 w-4" />,
-    accent: "border-sky-600 bg-sky-600 text-white",
-    inputRing: "focus:border-sky-400 focus:ring-sky-100",
-    btnCls: "bg-sky-600 hover:bg-sky-700 shadow-sky-200",
+    icon: Users,
+    label: "Parents",
+    description: "Progress & Communication",
+    color: "text-sky-600",
   },
 ];
 
-// Demo credentials — remove in production
-const DEMO_EMAILS: Record<Role, string> = {
-  admin: "admin@kibali.ac.ke",
-  teacher: "j.kamau@kibali.ac.ke",
-  parent: "parent@gmail.com",
-};
-
-// ── Component ──────────────────────────────────────────────────────────────────
-
 export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
-  const [role, setRole] = useState<Role>("admin");
   const [showPassword, setShowPassword] = useState(false);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
-  const activeRole = ROLES.find((r) => r.id === role)!;
-
   const {
     register,
     handleSubmit,
-    setValue,
     setError,
     formState: { errors },
   } = useForm<LoginFormValues>({
@@ -107,6 +53,7 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
     defaultValues: { email: "", password: "" },
   });
 
+  // Handle URL errors
   if (errorParam) {
     const msg: Record<string, string> = {
       missing_code: "The sign-in link was invalid or expired.",
@@ -115,26 +62,25 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
     toast.error(msg[errorParam] ?? "An error occurred.", { id: "url-error" });
   }
 
-  const handleRoleSwitch = (r: Role) => {
-    setRole(r);
-    setValue("email", "");
-    setValue("password", "");
-    setShowPassword(false);
-  };
-
   const doLogin = (email: string, password: string) => {
     startTransition(async () => {
       const fd = new FormData();
       fd.append("email", email);
       fd.append("password", password);
+
       const result = await loginAction(fd);
 
       if (!result.success) {
         setError("root", { message: result.message });
+        toast.error(result.message);
         return;
       }
 
-      toast.success("Welcome back!", { duration: 2000 });
+      toast.success("Welcome back! Redirecting...", { 
+        duration: 1500,
+        position: "top-center"
+      });
+
       router.push(redirectTo ?? result.redirectTo ?? "/admin/dashboard");
       router.refresh();
     });
@@ -144,182 +90,143 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
     doLogin(values.email, values.password);
   };
 
-  const baseInput = [
-    "w-full px-4 py-3 border-2 border-slate-200 rounded-xl text-sm text-slate-800",
-    "outline-none transition-all duration-200 bg-slate-50 placeholder:text-slate-400",
-    "focus:bg-white focus:ring-2",
-    activeRole.inputRing,
-  ].join(" ");
-
   return (
     <AuthLayout>
-      {/* Detects auth token fragments landing on /login and forwards to /auth/confirm */}
-      <AuthFragmentForwarder />
-
-      {/* ── Brand ────────────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 mb-7">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 border border-amber-200">
-          <GraduationCap className="h-5 w-5 text-amber-600" />
-        </div>
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-widest text-amber-600/80">
-            Kibali Academy
-          </p>
-          <h1 className="text-lg font-extrabold text-slate-900 leading-tight">
-            School Portal
-          </h1>
-        </div>
-      </div>
-
-      {/* ── Role selector ────────────────────────────────────────────────────── */}
-      <div className="mb-6">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-          Sign in as
-        </p>
-        <div className="grid grid-cols-3 gap-2">
-          {ROLES.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => handleRoleSwitch(r.id)}
-              className={[
-                "flex flex-col items-center gap-1.5 px-2 py-3 rounded-xl border-2 text-center transition-all duration-200 text-xs font-semibold",
-                role === r.id
-                  ? r.accent
-                  : "border-slate-200 text-slate-500 bg-white hover:border-slate-300 hover:text-slate-700",
-              ].join(" ")}
-            >
-              {r.icon}
-              <span className="leading-tight">{r.label}</span>
-            </button>
-          ))}
-        </div>
-        <p className="mt-2 text-center text-[11px] text-slate-400">
-          {activeRole.description}
-        </p>
-      </div>
-
-      {/* ── Form ─────────────────────────────────────────────────────────────── */}
-      <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
-        {errors.root && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
-            {errors.root.message}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+      >
+        {/* Mini Brand */}
+        <div className="flex items-center gap-3 mb-10">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 shadow-lg">
+            <GraduationCap className="h-6 w-6 text-white" />
           </div>
-        )}
-
-        <div className="space-y-1.5">
-          <label className="text-xs font-bold text-slate-600 uppercase tracking-wide">
-            Email Address
-          </label>
-          <input
-            type="email"
-            autoComplete="email"
-            placeholder="Enter your email address"
-            className={baseInput}
-            disabled={isPending}
-            {...register("email")}
-          />
-          {errors.email && (
-            <p className="text-xs text-red-500">{errors.email.message}</p>
-          )}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[2px] text-amber-700">KIBALI ACADEMY</p>
+            <h1 className="text-xl font-semibold text-slate-900">School Portal</h1>
+          </div>
         </div>
 
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-bold text-slate-600 uppercase tracking-wide">
-              Password
-            </label>
-            <Link
-              href="/auth/forgot-password"
-              className="text-xs text-amber-600 hover:text-amber-700 font-semibold transition-colors"
-            >
-              Forgot password?
-            </Link>
-          </div>
-
-          <div className="relative">
-            <input
-              type={showPassword ? "text" : "password"}
-              autoComplete="current-password"
-              placeholder="Enter your password"
-              className={`${baseInput} pr-11`}
-              disabled={isPending}
-              {...register("password")}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword((v) => !v)}
-              disabled={isPending}
-              aria-label={showPassword ? "Hide password" : "Show password"}
-              className="absolute right-3 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:text-slate-600 hover:bg-slate-100 disabled:opacity-40"
-            >
-              {showPassword ? (
-                <EyeOff className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
-            </button>
-          </div>
-
-          {errors.password && (
-            <p className="text-xs text-red-500">{errors.password.message}</p>
-          )}
+        {/* Header */}
+        <div className="mb-8">
+          <h2 className="text-3xl font-semibold tracking-tight text-slate-900">Welcome back</h2>
+          <p className="text-slate-600 mt-2">Sign in to access your dashboard</p>
         </div>
 
-        {role === "parent" && (
-          <div className="rounded-xl bg-sky-50 border border-sky-100 px-4 py-3 text-xs text-sky-700 leading-relaxed">
-            <strong>First time?</strong> Check your email for a setup link from
-            Kibali Academy. If you can't find it, visit the school office and
-            ask staff to resend your invite.
-          </div>
-        )}
-
-        <button
-          type="submit"
-          disabled={isPending}
-          className={[
-            "w-full py-3 rounded-xl text-sm font-bold text-white transition-all duration-200 mt-1",
-            "disabled:opacity-60 disabled:cursor-not-allowed",
-            "flex items-center justify-center gap-2 shadow-sm",
-            activeRole.btnCls,
-          ].join(" ")}
-        >
-          {isPending ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Signing in…
-            </>
-          ) : (
-            `Sign in to ${activeRole.label} Portal →`
-          )}
-        </button>
-      </form>
-
-      {/* ── Dev quick-access — REMOVE IN PRODUCTION ─────────────────────────── */}
-      {process.env.NODE_ENV === "development" && (
-        <div className="mt-6 pt-5 border-t border-dashed border-slate-200">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3 text-center">
-            Dev — Quick Demo Access
-          </p>
-          <div className="flex flex-col gap-2">
-            {ROLES.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => doLogin(DEMO_EMAILS[r.id], "demo1234")}
-                disabled={isPending}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50 text-left"
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+          <AnimatePresence mode="wait">
+            {errors.root && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3.5 text-sm text-red-700 flex items-start gap-3"
               >
-                <span>{r.icon}</span>
-                <span className="font-semibold">{r.label}</span>
-                <span className="ml-auto font-mono text-slate-400">
-                  {DEMO_EMAILS[r.id]}
-                </span>
+                ⚠️ {errors.root.message}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Email Field */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-slate-600">Email Address</label>
+            <div className="relative">
+              <input
+                type="email"
+                autoComplete="email"
+                placeholder="you@school.ac.ke"
+                disabled={isPending}
+                {...register("email")}
+                className="w-full px-5 py-4 bg-white border border-slate-200 rounded-2xl text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-100 transition-all duration-300"
+              />
+            </div>
+            {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email.message}</p>}
+          </div>
+
+          {/* Password Field */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-slate-600">Password</label>
+              <Link
+                href="/auth/forgot-password"
+                className="text-sm text-amber-700 hover:text-amber-800 transition-colors font-medium"
+              >
+                Forgot password?
+              </Link>
+            </div>
+
+            <div className="relative group">
+              <input
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                placeholder="••••••••"
+                disabled={isPending}
+                {...register("password")}
+                className="w-full px-5 py-4 bg-white border border-slate-200 rounded-2xl text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-100 transition-all duration-300 pr-12"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                disabled={isPending}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
               </button>
+            </div>
+            {errors.password && <p className="text-xs text-red-500 mt-1">{errors.password.message}</p>}
+          </div>
+
+          {/* Submit Button */}
+          <motion.button
+            whileHover={{ scale: 1.01 }}
+            whileTap={{ scale: 0.985 }}
+            type="submit"
+            disabled={isPending}
+            className="w-full py-4 rounded-2xl text-base font-semibold text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 disabled:opacity-70 disabled:cursor-not-allowed shadow-lg shadow-amber-500/30 flex items-center justify-center gap-3 transition-all duration-300"
+          >
+            {isPending ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Signing you in...
+              </>
+            ) : (
+              "Sign In Securely"
+            )}
+          </motion.button>
+        </form>
+
+        {/* Portal Access Info */}
+        <div className="mt-10 pt-8 border-t border-slate-100">
+          <p className="text-xs uppercase tracking-widest text-slate-400 font-semibold mb-4">
+            Choose your portal
+          </p>
+
+          <div className="space-y-3">
+            {PORTAL_INFO.map(({ icon: Icon, label, description, color }, index) => (
+              <motion.div
+                key={label}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.1 * index }}
+                className="group flex items-center gap-4 px-5 py-4 rounded-2xl border border-slate-100 hover:border-slate-200 bg-slate-50/70 hover:bg-white transition-all duration-300 cursor-default"
+              >
+                <div className="w-9 h-9 rounded-xl bg-white shadow flex items-center justify-center">
+                  <Icon className={`h-5 w-5 ${color}`} />
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-800 text-[15px]">{label}</p>
+                  <p className="text-xs text-slate-500">{description}</p>
+                </div>
+              </motion.div>
             ))}
           </div>
         </div>
-      )}
+
+        <p className="text-center text-xs text-slate-400 mt-8">
+          Secured with enterprise-grade encryption
+        </p>
+      </motion.div>
     </AuthLayout>
   );
 }
