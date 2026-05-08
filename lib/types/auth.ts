@@ -1,9 +1,9 @@
-export type UserRole = "admin" | "teacher" | "parent" ;
+export type UserRole = "admin" | "teacher" | "parent";
 
 export interface Profile {
   id: string;
   role: UserRole;
-  roles: UserRole[] | null;       // ← add this
+  roles: UserRole[] | null;
   full_name: string | null;
   avatar_url: string | null;
   teacher_id: string | null;
@@ -17,12 +17,14 @@ export interface AuthUser {
   profile: Profile;
 }
 
-// Route access map — which roles can access which route prefixes
+// ── Route Constants ─────────────────────────────────────────────────────────
+
+export const CHOOSE_ROLE_ROUTE = "/auth/choose-role";
+
 export const ROLE_ROUTES: Record<UserRole, string> = {
   admin: "/admin/dashboard",
   teacher: "/teacher",
   parent: "/parent",
-
 };
 
 export const PROTECTED_PREFIXES: Record<string, UserRole[]> = {

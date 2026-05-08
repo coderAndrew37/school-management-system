@@ -1,12 +1,13 @@
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { Profile } from "@/lib/types/auth";
+import type { Profile, UserRole } from "@/lib/types/auth";
 import {
   forgotPasswordSchema,
   loginSchema,
   resetPasswordSchema,
   ROLE_ROUTES,
+  CHOOSE_ROLE_ROUTE,
 } from "@/lib/types/auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -15,23 +16,20 @@ import { resolveAllRoles, resolvePrimaryRole } from "./auth-utils";
 import { supabaseAdmin } from "../supabase/admin";
 import { getAuthConfirmUrl } from "@/lib/utils/site-url";
 
-// Simple in-memory rate limiter (good enough for a school system)
-// For production with high traffic, replace with Upstash Redis or similar
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
-function checkRateLimit(key: string, limit: number = 5, windowMs: number = 15 * 60 * 1000): boolean {
+function checkRateLimit(
+  key: string,
+  limit: number = 5,
+  windowMs: number = 15 * 60 * 1000,
+): boolean {
   const now = Date.now();
   const record = rateLimitMap.get(key);
-
   if (!record || now > record.resetTime) {
     rateLimitMap.set(key, { count: 1, resetTime: now + windowMs });
     return true;
   }
-
-  if (record.count >= limit) {
-    return false;
-  }
-
+  if (record.count >= limit) return false;
   record.count++;
   return true;
 }
@@ -40,16 +38,14 @@ export interface AuthActionResult {
   success: boolean;
   message: string;
   redirectTo?: string;
+  roles?: UserRole[]; // only present when the user holds multiple roles
 }
 
 // ── Login ─────────────────────────────────────────────────────────────────────
 
-export async function loginAction(
-  formData: FormData,
-): Promise<AuthActionResult> {
+export async function loginAction(formData: FormData): Promise<AuthActionResult> {
   const email = (formData.get("email") as string)?.toLowerCase().trim();
 
-  // Rate limiting
   if (!checkRateLimit(`login:${email}`, 6, 10 * 60 * 1000)) {
     return {
       success: false,
@@ -57,12 +53,11 @@ export async function loginAction(
     };
   }
 
-  const raw = {
+  const parsed = loginSchema.safeParse({
     email: formData.get("email"),
     password: formData.get("password"),
-  };
+  });
 
-  const parsed = loginSchema.safeParse(raw);
   if (!parsed.success) {
     return {
       success: false,
@@ -80,13 +75,11 @@ export async function loginAction(
   if (error) {
     if (error.message.toLowerCase().includes("invalid login"))
       return { success: false, message: "Incorrect email or password." };
-
     if (error.message.toLowerCase().includes("email not confirmed"))
       return {
         success: false,
         message: "Please verify your email address before signing in.",
       };
-
     return { success: false, message: "Sign-in failed. Please try again." };
   }
 
@@ -94,9 +87,7 @@ export async function loginAction(
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
-    return { success: false, message: "Session error. Please try again." };
-  }
+  if (!user) return { success: false, message: "Session error. Please try again." };
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -104,17 +95,20 @@ export async function loginAction(
     .eq("id", user.id)
     .single();
 
+  // Derive roles — this is the source of truth for all routing below
+  const allRoles = resolveAllRoles(profile);
   const primaryRole = resolvePrimaryRole(profile);
 
-  // Block parents who haven't completed setup
-  if (primaryRole === "parent") {
+  // Block parents (including multi-role users who are also parents) who
+  // haven't completed their account setup yet
+  if (allRoles.includes("parent")) {
     const { data: parentRow } = await supabaseAdmin
       .from("parents")
       .select("invite_accepted")
       .eq("id", user.id)
       .maybeSingle();
 
-    if (parentRow && parentRow.invite_accepted === false) {
+    if (parentRow?.invite_accepted === false) {
       return {
         success: false,
         message:
@@ -124,6 +118,17 @@ export async function loginAction(
   }
 
   revalidatePath("/", "layout");
+
+  // Multi-role: hand off to the portal picker
+  if (allRoles.length > 1) {
+    return {
+      success: true,
+      message: "Signed in successfully.",
+      redirectTo: CHOOSE_ROLE_ROUTE,
+      roles: allRoles,
+    };
+  }
+
   return {
     success: true,
     message: "Signed in successfully.",
@@ -145,8 +150,7 @@ export async function logoutAction(): Promise<void> {
 export async function forgotPasswordAction(
   formData: FormData,
 ): Promise<AuthActionResult> {
-  const raw = { email: formData.get("email") };
-  const parsed = forgotPasswordSchema.safeParse(raw);
+  const parsed = forgotPasswordSchema.safeParse({ email: formData.get("email") });
 
   if (!parsed.success) {
     return {
@@ -157,23 +161,21 @@ export async function forgotPasswordAction(
 
   const email = parsed.data.email.toLowerCase().trim();
 
-  // Rate limiting
   if (!checkRateLimit(`forgot:${email}`, 3, 15 * 60 * 1000)) {
     return {
-      success: true, // Always return success for security
-      message: "If an account with that email exists, you will receive a reset link within a few minutes.",
+      success: true,
+      message:
+        "If an account with that email exists, you will receive a reset link within a few minutes.",
     };
   }
 
-  // Use "recovery" type (more semantic for password reset)
   const { data: linkData, error: linkError } =
     await supabaseAdmin.auth.admin.generateLink({
-      type: "recovery",                    // ← Changed from magiclink
+      type: "recovery",
       email,
       options: { redirectTo: getAuthConfirmUrl() },
     });
 
-  // Always respond identically — never reveal whether the address exists.
   const SAFE_RESPONSE: AuthActionResult = {
     success: true,
     message:
@@ -186,7 +188,6 @@ export async function forgotPasswordAction(
     return SAFE_RESPONSE;
   }
 
-  // Fetch display name for personalised email
   let recipientName = email.split("@")[0] ?? "there";
   try {
     const { data: profileRow } = await supabaseAdmin
@@ -194,7 +195,6 @@ export async function forgotPasswordAction(
       .select("full_name")
       .eq("id", linkData.user.id)
       .maybeSingle();
-
     if (profileRow?.full_name) recipientName = profileRow.full_name;
   } catch {
     /* non-blocking */
@@ -215,12 +215,11 @@ export async function forgotPasswordAction(
 export async function resetPasswordAction(
   formData: FormData,
 ): Promise<AuthActionResult> {
-  const raw = {
+  const parsed = resetPasswordSchema.safeParse({
     password: formData.get("password"),
     confirmPassword: formData.get("confirmPassword"),
-  };
+  });
 
-  const parsed = resetPasswordSchema.safeParse(raw);
   if (!parsed.success) {
     return {
       success: false,
@@ -252,14 +251,13 @@ export async function resetPasswordAction(
         success: false,
         message: "New password must be different from your current password.",
       };
-
     return {
       success: false,
-      message: "Failed to update password. The setup link may have expired — please contact the school office.",
+      message:
+        "Failed to update password. The setup link may have expired — please contact the school office.",
     };
   }
 
-  // Mark invite as accepted for parents
   await supabaseAdmin
     .from("parents")
     .update({ invite_accepted: true })
@@ -272,14 +270,13 @@ export async function resetPasswordAction(
     .single();
 
   const primaryRole = resolvePrimaryRole(profile);
-  const destination = ROLE_ROUTES[primaryRole] ?? "/parent";
 
   revalidatePath("/", "layout");
 
   return {
     success: true,
     message: "Password set successfully! Welcome to Kibali Academy.",
-    redirectTo: destination,
+    redirectTo: ROLE_ROUTES[primaryRole] ?? "/parent",
   };
 }
 

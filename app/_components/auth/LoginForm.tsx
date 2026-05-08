@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, GraduationCap, ShieldCheck, BookOpen, Users, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { loginSchema, type LoginFormValues } from "@/lib/types/auth";
+import { loginSchema, type LoginFormValues, CHOOSE_ROLE_ROUTE } from "@/lib/types/auth";
 import Link from "next/link";
 import { loginAction } from "@/lib/actions/auth";
 import { AuthLayout } from "./AuthLayout";
@@ -53,7 +53,6 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
     defaultValues: { email: "", password: "" },
   });
 
-  // Handle URL errors
   if (errorParam) {
     const msg: Record<string, string> = {
       missing_code: "The sign-in link was invalid or expired.",
@@ -62,33 +61,38 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
     toast.error(msg[errorParam] ?? "An error occurred.", { id: "url-error" });
   }
 
-  const doLogin = (email: string, password: string) => {
-    startTransition(async () => {
-      const fd = new FormData();
-      fd.append("email", email);
-      fd.append("password", password);
+  
+const doLogin = (email: string, password: string) => {
+  startTransition(async () => {
+    const fd = new FormData();
+    fd.append("email", email);
+    fd.append("password", password);
 
-      const result = await loginAction(fd);
+    const result = await loginAction(fd);
 
-      if (!result.success) {
-        setError("root", { message: result.message });
-        toast.error(result.message);
-        return;
-      }
+    if (!result.success) {
+      setError("root", { message: result.message });
+      toast.error(result.message);
+      return;
+    }
 
-      toast.success("Welcome back! Redirecting...", { 
-        duration: 1500,
-        position: "top-center"
-      });
+    toast.success("Signed in successfully!", { duration: 1500 });
 
+    if (result.roles && result.roles.length > 1) {
+      const params = new URLSearchParams();
+      params.set("roles", result.roles.join(","));
+      if (redirectTo) params.set("redirectTo", redirectTo);
+
+      router.push(`${CHOOSE_ROLE_ROUTE}?${params.toString()}`);
+    } else {
       router.push(redirectTo ?? result.redirectTo ?? "/admin/dashboard");
-      router.refresh();
-    });
-  };
+    }
 
-  const onSubmit = (values: LoginFormValues) => {
-    doLogin(values.email, values.password);
-  };
+    router.refresh();
+  });
+};
+
+  const onSubmit = (values: LoginFormValues) => doLogin(values.email, values.password);
 
   return (
     <AuthLayout>
@@ -97,13 +101,15 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: "easeOut" }}
       >
-        {/* Mini Brand */}
+        {/* Brand */}
         <div className="flex items-center gap-3 mb-10">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 shadow-lg">
             <GraduationCap className="h-6 w-6 text-white" />
           </div>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[2px] text-amber-700">KIBALI ACADEMY</p>
+            <p className="text-xs font-semibold uppercase tracking-[2px] text-amber-700">
+              Kibali Academy
+            </p>
             <h1 className="text-xl font-semibold text-slate-900">School Portal</h1>
           </div>
         </div>
@@ -128,23 +134,23 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
             )}
           </AnimatePresence>
 
-          {/* Email Field */}
+          {/* Email */}
           <div className="space-y-2">
             <label className="text-sm font-medium text-slate-600">Email Address</label>
-            <div className="relative">
-              <input
-                type="email"
-                autoComplete="email"
-                placeholder="you@school.ac.ke"
-                disabled={isPending}
-                {...register("email")}
-                className="w-full px-5 py-4 bg-white border border-slate-200 rounded-2xl text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-100 transition-all duration-300"
-              />
-            </div>
-            {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email.message}</p>}
+            <input
+              type="email"
+              autoComplete="email"
+              placeholder="you@school.ac.ke"
+              disabled={isPending}
+              {...register("email")}
+              className="w-full px-5 py-4 bg-white border border-slate-200 rounded-2xl text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-100 transition-all duration-300"
+            />
+            {errors.email && (
+              <p className="text-xs text-red-500 mt-1">{errors.email.message}</p>
+            )}
           </div>
 
-          {/* Password Field */}
+          {/* Password */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium text-slate-600">Password</label>
@@ -155,8 +161,7 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
                 Forgot password?
               </Link>
             </div>
-
-            <div className="relative group">
+            <div className="relative">
               <input
                 type={showPassword ? "text" : "password"}
                 autoComplete="current-password"
@@ -169,15 +174,18 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
                 disabled={isPending}
+                aria-label={showPassword ? "Hide password" : "Show password"}
                 className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
               >
                 {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
               </button>
             </div>
-            {errors.password && <p className="text-xs text-red-500 mt-1">{errors.password.message}</p>}
+            {errors.password && (
+              <p className="text-xs text-red-500 mt-1">{errors.password.message}</p>
+            )}
           </div>
 
-          {/* Submit Button */}
+          {/* Submit */}
           <motion.button
             whileHover={{ scale: 1.01 }}
             whileTap={{ scale: 0.985 }}
@@ -187,8 +195,7 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
           >
             {isPending ? (
               <>
-                <Loader2 className="h-5 w-5 animate-spin" />
-                Signing you in...
+                <Loader2 className="h-5 w-5 animate-spin" /> Signing you in...
               </>
             ) : (
               "Sign In Securely"
@@ -196,12 +203,11 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
           </motion.button>
         </form>
 
-        {/* Portal Access Info */}
+        {/* Portal info */}
         <div className="mt-10 pt-8 border-t border-slate-100">
           <p className="text-xs uppercase tracking-widest text-slate-400 font-semibold mb-4">
-            Choose your portal
+            Portal access
           </p>
-
           <div className="space-y-3">
             {PORTAL_INFO.map(({ icon: Icon, label, description, color }, index) => (
               <motion.div
@@ -209,9 +215,9 @@ export function LoginForm({ redirectTo, errorParam }: LoginFormProps) {
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.1 * index }}
-                className="group flex items-center gap-4 px-5 py-4 rounded-2xl border border-slate-100 hover:border-slate-200 bg-slate-50/70 hover:bg-white transition-all duration-300 cursor-default"
+                className="flex items-center gap-4 px-5 py-4 rounded-2xl border border-slate-100 hover:border-slate-200 bg-slate-50/70 hover:bg-white transition-all duration-300 cursor-default"
               >
-                <div className="w-9 h-9 rounded-xl bg-white shadow flex items-center justify-center">
+                <div className="w-9 h-9 rounded-xl bg-white shadow flex items-center justify-center shrink-0">
                   <Icon className={`h-5 w-5 ${color}`} />
                 </div>
                 <div>

@@ -1,11 +1,10 @@
-import { PROTECTED_PREFIXES, ROLE_ROUTES } from "@/lib/types/auth";
+import { PROTECTED_PREFIXES, ROLE_ROUTES, type UserRole } from "@/lib/types/auth";
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Initial response object to manage cookie syncing
   let response = NextResponse.next({
     request: { headers: request.headers },
   });
@@ -31,7 +30,6 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  // 1. Get authenticated user and metadata (Role is now inside app_metadata)
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -44,10 +42,18 @@ export async function proxy(request: NextRequest) {
     "/auth/confirm",
   ];
 
+  // Auth pages that stay accessible even when logged in
+  const authenticatedBypass = [
+    "/auth/confirm",
+    "/auth/reset-password",
+    "/auth/forgot-password",
+    "/auth/choose-role",
+  ];
+
   const isPublicRoute = publicRoutes.some((r) => pathname.startsWith(r));
   if (pathname.startsWith("/api/")) return response;
 
-  // 2. Unauthenticated handling
+  // 1. Unauthenticated
   if (!user) {
     if (isPublicRoute) return response;
     const redirectUrl = request.nextUrl.clone();
@@ -56,58 +62,42 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // 3. Extract Role from Metadata (Zero DB Calls)
-  // We assume the SQL trigger has populated 'role' and 'roles'
-  const primaryRole = user.app_metadata?.role as keyof typeof ROLE_ROUTES;
-  const userRoles = (user.app_metadata?.roles || []) as string[];
+  // 2. Extract roles from app_metadata (zero DB calls)
+  const primaryRole = user.app_metadata?.role as UserRole | undefined;
+  const userRoles = (user.app_metadata?.roles ?? []) as UserRole[];
 
-  // If role is missing from metadata, the user might need to re-log
-  // or the trigger hasn't fired yet. Fallback to response to avoid loops.
+  // Trigger hasn't fired yet or metadata is stale — let the request through
+  // rather than looping. The DB-level check in loginAction is the real guard.
   if (!primaryRole) return response;
 
-  // 4. Handle "/" root redirect
+  // 3. Root redirect
   if (pathname === "/") {
-    return NextResponse.redirect(
-      new URL(ROLE_ROUTES[primaryRole], request.url),
-    );
+    return NextResponse.redirect(new URL(ROLE_ROUTES[primaryRole], request.url));
   }
 
-  // 5. Authenticated user hitting public pages (e.g., trying to go to /login)
+  // 4. Authenticated user on a public route
   if (isPublicRoute) {
-    const bypass = [
-      "/auth/confirm",
-      "/auth/reset-password",
-      "/auth/forgot-password",
-        "/auth/choose-role",
-    ].some((p) => pathname.startsWith(p));
-
-    if (!bypass) {
-      return NextResponse.redirect(
-        new URL(ROLE_ROUTES[primaryRole], request.url),
-      );
+    const isBypass = authenticatedBypass.some((p) => pathname.startsWith(p));
+    if (!isBypass) {
+      return NextResponse.redirect(new URL(ROLE_ROUTES[primaryRole], request.url));
     }
     return response;
   }
 
-  // 6. Role-based Access Control (RBAC)
-  const matchingPrefixes = Object.keys(PROTECTED_PREFIXES)
+  // 5. RBAC — find the longest matching protected prefix
+  const matchingPrefix = Object.keys(PROTECTED_PREFIXES)
     .filter((p) => pathname.startsWith(p))
-    .sort((a, b) => b.length - a.length);
+    .sort((a, b) => b.length - a.length)[0];
 
-  if (matchingPrefixes.length > 0) {
-    const targetPrefix = matchingPrefixes[0];
-    const allowedRoles =
-      PROTECTED_PREFIXES[targetPrefix as keyof typeof PROTECTED_PREFIXES];
+  if (matchingPrefix) {
+    const allowedRoles = PROTECTED_PREFIXES[matchingPrefix];
 
-    // Check if user has any of the required roles
-    const hasAccess =
-      userRoles.some((r) => allowedRoles.includes(r as any)) ||
-      allowedRoles.includes(primaryRole as any);
+    // Merge primary + all roles for the access check
+    const effectiveRoles = Array.from(new Set([primaryRole, ...userRoles]));
+    const hasAccess = effectiveRoles.some((r) => allowedRoles.includes(r));
 
     if (!hasAccess) {
-      return NextResponse.redirect(
-        new URL(ROLE_ROUTES[primaryRole], request.url),
-      );
+      return NextResponse.redirect(new URL(ROLE_ROUTES[primaryRole], request.url));
     }
   }
 

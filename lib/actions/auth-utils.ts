@@ -1,8 +1,11 @@
 import type { UserRole } from "@/lib/types/auth";
 
+const ROLE_PRIORITY: UserRole[] = ["admin", "teacher", "parent"];
+
 /**
  * Returns every role the user holds.
- * Prefers the `roles` array; falls back to the single `role` field.
+ * Prefers the `roles` array when it has entries; falls back to single `role`.
+ * Deduplicates and preserves priority order.
  */
 export function resolveAllRoles(
   profile: {
@@ -11,10 +14,17 @@ export function resolveAllRoles(
   } | null,
 ): UserRole[] {
   if (!profile) return ["parent"];
-  if (Array.isArray(profile.roles) && profile.roles.length > 0) {
-    return profile.roles as UserRole[];
-  }
-  return [(profile.role ?? "parent") as UserRole];
+
+  const fromArray =
+    Array.isArray(profile.roles) && profile.roles.length > 0
+      ? (profile.roles as UserRole[])
+      : null;
+
+  const fromSingle = profile.role ? ([profile.role] as UserRole[]) : ["parent" as UserRole];
+
+  // Merge both sources, deduplicate, sort by priority
+  const merged = Array.from(new Set([...(fromArray ?? []), ...fromSingle]));
+  return ROLE_PRIORITY.filter((r) => merged.includes(r));
 }
 
 /**
@@ -27,7 +37,5 @@ export function resolvePrimaryRole(
     roles?: string[] | null;
   } | null,
 ): UserRole {
-  const all = resolveAllRoles(profile);
-  const priority: UserRole[] = ["admin", "teacher", "parent"];
-  return (priority.find((r) => all.includes(r)) as UserRole) ?? "parent";
+  return resolveAllRoles(profile)[0] ?? "parent";
 }
