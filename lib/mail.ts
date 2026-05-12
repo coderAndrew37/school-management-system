@@ -590,6 +590,7 @@ export async function broadcastEmail({
 // ── Audience resolver ─────────────────────────────────────────────────────────
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { AdminRole, BaseRole } from "./types/auth";
 
 type RecipientRow = { id: string; full_name: string; email: string };
 
@@ -685,5 +686,183 @@ export async function resolveAudienceRecipients(
 
       return [...(teachersRes.data ?? []), ...(parentsRes.data ?? [])];
     }
+  }
+}
+
+
+// ── New Staff Account Creation Email ─────────────────────────────────────────
+
+export interface NewStaffEmailParams {
+  staffEmail: string;
+  staffName: string;
+  staffRole: string;           // e.g. "Headteacher", "Deputy Headteacher", "Bursar", "DOS"
+  setupLink: string;
+  baseRole: BaseRole;          // Optional: for internal reference
+}
+
+/**
+ * Dedicated email for new staff created by Super Admin
+ */
+export async function sendNewStaffWelcomeEmail({
+  staffEmail,
+  staffName,
+  staffRole,
+  setupLink,
+  baseRole,
+}: NewStaffEmailParams): Promise<{ success: boolean; error?: unknown }> {
+  const firstName = staffName.split(" ")[0] ?? staffName;
+
+  const body = `
+    <p style="margin:0 0 16px;">Dear <strong>${staffName}</strong>,</p>
+
+    <p style="margin:0 0 16px;color:#4a5568;">
+      Congratulations! You have been added to the <strong>Kibali Academy</strong> 
+      staff portal as <strong>${staffRole}</strong>.
+    </p>
+
+    <div style="background:#ecfdf5;border:1px solid #d1fae5;border-radius:12px;padding:24px;margin:24px 0;text-align:center;">
+      <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#064e3b;">
+        Activate Your Staff Account
+      </p>
+      <p style="margin:0 0 4px;font-size:13px;color:#047857;line-height:1.6;">
+        Set your password to access your ${staffRole.toLowerCase()} dashboard 
+        and begin using the school management system.
+      </p>
+      <p style="margin:0 0 20px;font-size:12px;color:#6ee7b7;">
+        ⏱ This link expires in <strong>48 hours</strong>
+      </p>
+      ${ctaButton(setupLink, "Activate My Account →", "#10b981", "#ffffff")}
+    </div>
+
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:20px 24px;margin:24px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        ${infoRow("Name", staffName)}
+        ${infoRow("Role", staffRole)}
+        ${infoRow("Email", staffEmail)}
+        ${baseRole ? infoRow("Access Level", baseRole) : ""}
+      </table>
+    </div>
+
+    <p style="margin:0;font-size:13px;color:#a0aec0;">
+      🔒 This link is unique to your account. Do not share it with anyone.<br>
+      If you have any questions, please contact the school office.
+    </p>
+  `;
+
+  try {
+    const { error } = await resend.emails.send({
+      from: `Kibali Academy Staff <${SENDER_STAFF_EMAIL}>`,
+      to: resolveRecipient(staffEmail),
+      subject: `Welcome to Kibali Academy — ${staffRole} Account Created`,
+      html: buildEmail({
+        previewText: `Your ${staffRole} account at Kibali Academy is ready. Activate it now.`,
+        headerBg: "#10b981",
+        headerLabel: "Staff Account Created",
+        headerSubtitle: `${staffRole} • Kibali Academy`,
+        body,
+      }),
+    });
+
+    if (error) {
+      console.error("sendNewStaffWelcomeEmail error:", error);
+      return { success: false, error };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("sendNewStaffWelcomeEmail crash:", err);
+    return { success: false, error: err };
+  }
+}
+
+// ── Role Assignment / Update Notification ─────────────────────────────────────
+
+export interface RoleAssignmentNotificationParams {
+  recipientEmail: string;
+  recipientName: string;
+  newRole: string;                    // Human readable role (e.g. "Headteacher", "Bursar")
+  baseRole: BaseRole;
+  adminRole?: AdminRole | null;
+  reason?: string;
+  dashboardLink?: string;
+}
+
+/**
+ * Notify staff when Super Admin assigns or updates their role
+ */
+export async function sendRoleAssignmentNotification({
+  recipientEmail,
+  recipientName,
+  newRole,
+  baseRole,
+  adminRole,
+  reason,
+  dashboardLink = "https://kibali.ac.ke/login",
+}: RoleAssignmentNotificationParams): Promise<{ success: boolean; error?: unknown }> {
+  const firstName = recipientName.split(" ")[0] ?? recipientName;
+
+  const body = `
+    <p style="margin:0 0 16px;">Dear <strong>${recipientName}</strong>,</p>
+
+    <p style="margin:0 0 20px;color:#4a5568;">
+      Your role at <strong>Kibali Academy</strong> has been officially updated by the administration.
+    </p>
+
+    <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;padding:24px;margin:24px 0;">
+      <p style="margin:0 0 12px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#0369a1;">
+        ROLE UPDATE
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        ${infoRow("New Role", newRole)}
+        ${infoRow("Access Level", baseRole)}
+        ${adminRole ? infoRow("Title", adminRole.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())) : ""}
+      </table>
+    </div>
+
+    ${reason ? `
+    <div style="background:#fefce8;border:1px solid #fef08c;border-radius:10px;padding:16px 20px;margin:20px 0;">
+      <p style="margin:0;font-size:13px;color:#854d0e;">
+        <strong>Reason for update:</strong> ${reason}
+      </p>
+    </div>` : ""}
+
+    <p style="margin:0 0 16px;color:#4a5568;">
+      You may now access additional features and dashboards based on your updated role.
+      Please sign in to continue.
+    </p>
+
+    <div style="text-align:center;margin:32px 0 40px;">
+      ${ctaButton(dashboardLink, "Sign In Now →", "#3b82f6", "#ffffff")}
+    </div>
+
+    <p style="margin:0;font-size:13px;color:#a0aec0;">
+      If you have any questions about your new responsibilities, 
+      please reach out to the school administration office.
+    </p>
+  `;
+
+  try {
+    const { error } = await resend.emails.send({
+      from: `Kibali Academy Administration <${SENDER_STAFF_EMAIL}>`,
+      to: resolveRecipient(recipientEmail),
+      subject: `Role Update: You are now ${newRole} at Kibali Academy`,
+      html: buildEmail({
+        previewText: `Your role has been updated to ${newRole}.`,
+        headerBg: "#3b82f6",
+        headerLabel: "Role Updated",
+        headerSubtitle: "Kibali Academy Administration",
+        body,
+      }),
+    });
+
+    if (error) {
+      console.error("sendRoleAssignmentNotification error:", error);
+      return { success: false, error };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("sendRoleAssignmentNotification crash:", err);
+    return { success: false, error: err };
   }
 }

@@ -1,7 +1,7 @@
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { Profile, UserRole } from "@/lib/types/auth";
+import type { Profile, BaseRole } from "@/lib/types/auth";
 import {
   forgotPasswordSchema,
   loginSchema,
@@ -38,7 +38,7 @@ export interface AuthActionResult {
   success: boolean;
   message: string;
   redirectTo?: string;
-  roles?: UserRole[]; // only present when the user holds multiple roles
+  roles?: BaseRole[]; // Updated to BaseRole
 }
 
 // ── Login ─────────────────────────────────────────────────────────────────────
@@ -75,11 +75,13 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
   if (error) {
     if (error.message.toLowerCase().includes("invalid login"))
       return { success: false, message: "Incorrect email or password." };
+
     if (error.message.toLowerCase().includes("email not confirmed"))
       return {
         success: false,
         message: "Please verify your email address before signing in.",
       };
+
     return { success: false, message: "Sign-in failed. Please try again." };
   }
 
@@ -89,18 +91,22 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
 
   if (!user) return { success: false, message: "Session error. Please try again." };
 
+  // Fetch profile with new fields
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, roles")
+    .select("base_role, admin_role, roles")
     .eq("id", user.id)
     .single();
 
-  // Derive roles — this is the source of truth for all routing below
+  if (!profile) {
+    return { success: false, message: "Profile not found. Please contact admin." };
+  }
+
+  // Derive roles using new utilities
   const allRoles = resolveAllRoles(profile);
   const primaryRole = resolvePrimaryRole(profile);
 
-  // Block parents (including multi-role users who are also parents) who
-  // haven't completed their account setup yet
+  // Block parents (including multi-role users) who haven't completed setup
   if (allRoles.includes("parent")) {
     const { data: parentRow } = await supabaseAdmin
       .from("parents")
@@ -132,7 +138,7 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
   return {
     success: true,
     message: "Signed in successfully.",
-    redirectTo: ROLE_ROUTES[primaryRole],
+    redirectTo: ROLE_ROUTES[primaryRole] ?? "/parent/dashboard",
   };
 }
 
@@ -265,7 +271,7 @@ export async function resetPasswordAction(
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, roles")
+    .select("base_role, roles")
     .eq("id", user.id)
     .single();
 
@@ -276,7 +282,7 @@ export async function resetPasswordAction(
   return {
     success: true,
     message: "Password set successfully! Welcome to Kibali Academy.",
-    redirectTo: ROLE_ROUTES[primaryRole] ?? "/parent",
+    redirectTo: ROLE_ROUTES[primaryRole] ?? "/parent/dashboard",
   };
 }
 
@@ -293,7 +299,7 @@ export async function getSession() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("*")
+    .select("base_role, admin_role, roles, full_name, avatar_url, teacher_id, created_at, updated_at")
     .eq("id", user.id)
     .single();
 
