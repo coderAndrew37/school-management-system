@@ -1,71 +1,115 @@
 "use client";
 
-// ─────────────────────────────────────────────────────────────────────────────
 // components/nav/AdminLayoutShell.tsx
-// Client wrapper that manages sidebar open/close state for the admin layout.
-// ─────────────────────────────────────────────────────────────────────────────
+// Kibali Academy — Admin Layout Shell (Client Component)
+//
+// Manages sidebar open/collapse state for the entire admin layout.
+// Receives the pre-authorized NavLink array from the server layout —
+// never performs permission checks itself.
+//
+// The effectivePermissions prop is available to child pages via context
+// if needed for fine-grained UI element toggling (button disablement, etc.)
 
-import { useState } from "react";
+import { useState, createContext, useContext, type ReactNode } from "react";
+import type { NavLink } from "@/lib/constants";
 import type { Profile } from "@/lib/types/auth";
-import { ADMIN_LINKS } from "@/lib/constants";
-import { AdminSidebar } from "./AdminSidebar";
+import { AdminSidebarClient } from "./AdminSidebarClient";
 import { TopNav } from "./TopNav";
+
+// ── Permission Context ────────────────────────────────────────────────────────
+// Exposes the profile and derived helpers to any client child component
+// without prop-drilling. Consumed by useAdminPermissions() hook.
+
+interface AdminPermissionsContextValue {
+  profile: Profile;
+  isSuperAdmin: boolean;
+  isDev: boolean;
+}
+
+const AdminPermissionsContext = createContext<AdminPermissionsContextValue | null>(
+  null
+);
+
+export function useAdminPermissions(): AdminPermissionsContextValue {
+  const ctx = useContext(AdminPermissionsContext);
+  if (!ctx) {
+    throw new Error(
+      "useAdminPermissions must be used inside AdminLayoutShell"
+    );
+  }
+  return ctx;
+}
+
+// ── Props ─────────────────────────────────────────────────────────────────────
 
 interface AdminLayoutShellProps {
   profile: Profile;
   email: string;
-  children: React.ReactNode;
+  /** Pre-filtered authorized links from the server layout */
+  authorizedLinks: NavLink[];
+  children: ReactNode;
 }
+
+// ── Shell ─────────────────────────────────────────────────────────────────────
 
 export function AdminLayoutShell({
   profile,
   email,
+  authorizedLinks,
   children,
 }: AdminLayoutShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("sidebar-collapsed") === "true";
+  });
+
+  const toggleCollapse = () => {
+    const next = !isCollapsed;
+    setIsCollapsed(next);
+    localStorage.setItem("sidebar-collapsed", String(next));
+  };
+
+  const contextValue: AdminPermissionsContextValue = {
+    profile,
+    isSuperAdmin: profile.is_super_admin || profile.is_dev,
+    isDev: profile.is_dev,
+  };
+
+  // Sidebar width values kept in sync with AdminSidebarClient dimensions
+  const sidebarWidth = isCollapsed ? "76px" : "260px";
 
   return (
-    <div className="min-h-screen bg-[#0c0f1a] font-[family-name:var(--font-body)]">
-      <AdminSidebar
-        links={ADMIN_LINKS}
-        isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-      />
+    <AdminPermissionsContext.Provider value={contextValue}>
+      <div className="min-h-screen bg-[#0c0f1a] font-[family-name:var(--font-body)]">
 
-      {/*
-        Main content area.
-
-        WHY inline style instead of lg:pl-[240px]:
-        Tailwind's JIT scanner statically analyses class strings. Arbitrary
-        values like lg:pl-[240px] are frequently dropped by the production
-        build (PurgeCSS / content scanning) even when written as a plain
-        string, because the scanner doesn't always resolve them in .tsx files.
-        Using an inline style is 100% reliable and has zero runtime cost.
-
-        The responsive override (padding = 0 on mobile) is handled by the
-        media query in the <style> tag below. This is the only safe pattern
-        when you can't add the class to Tailwind's safelist.
-      */}
-      <div className="admin-shell flex flex-col min-h-screen">
-        <style>{`
-          .admin-shell {
-            padding-left: 240px;
-          }
-          @media (max-width: 1023px) {
-            .admin-shell {
-              padding-left: 0;
-            }
-          }
-        `}</style>
-
-        <TopNav
-          profile={profile}
-          email={email}
-          onMenuClick={() => setSidebarOpen(true)}
+        {/* Sidebar — receives only the pre-authorized link array */}
+        <AdminSidebarClient
+          links={authorizedLinks}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          isCollapsed={isCollapsed}
+          onToggleCollapse={toggleCollapse}
         />
 
-        <main className="flex-1">{children}</main>
+        {/* Main content column */}
+        <div
+          className="flex flex-col min-h-screen transition-[padding] duration-300 ease-out"
+          style={{
+            // Desktop: offset by sidebar width. Mobile: no offset.
+            // Using inline style so the value is reactive to isCollapsed state.
+            paddingLeft: `clamp(0px, calc(100vw - 1024px + ${sidebarWidth}), ${sidebarWidth})`,
+          }}
+        >
+          <TopNav
+            profile={profile}
+            email={email}
+            onMenuClick={() => setSidebarOpen(true)}
+          />
+
+          <main className="flex-1 min-w-0">{children}</main>
+        </div>
       </div>
-    </div>
+    </AdminPermissionsContext.Provider>
   );
 }
