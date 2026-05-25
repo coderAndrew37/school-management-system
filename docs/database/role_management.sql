@@ -795,15 +795,18 @@ BEGIN
         'admin_role',     COALESCE(v_assignment.role_id,  NULL),
         'admin_label',    COALESCE(v_assignment.label,    NULL),
         'admin_paths',    to_jsonb(v_allowed_paths),
+        -- Bulletproof fallback: ensure permissions is always a JSON array, never a SQL null
         'permissions',    to_jsonb(COALESCE(v_permissions, ARRAY[]::TEXT[]))
     );
 
+    -- ── The Core Fix ─────────────────────────────────────────────────────────
+    -- Coalesce raw_app_meta_data to an empty json object '{}' to safely 
+    -- prevent new-user/empty-meta concatenation crashes.
     UPDATE auth.users
-    SET    raw_app_meta_data = raw_app_meta_data || v_claims
+    SET    raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::jsonb) || v_claims
     WHERE  id = p_profile_id;
 END;
 $$;
-
 
 -- ---------------------------------------------------------------------------
 -- 9d. execute_teacher_transfer_out(teacher_id, destination_school)

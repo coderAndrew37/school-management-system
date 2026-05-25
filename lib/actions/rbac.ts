@@ -1,26 +1,26 @@
 "use server";
 
 // lib/actions/rbac-actions.ts
-// Kibali Academy — RBAC Server Actions
+// Kibali Academy — RBAC Server Actions (new schema)
 //
-// Every mutating action performs a REAL-TIME database super-admin check.
-// JWT claims are re-synced after every permission-affecting mutation so
-// the next request reflects the change immediately.
-//
-// Audit log entries are written with structured JSONB context payloads
-// so the audit trail UI can render rich diffs without re-fetching related rows.
+// Key schema changes reflected here:
+//   - Roles are now admin_role_definitions, assignments are staff_role_assignments
+//   - Permission overrides live on profiles.allowed/denied_permissions_override columns
+//   - Staff teacher_id → profile linkage used for override writes
+//   - All mutations call sync_user_jwt_claims RPC after change
+//   - Audit logs include structured context JSONB
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { revalidatePath }             from "next/cache";
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { revalidatePath }             from 'next/cache';
 
-// ── Shared result type ────────────────────────────────────────────────────────
+// ── Shared result type ─────────────────────────────────────────────────────
 
 export interface ActionResult {
   success: boolean;
   error?:  string;
 }
 
-// ── Internal: resolve and guard super-admin context ──────────────────────────
+// ── Admin context guard ────────────────────────────────────────────────────
 
 interface AdminContext {
   userId:   string;
@@ -31,31 +31,31 @@ async function requireSuperAdmin(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>
 ): Promise<AdminContext> {
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("Unauthenticated.");
+  if (!user) throw new Error('Unauthenticated.');
 
   const { data: profile } = await supabase
-    .from("profiles")
-    .select("school_id, is_super_admin")
-    .eq("id", user.id)
+    .from('profiles')
+    .select('school_id, is_super_admin')
+    .eq('id', user.id)
     .single();
 
   if (!profile?.is_super_admin || !profile?.school_id) {
-    throw new Error("Unauthorized: Super Admin access required.");
+    throw new Error('Unauthorized: Super Admin access required.');
   }
 
   return { userId: user.id, schoolId: profile.school_id as string };
 }
 
-// ── Internal: flush JWT claims after any permission-affecting mutation ────────
+// ── JWT sync helper ────────────────────────────────────────────────────────
 
-async function syncJwtClaims(
+async function syncJwt(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   profileId: string
 ): Promise<void> {
-  await supabase.rpc("sync_user_jwt_claims", { p_profile_id: profileId });
+  await supabase.rpc('sync_user_jwt_claims', { p_profile_id: profileId });
 }
 
-// ── Internal: append audit log entry ─────────────────────────────────────────
+// ── Audit log helper ───────────────────────────────────────────────────────
 
 interface AuditPayload {
   schoolId:    string;
@@ -69,242 +69,51 @@ interface AuditPayload {
   context?:    Record<string, unknown>;
 }
 
-async function writeAuditLog(
+async function writeAudit(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
-  payload: AuditPayload
+  p: AuditPayload
 ): Promise<void> {
-  await supabase.from("security_audit_logs").insert({
-    school_id:    payload.schoolId,
-    actor_id:     payload.actorId,
-    target_id:    payload.targetId   ?? null,
-    action_type:  payload.actionType,
-    target_table: payload.targetTable,
-    record_id:    payload.recordId,
-    old_values:   payload.oldValues  ? JSON.stringify(payload.oldValues)  : null,
-    new_values:   payload.newValues  ? JSON.stringify(payload.newValues)  : null,
-    context:      payload.context    ?? {},
+  await supabase.from('security_audit_logs').insert({
+    school_id:    p.schoolId,
+    actor_id:     p.actorId,
+    target_id:    p.targetId   ?? null,
+    action_type:  p.actionType,
+    target_table: p.targetTable,
+    record_id:    p.recordId,
+    old_values:   p.oldValues  ? JSON.stringify(p.oldValues)  : null,
+    new_values:   p.newValues  ? JSON.stringify(p.newValues)  : null,
+    context:      p.context    ?? {},
   });
 }
 
-// ============================================================================
-// ACTION 1: ASSIGN ROLE
-// ============================================================================
+// ── Helper: resolve profile_id from teacher_id ────────────────────────────
+// profiles.teacher_id → teachers.id  (one-to-one)
 
-export interface AssignRolePayload {
-  profileId:  string;
-  roleId:     string;
-  notes?:     string;
-}
-
-/**
- * Creates an active staff_role_assignments row linking a profile to a role.
- * Re-syncs JWT claims immediately. Logs the assignment to the audit trail.
- */
-export async function assignRoleAction(
-  payload: AssignRolePayload
-): Promise<ActionResult> {
-  const supabase = await createSupabaseServerClient();
-
-  try {
-    const { userId, schoolId } = await requireSuperAdmin(supabase);
-
-    // Snapshot previous active roles for the diff
-    const { data: previousRoles } = await supabase
-      .from("staff_role_assignments")
-      .select("role_id")
-      .eq("profile_id", payload.profileId)
-      .is("revoked_at", null);
-
-    const { error } = await supabase
-      .from("staff_role_assignments")
-      .insert({
-        school_id:   schoolId,
-        profile_id:  payload.profileId,
-        role_id:     payload.roleId,
-        assigned_by: userId,
-        notes:       payload.notes ?? null,
-      });
-
-    if (error) throw error;
-
-    await syncJwtClaims(supabase, payload.profileId);
-
-    await writeAuditLog(supabase, {
-      schoolId,
-      actorId:     userId,
-      targetId:    payload.profileId,
-      actionType:  "ROLE_ASSIGN",
-      targetTable: "staff_role_assignments",
-      recordId:    payload.profileId,
-      oldValues:   { roles: previousRoles?.map((r) => r.role_id) ?? [] },
-      newValues:   { role_assigned: payload.roleId },
-      context:     { role_id: payload.roleId, notes: payload.notes ?? null },
-    });
-
-    revalidatePath("/admin/security");
-    return { success: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Failed to assign role.";
-    return { success: false, error: msg };
-  }
+async function resolveProfileId(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  teacherId: string
+): Promise<string | null> {
+  const { data } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('teacher_id', teacherId)
+    .maybeSingle();
+  return (data?.id as string) ?? null;
 }
 
 // ============================================================================
-// ACTION 2: REVOKE ROLE
-// ============================================================================
-
-export interface RevokeRolePayload {
-  assignmentId:  string;
-  profileId:     string;
-  revokeReason?: string;
-}
-
-/**
- * Sets revoked_at on a staff_role_assignments row (soft delete — keeps history).
- * Re-syncs JWT claims so revocation is effective on next request.
- */
-export async function revokeRoleAction(
-  payload: RevokeRolePayload
-): Promise<ActionResult> {
-  const supabase = await createSupabaseServerClient();
-
-  try {
-    const { userId, schoolId } = await requireSuperAdmin(supabase);
-
-    // Snapshot old row
-    const { data: oldRow } = await supabase
-      .from("staff_role_assignments")
-      .select("role_id, assigned_at, assigned_by")
-      .eq("id", payload.assignmentId)
-      .single();
-
-    const { error } = await supabase
-      .from("staff_role_assignments")
-      .update({
-        revoked_at:    new Date().toISOString(),
-        revoke_reason: payload.revokeReason ?? null,
-      })
-      .eq("id",        payload.assignmentId)
-      .eq("school_id", schoolId)
-      .is("revoked_at", null);
-
-    if (error) throw error;
-
-    await syncJwtClaims(supabase, payload.profileId);
-
-    await writeAuditLog(supabase, {
-      schoolId,
-      actorId:     userId,
-      targetId:    payload.profileId,
-      actionType:  "ROLE_REVOKE",
-      targetTable: "staff_role_assignments",
-      recordId:    payload.assignmentId,
-      oldValues:   oldRow ?? null,
-      newValues:   { revoked_at: new Date().toISOString(), revoke_reason: payload.revokeReason ?? null },
-      context:     { role_id: oldRow?.role_id ?? null, reason: payload.revokeReason ?? null },
-    });
-
-    revalidatePath("/admin/security");
-    return { success: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Failed to revoke role.";
-    return { success: false, error: msg };
-  }
-}
-
-// ============================================================================
-// ACTION 3: UPDATE PERMISSION OVERRIDES
-// ============================================================================
-
-export interface UpdateOverridesPayload {
-  profileId:                   string;
-  allowed_permissions_override: string[];
-  denied_permissions_override:  string[];
-}
-
-/**
- * Replaces the override arrays on a profile row.
- * The profiles UPDATE trigger automatically calls sync_user_jwt_claims,
- * so JWT is re-synced even without the explicit RPC call here.
- * We call syncJwtClaims explicitly as a belt-and-suspenders guarantee.
- */
-export async function updatePermissionOverridesAction(
-  payload: UpdateOverridesPayload
-): Promise<ActionResult> {
-  const supabase = await createSupabaseServerClient();
-
-  try {
-    const { userId, schoolId } = await requireSuperAdmin(supabase);
-
-    // Snapshot current state
-    const { data: currentProfile } = await supabase
-      .from("profiles")
-      .select("allowed_permissions_override, denied_permissions_override, full_name")
-      .eq("id", payload.profileId)
-      .single();
-
-    const { error } = await supabase
-      .from("profiles")
-      .update({
-        allowed_permissions_override: payload.allowed_permissions_override,
-        denied_permissions_override:  payload.denied_permissions_override,
-      })
-      .eq("id",       payload.profileId)
-      .eq("school_id", schoolId);
-
-    if (error) throw error;
-
-    // Explicit sync (trigger will also fire, but this ensures immediate consistency)
-    await syncJwtClaims(supabase, payload.profileId);
-
-    await writeAuditLog(supabase, {
-      schoolId,
-      actorId:     userId,
-      targetId:    payload.profileId,
-      actionType:  "PERMISSION_OVERRIDE_SET",
-      targetTable: "profiles",
-      recordId:    payload.profileId,
-      oldValues: {
-        allowed_permissions_override: currentProfile?.allowed_permissions_override ?? [],
-        denied_permissions_override:  currentProfile?.denied_permissions_override  ?? [],
-      },
-      newValues: {
-        allowed_permissions_override: payload.allowed_permissions_override,
-        denied_permissions_override:  payload.denied_permissions_override,
-      },
-      context: {
-        target_name:    currentProfile?.full_name ?? payload.profileId,
-        granted_count:  payload.allowed_permissions_override.length,
-        revoked_count:  payload.denied_permissions_override.length,
-      },
-    });
-
-    revalidatePath("/admin/security");
-    return { success: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Failed to update permission overrides.";
-    return { success: false, error: msg };
-  }
-}
-
-// ============================================================================
-// ACTION 4: SAVE / UPDATE ROLE DEFINITION
+// ACTION 1: SAVE / UPSERT ROLE DEFINITION
 // ============================================================================
 
 export interface SaveRoleDefinitionPayload {
-  id:                  string;   // slug: 'bursar', 'class_teacher_east'
-  label:               string;
-  description:         string;
+  id:                   string;   // slug
+  label:                string;
+  description:          string;
   baseline_permissions: string[];
-  allowed_paths:       string[];
-  sort_order?:         number;
+  allowed_paths:        string[];
+  sort_order?:          number;
 }
 
-/**
- * Upserts an admin_role_definitions row.
- * After saving, re-syncs JWT for all staff currently holding this role
- * so the updated baseline_permissions propagate immediately.
- */
 export async function saveRoleDefinitionAction(
   payload: SaveRoleDefinitionPayload
 ): Promise<ActionResult> {
@@ -313,52 +122,51 @@ export async function saveRoleDefinitionAction(
   try {
     const { userId, schoolId } = await requireSuperAdmin(supabase);
 
-    // Snapshot old definition for diff
     const { data: oldDef } = await supabase
-      .from("admin_role_definitions")
-      .select("*")
-      .eq("id",        payload.id)
-      .eq("school_id", schoolId)
+      .from('admin_role_definitions')
+      .select('*')
+      .eq('id', payload.id)
+      .eq('school_id', schoolId)
       .maybeSingle();
 
     const { error } = await supabase
-      .from("admin_role_definitions")
+      .from('admin_role_definitions')
       .upsert(
         {
-          id:                  payload.id,
-          school_id:           schoolId,
-          label:               payload.label,
-          description:         payload.description,
+          id:                   payload.id,
+          school_id:            schoolId,
+          label:                payload.label,
+          description:          payload.description,
           baseline_permissions: payload.baseline_permissions,
-          allowed_paths:       payload.allowed_paths,
-          sort_order:          payload.sort_order ?? 0,
+          allowed_paths:        payload.allowed_paths,
+          sort_order:           payload.sort_order ?? 0,
         },
-        { onConflict: "school_id,id" }
+        { onConflict: 'school_id,id' }
       );
 
     if (error) throw error;
 
-    // Re-sync all staff currently holding this role
+    // Re-sync JWT for all staff currently holding this role
     const { data: assignments } = await supabase
-      .from("staff_role_assignments")
-      .select("profile_id")
-      .eq("role_id",   payload.id)
-      .eq("school_id", schoolId)
-      .is("revoked_at", null);
+      .from('staff_role_assignments')
+      .select('profile_id')
+      .eq('role_id', payload.id)
+      .eq('school_id', schoolId)
+      .is('revoked_at', null);
 
     for (const a of assignments ?? []) {
-      await syncJwtClaims(supabase, a.profile_id as string);
+      await syncJwt(supabase, a.profile_id as string);
     }
 
-    await writeAuditLog(supabase, {
+    await writeAudit(supabase, {
       schoolId,
       actorId:     userId,
-      actionType:  oldDef ? "UPDATE" : "INSERT",
-      targetTable: "admin_role_definitions",
+      actionType:  oldDef ? 'UPDATE' : 'INSERT',
+      targetTable: 'admin_role_definitions',
       recordId:    payload.id,
       oldValues:   oldDef   ?? null,
       newValues:   payload,
-      context:     {
+      context: {
         role_id:           payload.id,
         label:             payload.label,
         permissions_count: payload.baseline_permissions.length,
@@ -366,32 +174,190 @@ export async function saveRoleDefinitionAction(
       },
     });
 
-    revalidatePath("/admin/security");
+    revalidatePath('/admin/security');
     return { success: true };
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Failed to save role definition.";
-    return { success: false, error: msg };
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to save role.' };
   }
 }
 
 // ============================================================================
-// ACTION 5: TRANSFER OUT
+// ACTION 2: DELETE ROLE DEFINITION
+// ============================================================================
+
+export async function deleteRoleDefinitionAction(roleId: string): Promise<ActionResult> {
+  const supabase = await createSupabaseServerClient();
+
+  try {
+    const { userId, schoolId } = await requireSuperAdmin(supabase);
+
+    const { data: oldDef } = await supabase
+      .from('admin_role_definitions')
+      .select('label')
+      .eq('id', roleId)
+      .eq('school_id', schoolId)
+      .maybeSingle();
+
+    const { error } = await supabase
+      .from('admin_role_definitions')
+      .delete()
+      .eq('id', roleId)
+      .eq('school_id', schoolId);
+
+    if (error) throw error;
+
+    await writeAudit(supabase, {
+      schoolId,
+      actorId:     userId,
+      actionType:  'DELETE',
+      targetTable: 'admin_role_definitions',
+      recordId:    roleId,
+      oldValues:   oldDef ?? null,
+      context:     { role_id: roleId, label: oldDef?.label ?? roleId },
+    });
+
+    revalidatePath('/admin/security');
+    return { success: true };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to delete role.' };
+  }
+}
+
+// ============================================================================
+// ACTION 3: UPDATE STAFF ACCESS
+// Assigns active role assignments and writes permission overrides to
+// profiles.allowed_permissions_override / denied_permissions_override.
+// ============================================================================
+
+export interface UpdateStaffAccessPayload {
+  // Active role slugs to assign (any not in this list get revoked)
+  roleIds: string[];
+  // Token overrides: has_access true → allowed array, false → denied array
+  overrides: { permissionId: string; hasAccess: boolean }[];
+}
+
+export async function updateStaffAccessAction(
+  teacherId: string,
+  payload: UpdateStaffAccessPayload
+): Promise<ActionResult> {
+  const supabase = await createSupabaseServerClient();
+
+  try {
+    const { userId, schoolId } = await requireSuperAdmin(supabase);
+
+    // Resolve profile linked to this teacher
+    const profileId = await resolveProfileId(supabase, teacherId);
+    if (!profileId) {
+      throw new Error(`No profile found for teacher ${teacherId}. Ensure profiles.teacher_id is set.`);
+    }
+
+    // Snapshot previous state for audit diff
+    const { data: prevAssignments } = await supabase
+      .from('staff_role_assignments')
+      .select('role_id, id')
+      .eq('profile_id', profileId)
+      .is('revoked_at', null);
+
+    const { data: prevProfile } = await supabase
+      .from('profiles')
+      .select('allowed_permissions_override, denied_permissions_override')
+      .eq('id', profileId)
+      .single();
+
+    // 1. Revoke roles no longer in the list
+    const existingRoleIds = (prevAssignments ?? []).map((a) => a.role_id as string);
+    const toRevoke = existingRoleIds.filter((r) => !payload.roleIds.includes(r));
+
+    if (toRevoke.length > 0) {
+      await supabase
+        .from('staff_role_assignments')
+        .update({ revoked_at: new Date().toISOString(), revoke_reason: 'Removed by super admin' })
+        .eq('profile_id', profileId)
+        .in('role_id', toRevoke)
+        .is('revoked_at', null);
+    }
+
+    // 2. Assign new roles not already active
+    const toAssign = payload.roleIds.filter((r) => !existingRoleIds.includes(r));
+
+    if (toAssign.length > 0) {
+      const rows = toAssign.map((roleId) => ({
+        school_id:   schoolId,
+        profile_id:  profileId,
+        role_id:     roleId,
+        assigned_by: userId,
+      }));
+      const { error: assignErr } = await supabase
+        .from('staff_role_assignments')
+        .insert(rows);
+      if (assignErr) throw assignErr;
+    }
+
+    // 3. Write permission overrides to profiles columns
+    const allowed = payload.overrides
+      .filter((o) => o.hasAccess)
+      .map((o) => o.permissionId);
+
+    const denied = payload.overrides
+      .filter((o) => !o.hasAccess)
+      .map((o) => o.permissionId);
+
+    const { error: overrideErr } = await supabase
+      .from('profiles')
+      .update({
+        allowed_permissions_override: allowed,
+        denied_permissions_override:  denied,
+      })
+      .eq('id', profileId);
+
+    if (overrideErr) throw overrideErr;
+
+    // 4. Sync JWT (trigger also fires, but explicit call ensures immediate effect)
+    await syncJwt(supabase, profileId);
+
+    // 5. Audit log
+    await writeAudit(supabase, {
+      schoolId,
+      actorId:     userId,
+      targetId:    profileId,
+      actionType:  'ROLE_ASSIGN',
+      targetTable: 'staff_role_assignments',
+      recordId:    profileId,
+      oldValues: {
+        roles:    existingRoleIds,
+        allowed:  prevProfile?.allowed_permissions_override ?? [],
+        denied:   prevProfile?.denied_permissions_override  ?? [],
+      },
+      newValues: {
+        roles:    payload.roleIds,
+        allowed,
+        denied,
+      },
+      context: {
+        teacher_id:      teacherId,
+        roles_assigned:  toAssign.length,
+        roles_revoked:   toRevoke.length,
+        overrides_count: payload.overrides.length,
+      },
+    });
+
+    revalidatePath('/admin/security');
+    return { success: true };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to update staff access.' };
+  }
+}
+
+// ============================================================================
+// ACTION 4: TRANSFER OUT
 // ============================================================================
 
 export interface TransferOutPayload {
-  teacherId:               string;
-  destinationSchoolName:   string;
-  reason?:                 string;
+  teacherId:             string;
+  destinationSchoolName: string;
+  reason?:               string;
 }
 
-/**
- * Offboards a departing teacher atomically:
- *   - Marks teacher as transferred
- *   - Revokes all active role assignments
- *   - Clears permission overrides
- *   - Wipes JWT permissions to [] immediately
- * Uses the execute_teacher_transfer_out DB function for atomicity.
- */
 export async function transferTeacherOutAction(
   payload: TransferOutPayload
 ): Promise<ActionResult> {
@@ -400,82 +366,74 @@ export async function transferTeacherOutAction(
   try {
     const { userId, schoolId } = await requireSuperAdmin(supabase);
 
-    // Snapshot pre-transfer state for the audit diff
-    const { data: oldProfile } = await supabase
-      .from("profiles")
-      .select("full_name, allowed_permissions_override, denied_permissions_override")
-      .eq("id", payload.teacherId)
+    // Snapshot pre-transfer state
+    const { data: oldTeacher } = await supabase
+      .from('teachers')
+      .select('full_name, status')
+      .eq('id', payload.teacherId)
       .single();
 
-    const { data: oldRoles } = await supabase
-      .from("staff_role_assignments")
-      .select("role_id")
-      .eq("profile_id", payload.teacherId)
-      .is("revoked_at", null);
+    const profileId = await resolveProfileId(supabase, payload.teacherId);
 
-    const { error } = await supabase.rpc("execute_teacher_transfer_out", {
-      p_teacher_id:          payload.teacherId,
-      p_destination_school:  payload.destinationSchoolName,
+    const { data: prevRoles } = profileId ? await supabase
+      .from('staff_role_assignments')
+      .select('role_id')
+      .eq('profile_id', profileId)
+      .is('revoked_at', null) : { data: [] };
+
+    // Atomic DB function: marks teacher, revokes roles, clears overrides, wipes JWT
+    const { error } = await supabase.rpc('execute_teacher_transfer_out', {
+      p_teacher_id:         payload.teacherId,
+      p_destination_school: payload.destinationSchoolName,
     });
 
     if (error) throw error;
 
-    await writeAuditLog(supabase, {
+    await writeAudit(supabase, {
       schoolId,
-      actorId:     userId,
-      targetId:    payload.teacherId,
-      actionType:  "TRANSFER_OUT",
-      targetTable: "teachers",
-      recordId:    payload.teacherId,
+      actorId:   userId,
+      targetId:  profileId ?? undefined,
+      actionType: 'TRANSFER_OUT',
+      targetTable: 'teachers',
+      recordId:  payload.teacherId,
       oldValues: {
-        roles:                       (oldRoles ?? []).map((r) => r.role_id),
-        allowed_permissions_override: oldProfile?.allowed_permissions_override ?? [],
-        denied_permissions_override:  oldProfile?.denied_permissions_override  ?? [],
+        status:        oldTeacher?.status ?? 'active',
+        roles_held:    (prevRoles ?? []).map((r) => r.role_id),
       },
       newValues: {
-        status:                      "transferred",
-        destination_school:          payload.destinationSchoolName,
-        roles:                       [],
-        allowed_permissions_override: [],
-        denied_permissions_override:  [],
+        status:            'transferred',
+        destination:       payload.destinationSchoolName,
+        roles_revoked:     (prevRoles ?? []).length,
+        overrides_cleared: true,
       },
       context: {
-        target_name:        oldProfile?.full_name   ?? payload.teacherId,
-        destination_school: payload.destinationSchoolName,
-        reason:             payload.reason          ?? null,
-        roles_revoked:      (oldRoles ?? []).length,
+        teacher_name:  oldTeacher?.full_name ?? payload.teacherId,
+        destination:   payload.destinationSchoolName,
+        reason:        payload.reason ?? null,
       },
     });
 
-    revalidatePath("/admin/security");
-    revalidatePath("/admin/teachers");
+    revalidatePath('/admin/security');
+    revalidatePath('/admin/teachers');
     return { success: true };
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Failed to process transfer out.";
-    return { success: false, error: msg };
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to process transfer out.' };
   }
 }
 
 // ============================================================================
-// ACTION 6: TRANSFER IN
+// ACTION 5: TRANSFER IN
 // ============================================================================
 
 export interface TransferInPayload {
-  fullName:        string;
-  tscNumber:       string;
-  email:           string;
-  phoneNumber:     string;
-  initialRoleIds:  string[];
-  notes?:          string;
+  fullName:       string;
+  tscNumber:      string;
+  email:          string;
+  phoneNumber:    string;
+  initialRoleIds: string[];
+  notes?:         string;
 }
 
-/**
- * Ingests an incoming teacher:
- *   - Matches on TSC number to detect historical profile (re-activate vs create)
- *   - Sets status = active, clears transfer fields
- *   - Assigns initial roles
- *   - Syncs JWT claims
- */
 export async function transferTeacherInAction(
   payload: TransferInPayload
 ): Promise<ActionResult> {
@@ -484,113 +442,111 @@ export async function transferTeacherInAction(
   try {
     const { userId, schoolId } = await requireSuperAdmin(supabase);
 
-    // Detect existing profile by TSC number
+    // Check for existing teacher by TSC number
     const { data: existingTeacher } = await supabase
-      .from("teachers")
-      .select("id, full_name")
-      .eq("tsc_number", payload.tscNumber)
+      .from('teachers')
+      .select('id, full_name')
+      .eq('tsc_number', payload.tscNumber)
       .maybeSingle();
 
-    let targetId: string;
-    const ingestMode: string = existingTeacher
-      ? "re_activated_historical_profile"
-      : "fresh_profile_creation";
+    let targetTeacherId: string;
+    let targetProfileId: string;
+    const isReactivation = !!existingTeacher;
 
     if (existingTeacher) {
       // Re-activate
-      await supabase
-        .from("profiles")
-        .update({
-          full_name:    payload.fullName,
-          email:        payload.email,
-          phone_number: payload.phoneNumber,
-          role:         "admin",
-        })
-        .eq("id", existingTeacher.id as string);
+      targetTeacherId = existingTeacher.id as string;
 
-      await supabase
-        .from("teachers")
-        .update({
-          status:                      "active",
-          transfer_destination_school: null,
-          transfer_date:               null,
-          archived_at:                 null,
-        })
-        .eq("id", existingTeacher.id as string);
+      await supabase.from('teachers').update({
+        status:                      'active',
+        transfer_destination_school: null,
+        transfer_date:               null,
+        archived_at:                 null,
+      }).eq('id', targetTeacherId);
 
-      targetId = existingTeacher.id as string;
+      const profileId = await resolveProfileId(supabase, targetTeacherId);
+      if (!profileId) throw new Error('Reactivation failed: profile link missing.');
+
+      await supabase.from('profiles').update({
+        full_name:    payload.fullName,
+        email:        payload.email,
+        phone_number: payload.phoneNumber,
+      }).eq('id', profileId);
+
+      targetProfileId = profileId;
     } else {
-      // Create new Supabase auth user + profile + teacher row
+      // Create new teacher + profile
       const newUid = crypto.randomUUID();
 
-      await supabase
-        .from("profiles")
-        .insert({
-          id:           newUid,
-          school_id:    schoolId,
-          full_name:    payload.fullName,
-          email:        payload.email,
-          phone_number: payload.phoneNumber,
-          role:         "admin",
-          is_super_admin: false,
-          is_dev:         false,
-        });
+      const { error: profileErr } = await supabase.from('profiles').insert({
+        id:           newUid,
+        school_id:    schoolId,
+        full_name:    payload.fullName,
+        email:        payload.email,
+        phone_number: payload.phoneNumber,
+        role:         'admin',
+        is_super_admin: false,
+        is_dev:         false,
+      });
+      if (profileErr) throw profileErr;
 
-      await supabase
-        .from("teachers")
-        .insert({
-          id:        newUid,
-          school_id: schoolId,
-          tsc_number: payload.tscNumber,
-          status:    "active",
-        });
+      const { error: teacherErr } = await supabase.from('teachers').insert({
+        id:         newUid,
+        school_id:  schoolId,
+        tsc_number: payload.tscNumber,
+        status:     'active',
+      });
+      if (teacherErr) throw teacherErr;
 
-      targetId = newUid;
+      // Link profile → teacher
+      await supabase.from('profiles')
+        .update({ teacher_id: newUid })
+        .eq('id', newUid);
+
+      targetTeacherId = newUid;
+      targetProfileId = newUid;
     }
 
     // Assign initial roles
     if (payload.initialRoleIds.length > 0) {
-      const roleRows = payload.initialRoleIds.map((roleId) => ({
+      const rows = payload.initialRoleIds.map((roleId) => ({
         school_id:   schoolId,
-        profile_id:  targetId,
+        profile_id:  targetProfileId,
         role_id:     roleId,
         assigned_by: userId,
         notes:       payload.notes ?? null,
       }));
-      const { error: roleError } = await supabase
-        .from("staff_role_assignments")
-        .insert(roleRows);
-      if (roleError) throw roleError;
+      const { error: roleErr } = await supabase.from('staff_role_assignments').insert(rows);
+      if (roleErr) throw roleErr;
     }
 
-    await syncJwtClaims(supabase, targetId);
+    await syncJwt(supabase, targetProfileId);
 
-    await writeAuditLog(supabase, {
+    await writeAudit(supabase, {
       schoolId,
       actorId:     userId,
-      targetId:    targetId,
-      actionType:  "TRANSFER_IN",
-      targetTable: "teachers",
-      recordId:    targetId,
-      oldValues:   existingTeacher ? { previous_name: existingTeacher.full_name } : null,
+      targetId:    targetProfileId,
+      actionType:  'TRANSFER_IN',
+      targetTable: 'teachers',
+      recordId:    targetTeacherId,
+      oldValues:   isReactivation ? { previous_status: 'transferred' } : null,
       newValues: {
-        status:          "active",
-        tsc_number:      payload.tscNumber,
-        roles_assigned:  payload.initialRoleIds,
+        status:         'active',
+        tsc_number:     payload.tscNumber,
+        roles_assigned: payload.initialRoleIds,
       },
       context: {
-        target_name:    payload.fullName,
+        teacher_name:   payload.fullName,
         tsc_number:     payload.tscNumber,
-        ingest_mode:    ingestMode,
+        ingest_mode:    isReactivation ? 're_activated' : 'new_profile',
         roles_assigned: payload.initialRoleIds.length,
       },
     });
 
-    revalidatePath("/admin/security");
-    revalidatePath("/admin/teachers");
+    revalidatePath('/admin/security');
+    revalidatePath('/admin/teachers');
     return { success: true };
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Failed to process transfer in.";
-    return { success: false, error: msg };
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to process transfer in.' };
   }
 }

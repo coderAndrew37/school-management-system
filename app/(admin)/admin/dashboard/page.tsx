@@ -2,6 +2,18 @@
 // app/(admin)/dashboard/page.tsx  —  Server Component
 // Route: /dashboard  (route group (admin) keeps URL clean)
 // Session + layout handled by (admin)/layout.tsx
+//
+// DATA LAYER NOTE (new multi-tenant schema):
+//   All three fetchers below are school_id scoped in the updated
+//   lib/data/dashboard.ts — they read the calling user's school_id from
+//   their JWT app_metadata (zero extra DB call on the hot path) and apply
+//   an explicit .eq("school_id", school_id) filter on every query.
+//
+//   fetchDashboardStats() now counts from student_parents instead of
+//   the old standalone parents table which no longer exists.
+//
+//   fetchTeachers() (lib/data/teachers.ts) must also apply a school_id
+//   filter — see lib/data/teachers.ts for the required patch if not already done.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
@@ -24,17 +36,19 @@ import {
   GenderDonut,
   ScoreDonut,
 } from "@/app/_components/dashboard/DashboardCharts";
-import { StatCard } from "@/app/_components/dashboard/StatCard";
-import { StudentGrid } from "@/app/_components/dashboard/StudentGrd";
-import { TeachersTable } from "@/app/_components/dashboard/TeachersTable";
-import RegisterTeacherModal from "@/app/_components/teachers/RegisterTeacherModal";
-import { fetchTeachers } from "@/lib/data/teachers";
+import { StatCard }          from "@/app/_components/dashboard/StatCard";
+import { StudentGrid }       from "@/app/_components/dashboard/StudentGrd";
+import { TeachersTable }     from "@/app/_components/dashboard/TeachersTable";
+import RegisterTeacherModal  from "@/app/_components/teachers/RegisterTeacherModal";
+import { fetchTeachers }     from "@/lib/data/teachers";
 
 export const metadata = {
-  title: "Dashboard | Kibali Academy",
+  title:       "Dashboard | Kibali Academy",
   description: "Overview of students and teachers at Kibali Academy",
 };
 
+// Revalidate every 60 s so stats stay reasonably fresh without hitting DB on
+// every request. The layout's live session check still runs on every navigation.
 export const revalidate = 60;
 
 const STUDENT_PREVIEW = 8;
@@ -59,6 +73,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
         {/* ── Page header ───────────────────────────────────────────────────── */}
         <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
           <div className="flex items-center gap-4">
@@ -76,10 +91,8 @@ export default async function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* NEW: Green Teacher Modal Button */}
             <RegisterTeacherModal />
 
-            {/* Existing Student Link */}
             <Link
               href="/admin/admission"
               className="flex items-center gap-2 rounded-xl bg-amber-400 hover:bg-amber-300 active:scale-95 transition-all duration-200 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#0c0f1a] shadow-lg shadow-amber-400/20"
@@ -117,6 +130,7 @@ export default async function DashboardPage() {
 
         {/* ── Charts row ─────────────────────────────────────────────────────── */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
           {/* Grade Enrollment — 2/3 width */}
           <div className="lg:col-span-2 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-5">
             <ChartHeader
@@ -139,7 +153,6 @@ export default async function DashboardPage() {
               ))}
             </div>
             <EnrollmentChart data={charts.gradeEnrollment} />
-            {/* Mini legend for male/female */}
             <div className="flex items-center gap-4 mt-2">
               <LegendDot color="#f59e0b" label="Male" />
               <LegendDot color="#fb923c" label="Female" />
@@ -190,6 +203,7 @@ export default async function DashboardPage() {
 
         {/* ── Second charts row ─────────────────────────────────────────────── */}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
           {/* Score distribution */}
           <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-5">
             <div className="flex items-start justify-between mb-4">
@@ -260,8 +274,7 @@ export default async function DashboardPage() {
                 href="/admin/students"
                 className="flex items-center justify-center gap-2 w-full rounded-2xl border border-white/[0.07] border-dashed bg-white/[0.02] hover:bg-amber-400/[0.04] hover:border-amber-400/20 transition-all duration-300 py-4 text-sm font-medium text-white/30 hover:text-amber-400/70"
               >
-                View all {stats.totalStudents} students — search, filter &amp;
-                sort
+                View all {stats.totalStudents} students — search, filter &amp; sort
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
@@ -290,14 +303,23 @@ export default async function DashboardPage() {
             Kibali Academy · CBC School Management System · Academic Year 2026
           </p>
         </footer>
+
       </div>
     </div>
   );
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Sub-components (kept in this file — they're tiny and page-specific)
+// ─────────────────────────────────────────────────────────────────────────────
 
-function ChartHeader({ title, subtitle }: { title: string; subtitle: string }) {
+function ChartHeader({
+  title,
+  subtitle,
+}: {
+  title:    string;
+  subtitle: string;
+}) {
   return (
     <div className="mb-1">
       <h3 className="text-sm font-bold text-white">{title}</h3>
@@ -346,11 +368,12 @@ function CoverageStat({
 }
 
 interface SectionHeaderProps {
-  title: string;
-  count: number;
-  subtitle: string;
+  title:       string;
+  count:       number;
+  subtitle:    string;
   accentColor: string;
 }
+
 function SectionHeader({
   title,
   count,

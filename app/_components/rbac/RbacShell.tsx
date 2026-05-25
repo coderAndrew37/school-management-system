@@ -1,39 +1,50 @@
 'use client';
 
 import React, { useState } from 'react';
-import type { RoleWithPermissions, StaffAccessProfile, SystemPermission, AuditLogEntry } from '@/lib/data/rbac-fetchers';
-import { AmbientGlow } from './ui-primitives';
-import { StaffAccessMatrix } from './StaffAccessMatrix';
-import { RoleConfigurator } from './RoleConfigurator';
-import { SecurityAuditLedger } from './SecurityAuditLedger';
-import { usePermissions } from '@/hooks/use-permissions';
+// ✅ All four types come from rbac-fetchers — aligned to new schema
+import type {
+  RoleWithPermissions,
+  StaffAccessProfile,
+  SystemPermission,
+  AuditLogEntry,
+} from '@/lib/data/rbac-fetcher';
+import { AmbientGlow }           from './ui-primitives';
+import { RoleConfigurator }      from './RoleConfigurator';
+import { SecurityAuditLedger }   from './SecurityAuditLedger';
+import { usePermissions } from '@/lib/hooks/use-permissions';
+import { StaffAccessMatrix } from './StaffAcessMatrix';
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
 interface RbacShellProps {
-  staff: StaffAccessProfile[];
-  roles: RoleWithPermissions[];
+  staff:       StaffAccessProfile[];
+  roles:       RoleWithPermissions[];
   permissions: SystemPermission[];
-  auditLogs: AuditLogEntry[];
+  auditLogs:   AuditLogEntry[];
 }
 
 type TabId = 'staff' | 'roles' | 'audit';
 
 interface TabConfig {
-  id: TabId;
-  label: string;
+  id:          TabId;
+  label:       string;
   accentColor: string;
-  icon: React.ReactElement;
-  badge?: number | string;
+  icon:        React.ReactElement;
+  badge?:      number | string;
 }
 
 // ============================================================================
 // SHELL
 // ============================================================================
 
-export function RbacShell({ staff, roles, permissions, auditLogs }: RbacShellProps): React.ReactElement {
+export function RbacShell({
+  staff,
+  roles,
+  permissions,
+  auditLogs,
+}: RbacShellProps): React.ReactElement {
   const [activeTab, setActiveTab] = useState<TabId>('staff');
   const { isSuperAdmin, isLoading } = usePermissions();
 
@@ -41,35 +52,38 @@ export function RbacShell({ staff, roles, permissions, auditLogs }: RbacShellPro
 
   const tabs: TabConfig[] = [
     {
-      id: 'staff',
-      label: 'Staff Access Matrix',
+      id:          'staff',
+      label:       'Staff Access Matrix',
       accentColor: 'emerald',
-      badge: activeStaff,
+      badge:       activeStaff,
       icon: (
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
         </svg>
       ),
     },
     {
-      id: 'roles',
-      label: 'Role Configurator',
+      id:          'roles',
+      label:       'Role Configurator',
       accentColor: 'amber',
-      badge: roles.length,
+      badge:       roles.length,
       icon: (
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
         </svg>
       ),
     },
     {
-      id: 'audit',
-      label: 'Security Audit Ledger',
+      id:          'audit',
+      label:       'Security Audit Ledger',
       accentColor: 'sky',
-      badge: auditLogs.length,
+      badge:       auditLogs.length,
       icon: (
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
         </svg>
       ),
     },
@@ -77,14 +91,14 @@ export function RbacShell({ staff, roles, permissions, auditLogs }: RbacShellPro
 
   const tabAccentClasses: Record<string, { active: string; text: string }> = {
     emerald: { active: 'border-b-2 border-emerald-400 text-emerald-400', text: 'text-emerald-400' },
-    amber: { active: 'border-b-2 border-amber-400 text-amber-400', text: 'text-amber-400' },
-    sky: { active: 'border-b-2 border-sky-400 text-sky-400', text: 'text-sky-400' },
+    amber:   { active: 'border-b-2 border-amber-400 text-amber-400',     text: 'text-amber-400'   },
+    sky:     { active: 'border-b-2 border-sky-400 text-sky-400',         text: 'text-sky-400'     },
   };
 
   const badgeAccent: Record<string, string> = {
     emerald: 'bg-emerald-500/10 text-emerald-400',
-    amber: 'bg-amber-400/10 text-amber-400',
-    sky: 'bg-sky-500/10 text-sky-400',
+    amber:   'bg-amber-400/10 text-amber-400',
+    sky:     'bg-sky-500/10 text-sky-400',
   };
 
   return (
@@ -98,19 +112,18 @@ export function RbacShell({ staff, roles, permissions, auditLogs }: RbacShellPro
           <div className="flex items-center gap-3 mb-1">
             <div className="w-8 h-8 rounded-lg bg-amber-400/10 border border-amber-400/20 flex items-center justify-center">
               <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
               </svg>
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-white/25 text-xs font-mono">Kibali Academy</span>
-                <span className="text-white/15 text-xs">›</span>
-                <span className="text-white/25 text-xs font-mono">Security</span>
-              </div>
+            <div className="flex items-center gap-2">
+              <span className="text-white/25 text-xs font-mono">Kibali Academy</span>
+              <span className="text-white/15 text-xs">›</span>
+              <span className="text-white/25 text-xs font-mono">Security</span>
             </div>
           </div>
 
-          <div className="flex items-end justify-between">
+          <div className="flex items-end justify-between gap-4">
             <div>
               <h1 className="text-white font-bold text-2xl tracking-tight">
                 Access Control
@@ -122,9 +135,9 @@ export function RbacShell({ staff, roles, permissions, auditLogs }: RbacShellPro
               </p>
             </div>
 
-            {/* Super Admin Indicator */}
+            {/* Super Admin badge */}
             {!isLoading && isSuperAdmin && (
-              <div className="flex items-center gap-2 bg-amber-400/8 border border-amber-400/15 rounded-xl px-3 py-2 hidden sm:flex">
+              <div className="hidden sm:flex items-center gap-2 bg-amber-400/[0.08] border border-amber-400/15 rounded-xl px-3 py-2 flex-shrink-0">
                 <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
                 <span className="text-amber-400/80 text-xs font-medium">Super Admin</span>
               </div>
@@ -137,7 +150,7 @@ export function RbacShell({ staff, roles, permissions, auditLogs }: RbacShellPro
           <div className="flex items-center gap-0 overflow-x-auto scrollbar-none">
             {tabs.map((tab) => {
               const isActive = activeTab === tab.id;
-              const accent = tabAccentClasses[tab.accentColor];
+              const accent   = tabAccentClasses[tab.accentColor]!;
 
               return (
                 <button
