@@ -6,10 +6,14 @@
 // Receives only the pre-filtered, authorized NavLink array from the server.
 // Handles collapse state, mobile drawer, and Framer Motion animations.
 // Never performs any permission checks — that's done server-side.
+//
+// Resolves Lucide icon strings dynamically to maintain strict serialization
+// compliance across Server-to-Client framework execution paths.
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { X, GraduationCap, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, GraduationCap, ChevronLeft, ChevronRight, HelpCircle } from "lucide-react";
+import * as Icons from "lucide-react"; 
 import type { NavLink } from "@/lib/constants";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect } from "react";
@@ -197,7 +201,10 @@ export function AdminSidebarClient({
               <div className="space-y-0.5" role="list">
                 {groupLinks.map((link) => {
                   const active = isActive(link.href);
-                  const Icon = link.icon;
+                  
+                  // Safe TypeScript evaluation mapping key against known Lucide library dictionary export types
+                  const targetKey = link.icon as keyof typeof Icons;
+                  const IconComponent = (Icons[targetKey] as React.ComponentType<{ className?: string; size?: number }>) || HelpCircle;
 
                   return (
                     <Link
@@ -224,12 +231,11 @@ export function AdminSidebarClient({
                             : "group-hover:bg-white/[0.05]",
                         ].join(" ")}
                       >
-                        <Icon
+                        <IconComponent
                           className={[
                             "h-[18px] w-[18px] transition-colors",
                             active ? "text-amber-400" : "",
                           ].join(" ")}
-                          aria-hidden="true"
                         />
                       </div>
 

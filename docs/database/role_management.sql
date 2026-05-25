@@ -398,54 +398,65 @@ DROP POLICY IF EXISTS "profiles_super_admin_read"   ON public.profiles;
 DROP POLICY IF EXISTS "profiles_super_admin_write"  ON public.profiles;
 DROP POLICY IF EXISTS "profiles_dev_all"            ON public.profiles;
 
+COMMIT;
+
+-- 1. Drop the existing recursive policies
+DROP POLICY IF EXISTS "profiles_self_read" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_self_update" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_super_admin_read" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_super_admin_write" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_dev_all" ON public.profiles;
+
+-- 2. CREATE CLEAN, FAST, NON-RECURSIVE POLICIES
+
+-- POLICY 1: Devs get absolute power (Checked via JWT user_metadata)
+CREATE POLICY "profiles_dev_all"
+  ON public.profiles FOR ALL
+  TO authenticated
+  USING (
+    (auth.jwt() -> 'user_metadata' ->> 'is_dev')::boolean = true
+  );
+
+-- POLICY 2: Users can read their own profile row
 CREATE POLICY "profiles_self_read"
   ON public.profiles FOR SELECT
   TO authenticated
   USING (id = auth.uid());
 
+-- POLICY 3: Super Admins can read profiles within their own school
+CREATE POLICY "profiles_super_admin_read"
+  ON public.profiles FOR SELECT
+  TO authenticated
+  USING (
+    (auth.jwt() -> 'user_metadata' ->> 'is_super_admin')::boolean = true
+    AND school_id = (auth.jwt() -> 'user_metadata' ->> 'school_id')::uuid
+  );
+
+-- POLICY 4: Users can update their own profile (with strict flag protection)
 CREATE POLICY "profiles_self_update"
   ON public.profiles FOR UPDATE
   TO authenticated
   USING (id = auth.uid())
   WITH CHECK (
     id = auth.uid()
-    -- Prevent self-escalation of privilege flags
-    AND is_super_admin = (SELECT is_super_admin FROM public.profiles WHERE id = auth.uid())
-    AND is_dev         = (SELECT is_dev         FROM public.profiles WHERE id = auth.uid())
+    -- Instead of querying the table, we match against the secure, unchangeable JWT state
+    AND is_super_admin = (auth.jwt() -> 'user_metadata' ->> 'is_super_admin')::boolean
+    AND is_dev = (auth.jwt() -> 'user_metadata' ->> 'is_dev')::boolean
   );
 
-CREATE POLICY "profiles_super_admin_read"
-  ON public.profiles FOR SELECT
-  TO authenticated
-  USING (
-    school_id = (SELECT school_id FROM public.profiles WHERE id = auth.uid())
-    AND EXISTS (
-      SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_super_admin = true
-    )
-  );
-
+-- POLICY 5: Super Admins can update profiles within their own school
 CREATE POLICY "profiles_super_admin_write"
   ON public.profiles FOR UPDATE
   TO authenticated
   USING (
-    school_id = (SELECT school_id FROM public.profiles WHERE id = auth.uid())
-    AND EXISTS (
-      SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_super_admin = true
-    )
+    (auth.jwt() -> 'user_metadata' ->> 'is_super_admin')::boolean = true
+    AND school_id = (auth.jwt() -> 'user_metadata' ->> 'school_id')::uuid
     AND is_dev = false
   )
   WITH CHECK (
-    school_id = (SELECT school_id FROM public.profiles WHERE id = auth.uid())
+    school_id = (auth.jwt() -> 'user_metadata' ->> 'school_id')::uuid
     AND is_dev = false
   );
-
-CREATE POLICY "profiles_dev_all"
-  ON public.profiles FOR ALL
-  TO authenticated
-  USING (
-    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_dev = true)
-  );
-
 
 -- ── teachers ──────────────────────────────────────────────────────────────────
 
