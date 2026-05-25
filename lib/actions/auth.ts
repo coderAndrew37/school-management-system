@@ -33,7 +33,7 @@ import {
   type AuthActionResult,
 } from "@/lib/types/auth";
 
-// ✅ FIXED: correct import path — services not actions
+// ✅ FIXED: correct import path —  actions
 import {
   resolvePrimaryRole,
   resolveAllRoles,

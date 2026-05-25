@@ -529,6 +529,345 @@ $$;
 COMMIT;
 
 
+BEGIN;
+
+-- =============================================================================
+-- FIX 1: ADJUST SCHEMA OWNERSHIP AND ROLES DEFINITION (Addressing Diagnosis 4)
+-- Ensure postgres owns the schema engine, and grant access explicitly to all 
+-- auth daemons to avoid table grant runtime bypasses.
+-- =============================================================================
+
+-- Ensure the postgres superuser owns these core functions to execute cross-schema updates
+ALTER FUNCTION public.sync_user_jwt_claims(UUID) OWNER TO postgres;
+ALTER FUNCTION public.get_effective_permissions(UUID) OWNER TO postgres;
+ALTER FUNCTION public.user_has_permission(UUID, TEXT) OWNER TO postgres;
+ALTER FUNCTION public.trg_sync_jwt_on_profile_change() OWNER TO postgres;
+ALTER FUNCTION public.trg_sync_jwt_on_role_assignment() OWNER TO postgres;
+
+-- ---------------------------------------------------------------------------
+-- explicit Table Grants for the Function Owner (postgres)
+-- ---------------------------------------------------------------------------
+GRANT UPDATE, SELECT ON auth.users TO postgres;
+GRANT SELECT ON public.profiles TO postgres;
+GRANT SELECT ON public.staff_role_assignments TO postgres;
+GRANT SELECT ON public.admin_role_definitions TO postgres;
+
+-- ---------------------------------------------------------------------------
+-- explicit Table Grants for Supabase Auth Daemon Hooks
+-- This prevents the "empty claims array" fallback issue when GoTrue triggers evaluation
+-- ---------------------------------------------------------------------------
+GRANT EXECUTE ON FUNCTION public.sync_user_jwt_claims(UUID) TO supabase_auth_admin;
+GRANT EXECUTE ON FUNCTION public.get_effective_permissions(UUID) TO supabase_auth_admin, authenticated;
+GRANT EXECUTE ON FUNCTION public.user_has_permission(UUID, TEXT) TO supabase_auth_admin, authenticated;
+
+GRANT SELECT ON public.profiles TO supabase_auth_admin;
+GRANT SELECT ON public.staff_role_assignments TO supabase_auth_admin;
+GRANT SELECT ON public.admin_role_definitions TO supabase_auth_admin;
+
+COMMIT;
+
+BEGIN;
+
+-- =============================================================================
+-- FIX 2: HARDENING STEP 7 (TEACHER TRANSFER OUT TO METADATA LOOKUP)
+-- =============================================================================
+
+CREATE OR REPLACE FUNCTION public.execute_teacher_transfer_out(
+    p_teacher_id         UUID,
+    p_destination_school TEXT
+)
+RETURNS VOID
+SECURITY DEFINER
+SET search_path = public, auth
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_profile_id UUID;
+BEGIN
+    -- Resolve the exact auth profile user ID via target relationship mapping
+    BEGIN
+        SELECT id INTO v_profile_id
+        FROM   public.profiles
+        WHERE  teacher_id = p_teacher_id
+        LIMIT  1;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE WARNING '[execute_teacher_transfer_out] profile lookup failed: %', SQLERRM;
+        v_profile_id := NULL;
+    END;
+
+    -- 1. Track status migration inside school schema
+    UPDATE public.teachers
+    SET    status                      = 'transferred',
+           transfer_destination_school = p_destination_school,
+           transfer_date               = NOW()
+    WHERE  id = p_teacher_id;
+
+    -- 2. Clean out active security scopes if matching profile exists
+    IF v_profile_id IS NOT NULL THEN
+        BEGIN
+            UPDATE public.staff_role_assignments
+            SET    revoked_at    = NOW(),
+                   revoke_reason = 'Teacher transferred out'
+            WHERE  profile_id  = v_profile_id
+              AND  revoked_at IS NULL;
+
+            -- 3. Reset persistent permission override arrays 
+            UPDATE public.profiles
+            SET    allowed_permissions_override = '{}',
+                   denied_permissions_override  = '{}'
+            WHERE  id = v_profile_id;
+            
+            -- 4. Flush security clearance values immediately inside target metadata claims
+            UPDATE auth.users
+            SET    raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::JSONB) ||
+                   jsonb_build_object(
+                       'permissions',  '[]'::JSONB,
+                       'admin_role',   NULL::TEXT,
+                       'admin_label',  NULL::TEXT,
+                       'admin_paths',  jsonb_build_array('/admin/dashboard')
+                   )
+            WHERE  id = v_profile_id;
+            
+        EXCEPTION WHEN OTHERS THEN
+            RAISE WARNING '[execute_teacher_transfer_out] Security access revocation failed cleanly for uid=%: %', 
+                v_profile_id, SQLERRM;
+        END;
+    ELSE
+        RAISE WARNING '[execute_teacher_transfer_out] Skip JWT cleanup. No valid profile linked to teacher_id=%', p_teacher_id;
+    END IF;
+
+END;
+$$;
+
+COMMIT;
+
+BEGIN;
+
+CREATE OR REPLACE FUNCTION public.sync_user_jwt_claims(
+    p_profile_id UUID
+)
+RETURNS VOID
+SECURITY DEFINER
+SET search_path = public, auth
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_profile       RECORD;
+    v_assignment    RECORD;
+    v_permissions   TEXT[];
+    v_allowed_paths TEXT[];
+    v_claims        JSONB;
+BEGIN
+    -- 1. Fail-safe Advisory Lock check to prevent concurrent race conditions/deadlocks
+    -- If another process is updating this specific user token, skip to prevent a 500 crash
+    IF NOT pg_try_advisory_xact_lock(hashtext(p_profile_id::text)) THEN
+        RAISE WARNING '[sync_user_jwt_claims] Skipping execution to prevent deadlock for uid=%', p_profile_id;
+        RETURN;
+    END IF;
+
+    -- 2. Safe profile extraction
+    SELECT
+        id,
+        COALESCE(role::TEXT, 'teacher')    AS role,
+        school_id,
+        COALESCE(is_super_admin, false)    AS is_super_admin,
+        COALESCE(is_dev, false)            AS is_dev
+    INTO v_profile
+    FROM public.profiles
+    WHERE id = p_profile_id;
+
+    IF NOT FOUND THEN
+        RAISE WARNING '[sync_user_jwt_claims] profile not found for uid=%', p_profile_id;
+        RETURN;
+    END IF;
+
+    -- 3. Load active assignment scopes safely
+    BEGIN
+        SELECT sra.role_id, ard.label, ard.allowed_paths
+        INTO   v_assignment
+        FROM   public.staff_role_assignments sra
+        JOIN   public.admin_role_definitions ard
+               ON  ard.id        = sra.role_id
+               AND ard.school_id = sra.school_id
+        WHERE  sra.profile_id = p_profile_id
+          AND  sra.revoked_at IS NULL
+        ORDER  BY sra.assigned_at DESC
+        LIMIT  1;
+    EXCEPTION WHEN OTHERS THEN
+        v_assignment := NULL;
+    END;
+
+    -- 4. Gather authorized matrix tokens
+    BEGIN
+        SELECT array_agg(permission_id)
+        INTO   v_permissions
+        FROM   public.get_effective_permissions(p_profile_id);
+    EXCEPTION WHEN OTHERS THEN
+        v_permissions := ARRAY[]::TEXT[];
+    END;
+
+    v_permissions := COALESCE(v_permissions, ARRAY[]::TEXT[]);
+
+    -- 5. Establish allowed paths array matrix
+    IF v_profile.is_super_admin OR v_profile.is_dev THEN
+        v_allowed_paths := ARRAY['/admin'];
+    ELSIF v_assignment IS NOT NULL AND v_assignment.allowed_paths IS NOT NULL THEN
+        v_allowed_paths := v_assignment.allowed_paths;
+    ELSE
+        v_allowed_paths := ARRAY['/admin/dashboard'];
+    END IF;
+
+    -- 6. Construct meta payload cleanly
+    v_claims := jsonb_build_object(
+        'role',           COALESCE(v_profile.role,         'teacher'),
+        'school_id',      v_profile.school_id,
+        'is_super_admin', COALESCE(v_profile.is_super_admin, false),
+        'is_dev',         COALESCE(v_profile.is_dev,         false),
+        'admin_role',     CASE WHEN v_assignment IS NOT NULL THEN v_assignment.role_id ELSE NULL END,
+        'admin_label',    CASE WHEN v_assignment IS NOT NULL THEN v_assignment.label   ELSE NULL END,
+        'admin_paths',    to_jsonb(v_allowed_paths),
+        'permissions',    to_jsonb(v_permissions)
+    );
+
+    -- 7. Execute update wrapper safely isolated from GoTrue active execution path
+    -- If it's a new sign-in transaction, updating auth.users might throw a row lock error.
+    -- We isolate this using a nested sub-transaction block.
+    BEGIN
+        UPDATE auth.users
+        SET    raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::JSONB) || v_claims
+        WHERE  id = p_profile_id;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE WARNING '[sync_user_jwt_claims] Controlled rollback on raw_app_meta_data update for uid=%: %', 
+            p_profile_id, SQLERRM;
+    END;
+
+END;
+$$;
+
+COMMIT;
+
+BEGIN;
+
+-- =============================================================================
+-- GRANT EXPLICIT SELECT PRIVILEGES TO SUPABASE_AUTH_ADMIN
+-- Flips 'can_select' from FALSE to TRUE for the core infrastructure tables.
+-- =============================================================================
+
+GRANT SELECT ON public.schools                 TO supabase_auth_admin;
+GRANT SELECT ON public.profiles                TO supabase_auth_admin;
+GRANT SELECT ON public.teachers                TO supabase_auth_admin;
+GRANT SELECT ON public.admin_role_definitions  TO supabase_auth_admin;
+GRANT SELECT ON public.staff_role_assignments  TO supabase_auth_admin;
+GRANT SELECT ON public.permission_catalog      TO supabase_auth_admin;
+
+-- ---------------------------------------------------------------------------
+-- OPTIONAL BUT RECOMMENDED: If your triggers or sync routines ever need to
+-- update profile roles or sync flags directly from the auth side
+-- ---------------------------------------------------------------------------
+GRANT UPDATE(role, is_super_admin, is_dev) ON public.profiles TO supabase_auth_admin;
+
+COMMIT;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+    v_initial_role  public.user_role;
+    v_full_name     TEXT;
+    v_school_id     UUID;
+    v_email         TEXT;
+BEGIN
+    -- Safely resolve role from metadata, default to parent
+    BEGIN
+        v_initial_role := COALESCE(
+            (NEW.raw_user_meta_data->>'role')::public.user_role,
+            'parent'::public.user_role
+        );
+    EXCEPTION WHEN OTHERS THEN
+        v_initial_role := 'parent'::public.user_role;
+    END;
+
+    -- Resolve display name
+    v_full_name := COALESCE(
+        NULLIF(TRIM(NEW.raw_user_meta_data->>'full_name'), ''),
+        split_part(NEW.email, '@', 1)
+    );
+
+    -- Resolve school_id from metadata if provided (set during admin-created invites)
+    BEGIN
+        v_school_id := (NEW.raw_user_meta_data->>'school_id')::UUID;
+    EXCEPTION WHEN OTHERS THEN
+        v_school_id := NULL;
+    END;
+
+    -- Mirror email from auth.users
+    v_email := NEW.email;
+
+    -- Insert profile row — idempotent via ON CONFLICT
+    INSERT INTO public.profiles (
+        id,
+        full_name,
+        email,
+        role,
+        roles,
+        school_id,
+        allowed_permissions_override,
+        denied_permissions_override
+    )
+    VALUES (
+        NEW.id,
+        v_full_name,
+        v_email,
+        v_initial_role,
+        ARRAY[v_initial_role],
+        v_school_id,
+        '{}',
+        '{}'
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        -- Only backfill NULLs — never overwrite data already set
+        email     = EXCLUDED.email,
+        school_id = COALESCE(profiles.school_id, EXCLUDED.school_id),
+        full_name = COALESCE(NULLIF(profiles.full_name, ''), EXCLUDED.full_name);
+
+    -- !! REMOVED: NEW.raw_app_meta_data mutation
+    -- That was a no-op in an AFTER trigger and corrupted GoTrue's
+    -- transaction return contract. JWT sync happens via
+    -- trg_sync_profile_to_jwt → sync_user_jwt_claims instead.
+
+    RETURN NULL; -- correct return value for AFTER triggers
+
+EXCEPTION WHEN OTHERS THEN
+    -- Never crash GoTrue — a failed profile insert is recoverable,
+    -- a 500 on login is not.
+    RAISE WARNING '[handle_new_user] non-fatal error for uid=%: % (SQLSTATE: %)',
+        NEW.id, SQLERRM, SQLSTATE;
+    RETURN NULL;
+END;
+$$;
+
+COMMIT;
+
+-- 1. Restore core schema usage to the auth admin role
+GRANT USAGE ON SCHEMA auth TO supabase_auth_admin, postgres, service_role;
+GRANT USAGE ON SCHEMA public TO supabase_auth_admin, postgres, service_role;
+
+-- 2. Restore all structural table permissions within the auth schema
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin, postgres, service_role;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA auth TO supabase_auth_admin, postgres, service_role;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA auth TO supabase_auth_admin, postgres, service_role;
+
+-- 3. Ensure future tables in the auth schema inherit these privileges
+ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON TABLES TO supabase_auth_admin, postgres, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON SEQUENCES TO supabase_auth_admin, postgres, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON FUNCTIONS TO supabase_auth_admin, postgres, service_role;
+
+-- 4. Re-grant visibility permissions to standard API consumer roles
+GRANT USAGE ON SCHEMA auth TO anon, authenticated;
+GRANT SELECT ON ALL TABLES IN SCHEMA auth TO anon, authenticated;
+
+
 -- =============================================================================
 -- STEP 8: DIAGNOSTIC VERIFICATION QUERIES
 -- Run these AFTER applying the fix to confirm the functions work correctly.
