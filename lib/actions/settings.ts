@@ -10,7 +10,7 @@ import { z } from "zod";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface SchoolSettings {
-  id: string;
+  id: number;
   school_name: string;
   school_motto: string | null;
   school_address: string | null;
@@ -41,8 +41,9 @@ export interface SettingsActionResult {
 export async function fetchSchoolSettings(): Promise<SchoolSettings | null> {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
-    .from("school_settings")
+    .from("system_settings")
     .select("*")
+    .eq("id", 1)
     .single();
 
   if (error) {
@@ -83,28 +84,26 @@ export async function updateSchoolSettings(
   formData: FormData,
 ): Promise<SettingsActionResult> {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+  if (!session || !["admin", "superadmin"].includes(session.profile.base_role)) {
     return { success: false, message: "Unauthorised" };
   }
 
   const raw = {
-    school_name: formData.get("school_name"),
-    school_motto: formData.get("school_motto") || null,
-    school_address: formData.get("school_address") || null,
-    school_phone: formData.get("school_phone") || null,
-    school_email: formData.get("school_email") || null,
-    current_term: formData.get("current_term"),
-    current_academic_year: formData.get("current_academic_year"),
-    term1_start: formData.get("term1_start") || null,
-    term1_end: formData.get("term1_end") || null,
-    term2_start: formData.get("term2_start") || null,
-    term2_end: formData.get("term2_end") || null,
-    term3_start: formData.get("term3_start") || null,
-    term3_end: formData.get("term3_end") || null,
-    sms_notifications_enabled:
-      formData.get("sms_notifications_enabled") === "true",
-    email_notifications_enabled:
-      formData.get("email_notifications_enabled") === "true",
+    school_name:                formData.get("school_name"),
+    school_motto:               formData.get("school_motto")    || null,
+    school_address:             formData.get("school_address")  || null,
+    school_phone:               formData.get("school_phone")    || null,
+    school_email:               formData.get("school_email")    || null,
+    current_term:               formData.get("current_term"),
+    current_academic_year:      formData.get("current_academic_year"),
+    term1_start:                formData.get("term1_start")     || null,
+    term1_end:                  formData.get("term1_end")       || null,
+    term2_start:                formData.get("term2_start")     || null,
+    term2_end:                  formData.get("term2_end")       || null,
+    term3_start:                formData.get("term3_start")     || null,
+    term3_end:                  formData.get("term3_end")       || null,
+    sms_notifications_enabled:  formData.get("sms_notifications_enabled")  === "true",
+    email_notifications_enabled: formData.get("email_notifications_enabled") === "true",
   };
 
   const parsed = settingsSchema.safeParse(raw);
@@ -115,12 +114,12 @@ export async function updateSchoolSettings(
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
-    .from("school_settings")
+    .from("system_settings")
     .update({
       ...parsed.data,
       updated_by: session.profile.id,
     })
-    .eq("id", (await fetchSchoolSettings())?.id ?? "");
+    .eq("id", 1); // always 1 — single-row singleton table
 
   if (error) {
     console.error("updateSchoolSettings error:", error.message);
@@ -136,13 +135,13 @@ export async function updateSchoolSettings(
 }
 
 // ── Upload logo ───────────────────────────────────────────────────────────────
-// Uploads to school-assets bucket, stores the path in school_settings.logo_url
+// Uploads to school-assets bucket, stores the path in system_settings.logo_url
 
 export async function uploadSchoolLogo(
   formData: FormData,
 ): Promise<SettingsActionResult & { logo_url?: string }> {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+  if (!session || !["admin", "superadmin"].includes(session.profile.base_role)) {
     return { success: false, message: "Unauthorised" };
   }
 
@@ -163,8 +162,8 @@ export async function uploadSchoolLogo(
     return { success: false, message: "Logo must be PNG, JPEG, WEBP, or SVG" };
   }
 
-  const ext = file.name.split(".").pop() ?? "png";
-  const path = `logos/school-logo.${ext}`;
+  const ext    = file.name.split(".").pop() ?? "png";
+  const path   = `logos/school-logo.${ext}`;
   const buffer = Buffer.from(await file.arrayBuffer());
 
   const { error: uploadError } = await supabaseAdmin.storage
@@ -182,17 +181,14 @@ export async function uploadSchoolLogo(
     };
   }
 
-  // Persist the path in settings
-  const current = await fetchSchoolSettings();
-  if (!current) return { success: false, message: "Settings row not found" };
-
   const supabase = await createSupabaseServerClient();
   const { error: updateError } = await supabase
-    .from("school_settings")
+    .from("system_settings")
     .update({ logo_url: path, updated_by: session.profile.id })
-    .eq("id", current.id);
+    .eq("id", 1); // always 1 — no need to fetch first
 
   if (updateError) {
+    console.error("Logo settings update error:", updateError.message);
     return {
       success: false,
       message: "Logo uploaded but settings update failed.",

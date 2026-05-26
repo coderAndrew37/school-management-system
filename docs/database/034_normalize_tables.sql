@@ -104,3 +104,61 @@ ALTER TABLE public.profiles
 
 -- 2. Force PostgREST to rebuild its join cache maps
 NOTIFY pgrst, 'reload schema';
+
+DROP TABLE IF EXISTS public.system_settings CASCADE;
+
+CREATE TABLE public.system_settings (
+    id                          INTEGER PRIMARY KEY DEFAULT 1,
+    school_name                 TEXT NOT NULL DEFAULT 'Kibali Academy',
+    school_motto                TEXT NULL,
+    school_address              TEXT NULL,
+    school_phone                TEXT NULL,
+    school_email                TEXT NULL,
+    logo_url                    TEXT NULL,
+    current_term                INTEGER NOT NULL DEFAULT 1,
+    current_academic_year       INTEGER NOT NULL DEFAULT 2026,
+    term1_start                 DATE NULL,
+    term1_end                   DATE NULL,
+    term2_start                 DATE NULL,
+    term2_end                   DATE NULL,
+    term3_start                 DATE NULL,
+    term3_end                   DATE NULL,
+    sms_notifications_enabled   BOOLEAN NOT NULL DEFAULT true,
+    email_notifications_enabled BOOLEAN NOT NULL DEFAULT true,
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by                  UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+
+    CONSTRAINT system_settings_id_check      CHECK (id = 1),
+    CONSTRAINT system_settings_term_check    CHECK (current_term IN (1, 2, 3)),
+    CONSTRAINT system_settings_year_check    CHECK (current_academic_year BETWEEN 2020 AND 2040)
+);
+
+-- Seed the single row
+INSERT INTO system_settings (
+    id, school_name, current_term, current_academic_year
+) VALUES (
+    1, 'Kibali Academy', 1, 2026
+);
+
+-- RLS
+ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
+
+-- Anyone authenticated in the school can read settings
+CREATE POLICY "settings_read_authenticated"
+    ON public.system_settings FOR SELECT
+    TO authenticated USING (true);
+
+-- Only super admin or dev can write
+CREATE POLICY "settings_write_super_admin"
+    ON public.system_settings FOR UPDATE
+    TO authenticated
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.profiles
+            WHERE id = auth.uid()
+              AND (is_super_admin = true OR is_dev = true)
+        )
+    );
+
+-- Reload PostgREST cache
+NOTIFY pgrst, 'reload schema';
