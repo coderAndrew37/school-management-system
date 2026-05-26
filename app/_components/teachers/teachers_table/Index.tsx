@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useState } from "react";
 
 // Local Components
@@ -10,7 +10,6 @@ import { TeachersTableContent } from "./TeachersTableContent";
 import { useTeachersFilter } from "./useTeachersFilters"; // Changed from useTeachersFilters to match the export
 
 import type { Teacher } from "@/lib/types/dashboard";
-import RegisterTeacherModal from "../RegisterTeacherModal";
 
 interface TeachersIndexProps {
   initialTeachers: Teacher[];
@@ -73,7 +72,6 @@ export default function TeachersIndex({
             </div>
           </div>
 
-          <RegisterTeacherModal/>
         </div>
       </div>
 

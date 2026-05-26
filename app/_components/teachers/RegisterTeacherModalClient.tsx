@@ -11,14 +11,18 @@ import {
   teacherRegistrationSchema,
   type TeacherFormValues,
 } from "@/lib/schemas/teacher";
-import { addTeacherAction } from "@/lib/actions/addTeacher";
+import type { ActionResult } from "@/lib/types/dashboard";
 import { KButton, KInput } from "../shared/Forms";
 
 interface RegisterTeacherModalClientProps {
   schoolId: string | null;
+  onRegisterAction: (formData: FormData) => Promise<ActionResult>;
 }
 
-export function RegisterTeacherModalClient({ schoolId }: RegisterTeacherModalClientProps) {
+export function RegisterTeacherModalClient({ 
+  schoolId, 
+  onRegisterAction 
+}: RegisterTeacherModalClientProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isPending, setIsPending] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -80,7 +84,8 @@ export function RegisterTeacherModalClient({ schoolId }: RegisterTeacherModalCli
     }
 
     try {
-      const result = await addTeacherAction(formData);
+      // Execute the server action passed through components props
+      const result = await onRegisterAction(formData);
       if (result.success) {
         toast.success(result.message || "Staff member registered successfully");
         reset();
@@ -113,7 +118,6 @@ export function RegisterTeacherModalClient({ schoolId }: RegisterTeacherModalCli
 
       {isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 animate-in fade-in duration-150">
-          {/* Overlay Backdrop background click handler */}
           <div
             className="absolute inset-0 bg-black/80 backdrop-blur-md"
             onClick={handleClose}
@@ -138,7 +142,6 @@ export function RegisterTeacherModalClient({ schoolId }: RegisterTeacherModalCli
             </div>
 
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-              {/* Profile Image Uploader Layout Frame */}
               <div className="flex justify-center pb-2">
                 <div className="relative group h-24 w-24">
                   <div className="h-24 w-24 rounded-full bg-white/5 border border-white/10 overflow-hidden flex items-center justify-center relative">

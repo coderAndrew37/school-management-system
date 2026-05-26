@@ -1,4 +1,8 @@
+// lib/supabase/server.ts
+import "server-only";
+
 import { createServerClient as createSSRServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js"; // Standardized ES Import replaces the require call
 import { cookies } from "next/headers";
 import type { CookieOptions } from "@supabase/ssr";
 
@@ -23,7 +27,7 @@ export async function createSupabaseServerClient() {
         return cookieStore.getAll();
       },
       setAll(
-        cookiesToSet: { name: string; value: string; options: CookieOptions }[],
+        cookiesToSet: { name: string; value: string; options: CookieOptions }[]
       ) {
         try {
           cookiesToSet.forEach(({ name, value, options }) => {
@@ -50,8 +54,7 @@ export function createSupabaseServiceClient() {
     throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
   }
 
-  // Service client does not need cookie-based session management
-  const { createClient } = require("@supabase/supabase-js");
+  // Pure clean initialization using the top-level static ES import
   return createClient(url, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });

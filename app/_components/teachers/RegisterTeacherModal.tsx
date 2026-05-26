@@ -1,6 +1,7 @@
 // components/modals/RegisterTeacherModal.tsx
 import React from "react";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { addTeacherAction } from "@/lib/actions/addTeacher";
 import { RegisterTeacherModalClient } from "./RegisterTeacherModalClient";
 
 export default async function RegisterTeacherModal() {
@@ -24,5 +25,11 @@ export default async function RegisterTeacherModal() {
     resolvedSchoolId = profile?.school_id ?? null;
   }
 
-  return <RegisterTeacherModalClient schoolId={resolvedSchoolId} />;
+  // Pass the server action cleanly down into the presentation layer via props
+  return (
+    <RegisterTeacherModalClient 
+      schoolId={resolvedSchoolId} 
+      onRegisterAction={addTeacherAction} 
+    />
+  );
 }
