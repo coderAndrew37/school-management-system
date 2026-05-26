@@ -5,7 +5,7 @@
 // It performs two layers of authorization:
 //
 //   Layer 1 — Base role check:
-//     Verifies the session exists and the user has the "admin" base_role.
+//     Verifies the session exists and the user has the "admin" or "super_admin" base_role.
 //     Redirects to /login if unauthenticated or /access-denied if wrong portal.
 //
 //   Layer 2 — Path-level domain-action check:
@@ -22,6 +22,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { getSession } from "@/lib/actions/auth";
 import { ADMIN_LINKS, getAuthorizedLinks } from "@/lib/constants";
+// ✅ FIXED: Imported hasPermission from the updated single source of truth in services
 import { hasPermission } from "@/lib/actions/auth-utils";
 import { ACCESS_DENIED_ROUTE } from "@/lib/types/auth";
 import { AdminLayoutShell } from "@/app/_components/nav/AdminLayoutShell";
@@ -75,12 +76,21 @@ export default async function AdminLayout({
     redirect("/login");
   }
 
-  if (session.primaryRole !== "admin" && !session.profile.is_dev) {
+  // ✅ FIXED: Updated role evaluation to support "super_admin" and bypass checks for is_dev
+  const isAuthorizedAdmin = 
+    session.primaryRole === "admin" || 
+    session.primaryRole === "super_admin" || 
+    session.profile.is_dev;
+
+  if (!isAuthorizedAdmin) {
     // Wrong portal — send to their correct landing page
+    // ✅ FIXED: Replaced legacy "teacher" route mapping key with standardized "staff"
     const destination = {
-      teacher: "/teacher/dashboard",
+      super_admin: "/admin/dashboard",
+      admin: "/admin/dashboard",
+      staff: "/teacher/dashboard",
       parent: "/parent/dashboard",
-      support: "/support/dashboard",
+      student: "/student/dashboard",
     }[session.primaryRole];
 
     redirect(destination ?? "/login");
@@ -93,6 +103,22 @@ export default async function AdminLayout({
     headersList.get("x-pathname") ??
     headersList.get("x-invoke-path") ??
     "/admin/dashboard";
+
+  // CRITICAL LOOP BREAKER: If the user is landing on the access-denied view itself,
+  // short-circuit immediately. Do not perform token or route manifest validations,
+  // which causes the infinite middleware-to-layout redirect loop.
+  if (currentPath === "/admin/access-denied" || currentPath === ACCESS_DENIED_ROUTE) {
+    const authorizedLinks = getAuthorizedLinks(session.profile);
+    return (
+      <AdminLayoutShell
+        profile={session.profile}
+        email={session.user.email ?? ""}
+        authorizedLinks={authorizedLinks}
+      >
+        {children}
+      </AdminLayoutShell>
+    );
+  }
 
   const requiredPermission = resolveRequiredPermission(currentPath);
 

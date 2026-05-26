@@ -6,21 +6,22 @@ import { z } from "zod";
 
 // ── Base Roles ───────────────────────────────────────────────────────────────
 // Determines which dashboard portal the user lands on.
-// Stored in profiles.base_role and synced to app_metadata.role.
+// Matches the public.user_role enum exactly:
+//   super_admin → full system control, all views
+//   admin       → school admin staff (headteacher, bursar, DOS etc.) — admin portal with dynamic views
+//   staff       → subject/class teachers — teacher portal
+//   parent      → parents — parent portal
+//   student     → students (future)
 
-export const BASE_ROLES = ["admin", "teacher", "parent", "support"] as const;
+export const BASE_ROLES = ["super_admin", "admin", "staff", "parent", "student"] as const;
 export type BaseRole = (typeof BASE_ROLES)[number];
 
 // ── Domain-Action Token System ───────────────────────────────────────────────
 // Permission tokens are structured as: domain:subdomain:action
 // e.g. "finance:fees:read", "academics:assessments:write", "people:students:delete"
-//
-// This is the canonical type for any permission token string used in the system.
-// Tokens can be exact (finance:fees:read) or domain-level wildcards (finance:*).
 
 export type PermissionToken = string & { readonly __brand: unique symbol };
 
-// Known top-level domains in the application
 export const PERMISSION_DOMAINS = [
   "finance",
   "academics",
@@ -32,7 +33,6 @@ export const PERMISSION_DOMAINS = [
 ] as const;
 export type PermissionDomain = (typeof PERMISSION_DOMAINS)[number];
 
-// Known actions (used as the final segment of a token)
 export const PERMISSION_ACTIONS = ["read", "write", "delete", "manage"] as const;
 export type PermissionAction = (typeof PERMISSION_ACTIONS)[number];
 
@@ -41,7 +41,6 @@ export type PermissionAction = (typeof PERMISSION_ACTIONS)[number];
 // Runtime-created roles extend this list as plain strings.
 
 export const SEEDED_ADMIN_ROLES = [
-  "super_admin",
   "headteacher",
   "deputy_headteacher",
   "bursar",
@@ -55,24 +54,23 @@ export type AdminRole = SeededAdminRole | string;
 // ── Admin Role Definition (from admin_role_definitions table) ────────────────
 
 export interface AdminRoleDefinition {
-  id: string;
-  label: string;
-  description: string;
-  allowed_paths: string[];
-  // Baseline permission tokens that this role inherits by default
+  id:                   string;
+  label:                string;
+  description:          string;
+  allowed_paths:        string[];
   baseline_permissions: string[];
-  is_active: boolean;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
+  is_active:            boolean;
+  sort_order:           number;
+  created_at:           string;
+  updated_at:           string;
 }
 
 // ── Baseline Role Capability Map ─────────────────────────────────────────────
-// Defines the fallback permission set for each seeded admin role.
-// The hasPermission evaluator uses this when no override is present.
+// Client-side reference only. The authoritative source is admin_role_definitions
+// in the database. This is used for UI hints and fallback rendering.
 
 export const BASELINE_ROLE_CAPABILITIES: Record<string, readonly string[]> = {
-  super_admin: ["*"], // Wildcard — bypasses all checks
+  super_admin: ["*"],
   headteacher: [
     "finance:fees:read",
     "academics:assessments:read",
@@ -128,70 +126,61 @@ export const BASELINE_ROLE_CAPABILITIES: Record<string, readonly string[]> = {
 // ── JWT App Metadata Schema ──────────────────────────────────────────────────
 
 export interface UserAppMetadata {
-  provider?: string;
-  providers?: string[];
-  role: BaseRole;
-  roles?: BaseRole[];
-  admin_role?: string;
-  admin_paths?: string[];
-  // Effective, resolved permission token array flushed at login/sync time
-  permissions?: string[];
+  provider?:      string;
+  providers?:     string[];
+  role:           BaseRole;
+  roles?:         BaseRole[];
+  admin_role?:    string;
+  admin_paths?:   string[];
+  permissions?:   string[];
   is_super_admin?: boolean;
+  is_dev?:        boolean;
+  school_id?:     string;
 }
 
-// ── Profile (single source of truth from public.profiles) ───────────────────
-// This maps directly to the database row. The two override arrays are the
-// core of the Domain-Action permission evaluation pipeline.
+// ── Profile (maps directly to public.profiles row) ───────────────────────────
 
 export interface Profile {
-  id: string;
-  school_id: string | null;
-  base_role: BaseRole;
-  admin_role: string | null;
-  roles: string[] | null;
-  full_name: string | null;
-  avatar_url: string | null;
-  email?: string | null;
-  phone_number?: string | null;
-  teacher_id: string | null;
-  is_super_admin: boolean;
-  is_dev: boolean;
-  created_at: string;
-  updated_at: string;
-
-  // ── Domain-Action Override Arrays ─────────────────────────────────────────
-  // These columns live on public.profiles and drive the runtime permission engine.
-  //
-  // allowed_permissions_override: explicit grants that expand beyond baseline role.
-  // denied_permissions_override:  explicit revocations that override everything.
-  //
-  // Evaluation priority: denied > allowed_override > baseline_role > deny
+  id:                           string;
+  school_id:                    string | null;
+  base_role:                    BaseRole;
+  admin_role:                   string | null;
+  roles:                        string[] | null;
+  full_name:                    string | null;
+  avatar_url:                   string | null;
+  email?:                       string | null;
+  phone_number?:                string | null;
+  teacher_id:                   string | null;
+  is_super_admin:               boolean;
+  is_dev:                       boolean;
+  created_at:                   string;
+  updated_at:                   string;
   allowed_permissions_override: string[] | null;
-  denied_permissions_override: string[] | null;
+  denied_permissions_override:  string[] | null;
 }
 
 // ── Enriched Staff Member ────────────────────────────────────────────────────
 
 export interface StaffMember {
-  id: string;
-  full_name: string | null;
-  avatar_url: string | null;
-  email: string | null;
-  base_role: BaseRole;
-  admin_role: string | null;
+  id:                    string;
+  full_name:             string | null;
+  avatar_url:            string | null;
+  email:                 string | null;
+  base_role:             BaseRole;
+  admin_role:            string | null;
   admin_role_definition: AdminRoleDefinition | null;
-  roles: string[] | null;
-  is_super_admin: boolean;
-  is_dev: boolean;
-  created_at: string;
-  updated_at: string;
+  roles:                 string[] | null;
+  is_super_admin:        boolean;
+  is_dev:                boolean;
+  created_at:            string;
+  updated_at:            string;
 }
 
 // ── Role Statistics ──────────────────────────────────────────────────────────
 
 export interface RoleStatistics {
-  total: number;
-  byBaseRole: Partial<Record<BaseRole, number>>;
+  total:       number;
+  byBaseRole:  Partial<Record<BaseRole, number>>;
   byAdminRole: Record<string, number>;
 }
 
@@ -199,86 +188,88 @@ export interface RoleStatistics {
 
 export interface AssignRolePayload {
   targetUserId: string;
-  base_role: BaseRole;
-  admin_role: string | null;
-  reason: string;
+  base_role:    BaseRole;
+  admin_role:   string | null;
+  reason:       string;
 }
 
 export interface UpdatePermissionOverridesPayload {
-  targetUserId: string;
+  targetUserId:                 string;
   allowed_permissions_override: string[];
-  denied_permissions_override: string[];
-  reason: string;
+  denied_permissions_override:  string[];
+  reason:                       string;
 }
 
 export interface RoleDefinitionPayload {
-  id: string;
-  label: string;
-  description: string;
-  allowed_paths: string[];
+  id:                   string;
+  label:                string;
+  description:          string;
+  allowed_paths:        string[];
   baseline_permissions: string[];
-  sort_order: number;
+  sort_order:           number;
 }
 
 // ── Auth Result ──────────────────────────────────────────────────────────────
 
 export interface AuthUser {
-  id: string;
-  email: string;
+  id:      string;
+  email:   string;
   profile: Profile;
 }
 
 export interface AuthActionResult {
-  success: boolean;
-  message: string;
+  success:     boolean;
+  message:     string;
   redirectTo?: string;
-  roles?: BaseRole[];
+  roles?:      BaseRole[];
 }
 
 // ── Route Constants ──────────────────────────────────────────────────────────
 
-export const CHOOSE_ROLE_ROUTE = "/auth/choose-role";
+export const CHOOSE_ROLE_ROUTE  = "/auth/choose-role";
 export const ACCESS_DENIED_ROUTE = "/admin/access-denied";
 
+// Where each base role lands after login
 export const ROLE_ROUTES: Record<BaseRole, string> = {
-  admin: "/admin/dashboard",
-  teacher: "/teacher/dashboard",
-  parent: "/parent/dashboard",
-  support: "/support/dashboard",
+  super_admin: "/admin/dashboard",
+  admin:       "/admin/dashboard",
+  staff:       "/teacher/dashboard",
+  parent:      "/parent/dashboard",
+  student:     "/student/dashboard",
 };
 
-// Maps route prefixes to the minimum base roles that may access them.
-// This is the middleware Layer 1 check. Domain-action tokens are Layer 2.
+// Maps route prefixes to the base roles that may access them.
+// Layer 1 middleware check. Domain-action tokens are Layer 2+.
 export const PROTECTED_PREFIXES: Record<string, BaseRole[]> = {
-  "/admin": ["admin"],
-  "/teacher": ["teacher", "admin"],
-  "/parent": ["parent"],
-  "/support": ["support"],
+  "/admin":   ["admin", "super_admin"],
+  "/teacher": ["staff"],
+  "/parent":  ["parent"],
+  "/student": ["student"],
 };
 
 // ── Static Labels ────────────────────────────────────────────────────────────
 
 export const SEEDED_ROLE_LABELS: Record<string, string> = {
-  super_admin: "Super Administrator",
-  headteacher: "Headteacher",
+  headteacher:        "Headteacher",
   deputy_headteacher: "Deputy Headteacher",
-  bursar: "Bursar",
-  dos: "Director of Studies",
-  school_doctor: "School Doctor",
-  librarian: "Librarian",
+  bursar:             "Bursar",
+  dos:                "Director of Studies",
+  school_doctor:      "School Doctor",
+  librarian:          "Librarian",
 };
 
 export const BASE_ROLE_LABELS: Record<BaseRole, string> = {
-  admin: "Administrator",
-  teacher: "Teacher",
-  parent: "Parent / Guardian",
-  support: "Support Staff",
+  super_admin: "Super Administrator",
+  admin:       "Administrator",
+  staff:       "Teacher / Staff",
+  parent:      "Parent / Guardian",
+  student:     "Student",
 };
 
 // ── Zod Auth Form Schemas ────────────────────────────────────────────────────
 
 export const loginSchema = z.object({
-  email: z.string().email("Enter a valid email address"),
+  email:    z.string().email("Enter a valid email address"),
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
@@ -298,12 +289,13 @@ export const resetPasswordSchema = z
   })
   .refine((d) => d.password === d.confirmPassword, {
     message: "Passwords do not match",
-    path: ["confirmPassword"],
+    path:    ["confirmPassword"],
   });
 
-export type LoginFormValues = z.infer<typeof loginSchema>;
+export type LoginFormValues         = z.infer<typeof loginSchema>;
 export type ForgotPasswordFormValues = z.infer<typeof forgotPasswordSchema>;
-export type ResetPasswordFormValues = z.infer<typeof resetPasswordSchema>;
+export type ResetPasswordFormValues  = z.infer<typeof resetPasswordSchema>;
 
-// Legacy alias kept for backward compatibility with existing middleware
+// ── Legacy alias ─────────────────────────────────────────────────────────────
+// Kept for backward compatibility with middleware import
 export type UserRole = BaseRole;

@@ -27,7 +27,7 @@ interface RawProfileRow {
 interface RawParentLink {
   is_primary_contact: boolean;
   relationship_type: string;
-  profiles: RawProfileRow | null;
+  parent: RawProfileRow | null;  // was: profiles
 }
 
 interface RawStudentRow {
@@ -98,20 +98,20 @@ function mapStudentRow(row: RawStudentRow): Student {
     photo_url:      row.photo_url,
     created_at:     row.created_at,
     status:         (row.status as Student["status"]) ?? "active",
-    parents:        primary?.profiles
+    parents: primary?.parent
       ? {
-          id: primary.profiles.id,
-          full_name: primary.profiles.full_name,
-          phone_number: primary.profiles.phone_number,
-          email: primary.profiles.email ?? "",
+          id:              primary.parent.id,
+          full_name:       primary.parent.full_name,
+          phone_number:    primary.parent.phone_number,
+          email:           primary.parent.email ?? "",
           invite_accepted: true,
         }
       : null,
     all_parents: links.map((l) => ({
-      parent_id:          l.profiles?.id           ?? "",
-      full_name:          l.profiles?.full_name     ?? "",
-      phone_number:       l.profiles?.phone_number  ?? null,
-      email:              l.profiles?.email         ?? "",
+      parent_id:          l.parent?.id            ?? "",
+      full_name:          l.parent?.full_name      ?? "",
+      phone_number:       l.parent?.phone_number   ?? null,
+      email:              l.parent?.email          ?? "",
       relationship_type:  l.relationship_type,
       is_primary_contact: l.is_primary_contact,
       invite_accepted:    true,

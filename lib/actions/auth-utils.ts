@@ -40,10 +40,13 @@ export interface ProfileOrMetadataFragment {
  * satisfies a required permission token.
  *
  * Matching rules (in order):
- *   - Wildcard `"*"` candidate → matches everything.
- *   - Exact match → "finance:fees:read" satisfies "finance:fees:read".
- *   - Domain wildcard → "finance:*" satisfies "finance:fees:read".
- *   - Subdomain wildcard → "finance:fees:*" satisfies "finance:fees:read".
+ * - Wildcard `"*"` candidate → matches everything.
+ * - Exact match → "finance:fees:read" satisfies "finance:fees:read".
+ * - Domain wildcard → "finance:*" satisfies "finance:fees:read".
+ * - Subdomain wildcard → "finance:fees:*" satisfies "finance:fees:read".
+ *
+ * @param candidateToken  The token held by the user (e.g., "finance:*")
+ * @param requiredToken   The token required by the resource (e.g., "finance:fees:read")
  */
 function tokenMatchesRequired(
   candidateToken: string,
@@ -59,7 +62,7 @@ function tokenMatchesRequired(
   const candidateParts = candidateToken.split(":");
   const requiredParts = requiredToken.split(":");
 
-  // Candidate must not be longer than required (can't be more specific)
+  // Candidate must not be longer than required (can't be more specific than the target)
   if (candidateParts.length > requiredParts.length) return false;
 
   for (let i = 0; i < candidateParts.length; i++) {
@@ -73,9 +76,9 @@ function tokenMatchesRequired(
     if (c !== r) return false;
   }
 
-  // All candidate segments matched — but only if candidate == required in length
-  // (otherwise e.g. "finance" would match "finance:fees:read")
-  return candidateParts.length === requiredParts.length;
+  // All candidate segments matched — but only if candidate matches structural depth
+  // (otherwise e.g. a raw standalone "finance" token would match "finance:fees:read")
+  return candidateParts.length === requiredParts.length || candidateParts[candidateParts.length - 1] === "*";
 }
 
 /**
@@ -94,9 +97,10 @@ function arrayGrantsPermission(
 /**
  * Returns true if this profile has unconditional system-wide access.
  * A user is considered super-admin if:
- *   - profile.is_super_admin is explicitly true, OR
- *   - their admin_role is "super_admin", OR
- *   - their JWT permissions include the global wildcard "*".
+ * - profile.is_super_admin is explicitly true, OR
+ * - their admin_role is "super_admin", OR
+ * - their base_role is "super_admin", OR
+ * - their JWT permissions include the global wildcard "*".
  */
 export function isSuperAdmin(
   p: ProfileOrMetadataFragment | null | undefined
@@ -105,8 +109,8 @@ export function isSuperAdmin(
 
   if (p.is_super_admin === true) return true;
 
-  const adminRole = p.admin_role ?? p.role;
-  if (adminRole === "super_admin") return true;
+  const resolvedRole = p.base_role ?? p.role;
+  if (resolvedRole === "super_admin" || p.admin_role === "super_admin") return true;
 
   if (p.permissions?.includes("*") || p.permissions?.includes("all_permissions")) {
     return true;
@@ -122,46 +126,61 @@ export function isAdmin(
   p: ProfileOrMetadataFragment | null | undefined
 ): boolean {
   if (!p) return false;
-  return p.base_role === "admin" || p.role === "admin";
+  const resolvedRole = p.base_role ?? p.role;
+  return resolvedRole === "admin" || resolvedRole === "super_admin";
 }
 
 // ── Role Resolution Helpers ───────────────────────────────────────────────────
 
 /**
  * Resolves the single primary BaseRole for portal routing purposes.
+ * Enforces strict prioritization sequence: super_admin → admin → staff → parent → student
  */
 export function resolvePrimaryRole(
   p: ProfileOrMetadataFragment | null | undefined
 ): BaseRole {
   if (!p) return "parent";
 
-  const b = (p.base_role ?? p.role) as BaseRole | undefined;
-  if (b && (BASE_ROLES as readonly string[]).includes(b)) return b;
+  // Build an optimized lookup list of roles tied directly to the profile context
+  const structuralRoles: string[] = [];
+  
+  if (p.base_role) structuralRoles.push(p.base_role);
+  if (p.role) structuralRoles.push(p.role);
+  if (p.roles && Array.isArray(p.roles)) structuralRoles.push(...p.roles);
 
-  const first = p.roles?.[0] as BaseRole | undefined;
-  if (first && (BASE_ROLES as readonly string[]).includes(first)) return first;
+  // Structural strict priority checklist iteration block
+  const priorityChecklist: BaseRole[] = ["super_admin", "admin", "staff", "parent", "student"];
+
+  for (const candidateRole of priorityChecklist) {
+    if (structuralRoles.includes(candidateRole)) {
+      return candidateRole;
+    }
+  }
 
   return "parent";
 }
 
 /**
- * Compiles a deduplicated array of all BaseRoles linked to this account.
+ * Compiles a prioritized, deduplicated array of all BaseRoles linked to this account.
+ * Sorted matching priority order: super_admin → admin → staff → parent → student
  */
 export function resolveAllRoles(
   p: ProfileOrMetadataFragment | null | undefined
 ): BaseRole[] {
   if (!p) return ["parent"];
 
-  const set = new Set<BaseRole>();
+  const collectedRoles = new Set<string>();
 
-  const b = (p.base_role ?? p.role) as BaseRole | undefined;
-  if (b && (BASE_ROLES as readonly string[]).includes(b)) set.add(b);
-
-  for (const r of p.roles ?? []) {
-    if ((BASE_ROLES as readonly string[]).includes(r)) set.add(r as BaseRole);
+  if (p.base_role) collectedRoles.add(p.base_role);
+  if (p.role) collectedRoles.add(p.role);
+  if (p.roles && Array.isArray(p.roles)) {
+    p.roles.forEach((r) => collectedRoles.add(r));
   }
 
-  return set.size > 0 ? [...set] : ["parent"];
+  const priorityOrder: BaseRole[] = ["super_admin", "admin", "staff", "parent", "student"];
+  const compiledResult = priorityOrder.filter((role) => collectedRoles.has(role));
+
+  return compiledResult.length > 0 ? compiledResult : ["parent"];
 }
 
 // ── Core Domain-Action Evaluator ──────────────────────────────────────────────
@@ -173,11 +192,11 @@ export function resolveAllRoles(
  * ProfileOrMetadataFragment (client-side, from JWT app_metadata).
  *
  * Evaluation order:
- *   1. Super Admin bypass  → immediately return true
- *   2. Denied override     → if any token in denied_permissions_override matches, return false
- *   3. Allowed override    → if any token in allowed_permissions_override matches, return true
- *   4. Baseline role caps  → check BASELINE_ROLE_CAPABILITIES for this admin_role
- *   5. Default deny        → return false
+ * 1. Super Admin bypass   → immediately return true
+ * 2. Denied override     → if any token in denied_permissions_override matches, return false
+ * 3. Allowed override    → if any token in allowed_permissions_override matches, return true
+ * 4. Baseline role caps  → check BASELINE_ROLE_CAPABILITIES for this admin_role
+ * 5. Default deny        → return false
  *
  * @param profile   The resolved profile row (live DB) or JWT metadata fragment
  * @param required  The domain-action token to check, e.g. "finance:fees:read"
@@ -191,41 +210,35 @@ export function hasPermission(
   // ── Layer 1: Super Admin bypass ───────────────────────────────────────────
   if (isSuperAdmin(profile)) return true;
 
-  // For the full Profile type, use the direct DB column arrays.
-  // For a JWT fragment, fall back to the permissions[] array from app_metadata.
-  const denied = (profile as Profile).denied_permissions_override
-    ?? (profile as ProfileOrMetadataFragment).permissions
-       ?.filter(() => false); // fragments don't carry separate denied lists
+  // Type safe checks distinguishing full Profile from an app_metadata token fragment
+  const isFullProfile = "denied_permissions_override" in profile && "allowed_permissions_override" in profile;
 
-  const allowed = (profile as Profile).allowed_permissions_override
-    ?? null;
+  let deniedTokens: string[] | null = null;
+  let allowedTokens: string[] | null = null;
+  let jwtPermissions: string[] | null = null;
 
-  // Resolve denied array (DB column takes priority over any fragment)
-  const deniedTokens: string[] | null = "denied_permissions_override" in profile
-    ? (profile as Profile).denied_permissions_override
-    : null;
-
-  const allowedTokens: string[] | null = "allowed_permissions_override" in profile
-    ? (profile as Profile).allowed_permissions_override
-    : null;
-
-  // JWT fragment permissions array (used when full Profile isn't available)
-  const jwtPermissions: string[] | null =
-    !(("denied_permissions_override" in profile))
-      ? ((profile as ProfileOrMetadataFragment).permissions ?? null)
-      : null;
+  if (isFullProfile) {
+    const fullProfile = profile as Profile;
+    deniedTokens = fullProfile.denied_permissions_override ?? null;
+    allowedTokens = fullProfile.allowed_permissions_override ?? null;
+  } else {
+    const fragment = profile as ProfileOrMetadataFragment;
+    jwtPermissions = fragment.permissions ?? null;
+    // Note: client token fragments do not carry separate denied lists; 
+    // exclusions are pre-computed during JWT synchronization steps.
+  }
 
   // ── Layer 2: Explicit denial (denied_permissions_override wins always) ────
-  if (arrayGrantsPermission(deniedTokens, required)) {
+  if (deniedTokens && arrayGrantsPermission(deniedTokens, required)) {
     return false;
   }
 
   // ── Layer 3: Explicit grant (allowed_permissions_override) ────────────────
-  if (arrayGrantsPermission(allowedTokens, required)) {
+  if (allowedTokens && arrayGrantsPermission(allowedTokens, required)) {
     return true;
   }
 
-  // ── Layer 3b: JWT permissions array (for client-side / lightweight checks) ─
+  // ── Layer 3b: JWT permissions array (fallback for client-side / stateless checks) ─
   if (jwtPermissions && arrayGrantsPermission(jwtPermissions, required)) {
     return true;
   }
@@ -233,9 +246,9 @@ export function hasPermission(
   // ── Layer 4: Baseline role capabilities ──────────────────────────────────
   const adminRole =
     (profile as Profile).admin_role
-    ?? (profile as ProfileOrMetadataFragment).admin_role
-    ?? (profile as ProfileOrMetadataFragment).role
-    ?? null;
+      ?? (profile as ProfileOrMetadataFragment).admin_role
+      ?? (profile as ProfileOrMetadataFragment).role
+      ?? null;
 
   if (adminRole) {
     const baseline = BASELINE_ROLE_CAPABILITIES[adminRole];
@@ -273,10 +286,10 @@ export function hasAllPermissions(
  * baseline role capabilities through the override pipeline.
  *
  * Returns the resolved, deduplicated array of permission tokens this
- * user currently has access to. Used for JWT claims sync.
+ * user currently has access to. Used for database JWT claims synchronizations.
  */
 export function resolveEffectivePermissions(profile: Profile): string[] {
-  // Super admin gets the global wildcard
+  // Super admin inherits the absolute global wildcard token block
   if (isSuperAdmin(profile)) return ["*"];
 
   const adminRole = profile.admin_role;
@@ -287,13 +300,14 @@ export function resolveEffectivePermissions(profile: Profile): string[] {
   const allowed = profile.allowed_permissions_override ?? [];
   const denied = profile.denied_permissions_override ?? [];
 
-  // Merge baseline + explicit grants
+  // Merge baseline role arrays with explicit individual grants
   const merged = new Set<string>([...baseline, ...allowed]);
 
-  // Remove explicitly denied tokens (exact match only for the deny step)
+  // Remove explicitly denied tokens (exact match checks for explicit targets)
   for (const token of denied) {
     merged.delete(token);
-    // Also remove wildcard-matching tokens from the merged set
+    
+    // Also strip out any wildcard matches that fall under the umbrella of a denied rule
     for (const existing of merged) {
       if (tokenMatchesRequired(token, existing)) {
         merged.delete(existing);
