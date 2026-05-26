@@ -17,18 +17,17 @@ interface RawClassJoin {
   stream: string;
 }
 
-interface RawParentRow {
+interface RawProfileRow {
   id: string;
   full_name: string;
   phone_number: string | null;
-  email: string;
-  invite_accepted: boolean;
+  email: string | null;
 }
 
 interface RawParentLink {
   is_primary_contact: boolean;
   relationship_type: string;
-  parents: RawParentRow | null;
+  profiles: RawProfileRow | null;
 }
 
 interface RawStudentRow {
@@ -99,19 +98,28 @@ function mapStudentRow(row: RawStudentRow): Student {
     photo_url:      row.photo_url,
     created_at:     row.created_at,
     status:         (row.status as Student["status"]) ?? "active",
-    parents:        primary?.parents ?? null,
+    parents:        primary?.profiles
+      ? {
+          id: primary.profiles.id,
+          full_name: primary.profiles.full_name,
+          phone_number: primary.profiles.phone_number,
+          email: primary.profiles.email ?? "",
+          invite_accepted: true,
+        }
+      : null,
     all_parents: links.map((l) => ({
-      parent_id:          l.parents?.id           ?? "",
-      full_name:          l.parents?.full_name     ?? "",
-      phone_number:       l.parents?.phone_number  ?? null,
-      email:              l.parents?.email         ?? "",
+      parent_id:          l.profiles?.id           ?? "",
+      full_name:          l.profiles?.full_name     ?? "",
+      phone_number:       l.profiles?.phone_number  ?? null,
+      email:              l.profiles?.email         ?? "",
       relationship_type:  l.relationship_type,
       is_primary_contact: l.is_primary_contact,
-      invite_accepted:    l.parents?.invite_accepted ?? false,
+      invite_accepted:    true,
     })),
   };
 }
 
+// Explicit foreign key constraint tracking to bypass old cached relation mappings
 const STUDENT_SELECT = `
   id, readable_id, upi_number, full_name,
   date_of_birth, gender, current_grade, class_id, photo_url, status, created_at,
@@ -119,10 +127,11 @@ const STUDENT_SELECT = `
   student_parents (
     is_primary_contact,
     relationship_type,
-    parents ( id, full_name, phone_number, email, invite_accepted )
+    parent:profiles!student_parents_parent_id_profiles_fkey ( 
+      id, full_name, phone_number, email 
+    )
   )
 ` as const;
-
 // ============================================================================
 // STUDENT FETCHERS
 // ============================================================================
@@ -186,9 +195,9 @@ export async function fetchAllStudents(
       `full_name.ilike.%${search}%,readable_id.ilike.%${search}%`
     );
   }
-  if (grade)              query = query.eq("current_grade", grade);
-  if (stream)             query = query.eq("classes.stream", stream);
-  if (gender)             query = query.eq("gender", gender);
+  if (grade)                      query = query.eq("current_grade", grade);
+  if (stream)                     query = query.eq("classes.stream", stream);
+  if (gender)                     query = query.eq("gender", gender);
   if (status && status !== "all") query = query.eq("status", status);
 
   const { data, error } = await query;

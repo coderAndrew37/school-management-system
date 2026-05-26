@@ -1,4 +1,10 @@
 // lib/data/teachers.ts
+// Kibali Academy — Teacher Data Fetchers
+//
+// All queries are school_id scoped via Supabase RLS + explicit .eq() filters.
+// Zero usage of `any` — every join shape is explicitly typed.
+// Core identity attributes are resolved directly from the normalized profiles relation.
+
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   AllocationRow,
@@ -7,7 +13,27 @@ import {
   TeacherStats,
 } from "@/lib/types/dashboard";
 
-// ── 1. Raw DB row shapes ──────────────────────────────────────────────────────
+// ============================================================================
+// INTERNAL JOIN TYPES
+// ============================================================================
+
+interface RawProfileJoin {
+  full_name: string;
+  email: string | null;
+  phone_number: string | null;
+  avatar_url: string | null;
+}
+
+interface RawTeacherRow {
+  id: string;
+  staff_id: string | null;
+  tsc_number: string | null;
+  status: string;
+  last_invite_sent: string | null;
+  invite_accepted: boolean;
+  created_at: string;
+  profiles: RawProfileJoin[] | RawProfileJoin | null;
+}
 
 interface RawAllocationRow {
   id: string;
@@ -26,10 +52,16 @@ interface RawAssignmentRow {
   classes: { grade: string; stream: string } | null;
 }
 
-// ── 2. Resolve school_id from JWT (fast) or profile row (fallback) ────────────
+// ============================================================================
+// HELPERS
+// ============================================================================
 
+/**
+ * Resolves the calling user's school_id from their profile.
+ * Returns null if unauthenticated or profile missing.
+ */
 async function resolveSchoolId(
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>
 ): Promise<string | null> {
   const {
     data: { user },
@@ -37,11 +69,11 @@ async function resolveSchoolId(
 
   if (!user) return null;
 
-  // Fast path — JWT app_metadata (written by sync_user_jwt_claims trigger)
+  // Prefer JWT app_metadata (zero DB call path) — written by sync_user_jwt_claims trigger
   const jwtSchoolId = user.app_metadata?.school_id as string | undefined;
   if (jwtSchoolId) return jwtSchoolId;
 
-  // Fallback — live DB read
+  // Fallback: read from profiles
   const { data: profile } = await supabase
     .from("profiles")
     .select("school_id")
@@ -51,7 +83,34 @@ async function resolveSchoolId(
   return profile?.school_id ?? null;
 }
 
-// ── 3. Fetch All Teachers ─────────────────────────────────────────────────────
+function mapTeacherRow(row: RawTeacherRow): Teacher {
+  // Handle both array or single object returns gracefully based on cache state
+  const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+
+  return {
+    id: row.id,
+    staff_id: row.staff_id ?? "—",
+    full_name: profile?.full_name ?? "Unknown Teacher",
+    tsc_number: row.tsc_number,
+    email: profile?.email ?? "",
+    phone_number: profile?.phone_number ?? null,
+    status: (row.status as Teacher["status"]) ?? "active",
+    last_invite_sent: row.last_invite_sent,
+    created_at: row.created_at,
+    invite_accepted: row.invite_accepted,
+    avatar_url: profile?.avatar_url ?? null,
+  };
+}
+
+// Explicitly pointing to the verified foreign key constraint that targets 'teachers' from 'profiles'
+const TEACHER_SELECT = `
+  id, staff_id, tsc_number, status, last_invite_sent, invite_accepted, created_at,
+  profiles:profiles_teacher_id_fkey ( full_name, email, phone_number, avatar_url )
+` as const;
+
+// ============================================================================
+// TEACHER FETCHERS
+// ============================================================================
 
 export async function fetchTeachers(): Promise<Teacher[]> {
   const supabase = await createSupabaseServerClient();
@@ -60,26 +119,22 @@ export async function fetchTeachers(): Promise<Teacher[]> {
 
   const { data, error } = await supabase
     .from("teachers")
-    .select(
-      `id, staff_id, full_name, tsc_number, email,
-       phone_number, status, last_invite_sent,
-       created_at, avatar_url, invite_accepted`,
-    )
-    .eq("school_id", schoolId)
-    .order("full_name", { ascending: true });
+    .select(TEACHER_SELECT)
+    .eq("school_id", schoolId);
 
   if (error) {
     console.error("[fetchTeachers] Error:", error.message);
     return [];
   }
 
-  return (data ?? []) as unknown as Teacher[];
+  const mapped = (data as unknown as RawTeacherRow[]).map(mapTeacherRow);
+
+  // Keep rendering order strictly alphabetical by teacher's real name
+  return mapped.sort((a, b) => a.full_name.localeCompare(b.full_name));
 }
 
-// ── 4. Fetch Teachers by Status ───────────────────────────────────────────────
-
 export async function fetchTeachersByStatus(
-  status: "active" | "on_leave" | "all",
+  status: "active" | "on_leave" | "all"
 ): Promise<Teacher[]> {
   const supabase = await createSupabaseServerClient();
   const schoolId = await resolveSchoolId(supabase);
@@ -87,13 +142,8 @@ export async function fetchTeachersByStatus(
 
   let query = supabase
     .from("teachers")
-    .select(
-      `id, staff_id, full_name, tsc_number, email,
-       phone_number, status, last_invite_sent,
-       created_at, avatar_url, invite_accepted`,
-    )
-    .eq("school_id", schoolId)
-    .order("full_name", { ascending: true });
+    .select(TEACHER_SELECT)
+    .eq("school_id", schoolId);
 
   if (status !== "all") {
     query = query.eq("status", status);
@@ -106,13 +156,12 @@ export async function fetchTeachersByStatus(
     return [];
   }
 
-  return (data ?? []) as unknown as Teacher[];
+  const mapped = (data as unknown as RawTeacherRow[]).map(mapTeacherRow);
+  return mapped.sort((a, b) => a.full_name.localeCompare(b.full_name));
 }
 
-// ── 5. Fetch Single Teacher by Staff ID ───────────────────────────────────────
-
 export async function fetchTeacherByStaffId(
-  staffId: string,
+  staffId: string
 ): Promise<Teacher | null> {
   const supabase = await createSupabaseServerClient();
   const schoolId = await resolveSchoolId(supabase);
@@ -120,7 +169,7 @@ export async function fetchTeacherByStaffId(
 
   const { data, error } = await supabase
     .from("teachers")
-    .select("*")
+    .select(TEACHER_SELECT)
     .eq("staff_id", staffId)
     .eq("school_id", schoolId)
     .maybeSingle();
@@ -130,13 +179,12 @@ export async function fetchTeacherByStaffId(
     return null;
   }
 
-  return data as unknown as Teacher | null;
+  if (!data) return null;
+  return mapTeacherRow(data as unknown as RawTeacherRow);
 }
 
-// ── 6. Fetch Single Teacher by UUID ──────────────────────────────────────────
-
 export async function fetchTeacherById(
-  teacherId: string,
+  teacherId: string
 ): Promise<Teacher | null> {
   const supabase = await createSupabaseServerClient();
   const schoolId = await resolveSchoolId(supabase);
@@ -144,7 +192,7 @@ export async function fetchTeacherById(
 
   const { data, error } = await supabase
     .from("teachers")
-    .select("*")
+    .select(TEACHER_SELECT)
     .eq("id", teacherId)
     .eq("school_id", schoolId)
     .maybeSingle();
@@ -154,10 +202,9 @@ export async function fetchTeacherById(
     return null;
   }
 
-  return data as unknown as Teacher | null;
+  if (!data) return null;
+  return mapTeacherRow(data as unknown as RawTeacherRow);
 }
-
-// ── 7. Count Active Teachers ──────────────────────────────────────────────────
 
 export async function countActiveTeachers(): Promise<number> {
   const supabase = await createSupabaseServerClient();
@@ -178,11 +225,13 @@ export async function countActiveTeachers(): Promise<number> {
   return count ?? 0;
 }
 
-// ── 8. Fetch Teacher Statistics ───────────────────────────────────────────────
+// ============================================================================
+// TEACHER STATISTICS & ALLOCATIONS
+// ============================================================================
 
 export async function fetchTeacherStats(
   teacherId: string,
-  academicYear: number,
+  academicYear: number
 ): Promise<TeacherStats> {
   const supabase = await createSupabaseServerClient();
   const schoolId = await resolveSchoolId(supabase);
@@ -218,7 +267,7 @@ export async function fetchTeacherStats(
   const yearsAtKibali = teacherRes.data
     ? Math.floor(
         (Date.now() - new Date(teacherRes.data.created_at).getTime()) /
-          (1000 * 60 * 60 * 24 * 365),
+          (1000 * 60 * 60 * 24 * 365)
       )
     : 0;
 
@@ -241,11 +290,9 @@ export async function fetchTeacherStats(
   };
 }
 
-// ── 9. Fetch Subject Allocations ──────────────────────────────────────────────
-
 export async function fetchTeacherAllocations(
   teacherId: string,
-  academicYear: number,
+  academicYear: number
 ): Promise<AllocationRow[]> {
   const supabase = await createSupabaseServerClient();
   const schoolId = await resolveSchoolId(supabase);
@@ -256,7 +303,7 @@ export async function fetchTeacherAllocations(
     .select(
       `id, class_id,
        classes ( grade, stream ),
-       subjects ( name, code )`,
+       subjects ( name, code )`
     )
     .eq("teacher_id", teacherId)
     .eq("school_id", schoolId)
@@ -278,11 +325,9 @@ export async function fetchTeacherAllocations(
   }));
 }
 
-// ── 10. Fetch Class Teacher Assignments ───────────────────────────────────────
-
 export async function fetchClassTeacherAssignments(
   teacherId: string,
-  academicYear: number,
+  academicYear: number
 ): Promise<ClassTeacherAssignment[]> {
   const supabase = await createSupabaseServerClient();
   const schoolId = await resolveSchoolId(supabase);
@@ -292,7 +337,7 @@ export async function fetchClassTeacherAssignments(
     .from("class_teacher_assignments")
     .select(
       `id, class_id, is_active, assigned_at, relieved_at, academic_year,
-       classes ( grade, stream )`,
+       classes ( grade, stream )`
     )
     .eq("teacher_id", teacherId)
     .eq("school_id", schoolId)

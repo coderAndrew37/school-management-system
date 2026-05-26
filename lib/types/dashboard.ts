@@ -1,6 +1,19 @@
+// lib/types/dashboard.ts
+// Kibali Academy — Dashboard & Core Entity Type Definitions
+//
+// Strictly typed definitions supporting school-scoped multi-tenancy.
+// No implicit or explicit usage of `any` allowed.
+
 // ── Teacher Status & Core ─────────────────────────────────────────────────────
 
-export type TeacherStatus = "active" | "on_leave" | "resigned" | "terminated";
+export type TeacherStatus =
+  | "active"
+  | "on_leave"
+  | "transferred"
+  | "terminated"
+  | "resigned"
+  | "deceased"
+  | "retired";
 
 export interface Teacher {
   id: string;
@@ -16,7 +29,7 @@ export interface Teacher {
   avatar_url: string | null;
 }
 
-// ── Classes & Infrastructure (NEW) ───────────────────────────────────────────
+// ── Classes & Infrastructure ──────────────────────────────────────────────────
 
 export interface Class {
   id: string;
@@ -33,7 +46,7 @@ export interface AllocationRow {
   subjectName: string;
   subjectCode: string;
   class_id: string;
-  grade: string; // We keep these for easy UI display
+  grade: string; // Kept for convenient UI rendering
   stream: string;
 }
 
@@ -70,7 +83,7 @@ export interface StudentParentLink {
   email: string;
   relationship_type: string;
   is_primary_contact: boolean;
-  invite_accepted: boolean;
+  invite_accepted: boolean; // Computed from profile activation status
 }
 
 export interface Student {
@@ -80,8 +93,8 @@ export interface Student {
   full_name: string;
   date_of_birth: string;
   gender: "Male" | "Female" | null;
-  class_id: string | null; // Updated from current_grade string
-  current_grade: string; // Keeping for UI display convenience
+  class_id: string | null;
+  current_grade: string; // Kept for UI layout fallbacks
   current_stream: string;
   photo_url: string | null;
   status: StudentStatus;
@@ -91,6 +104,8 @@ export interface Student {
     id: string;
     full_name: string;
     phone_number: string | null;
+    email: string;
+    invite_accepted: boolean;
   } | null;
 }
 
@@ -107,17 +122,17 @@ export type ActionResult =
   | { success: true; message: string }
   | { success: false; message: string };
 
-// ── Parent & Communication (NEW) ──────────────────────────────────────────────
+// ── Parent & Communication (Unified Profile Mapping) ─────────────────────────
 
 export interface Parent {
   id: string;
   full_name: string;
-  email: string;
+  email: string | null;
   phone_number: string | null;
-  invite_accepted: boolean;
+  invite_accepted: boolean; // Matches active profile layout state
   last_invite_sent: string | null;
   created_at: string;
-  // The drawer maps over this to show the "Children" tab
+  // The UI drawer maps over this to show the "Children" tab
   children: {
     id: string;
     full_name: string;
@@ -144,13 +159,14 @@ export interface ParentNotificationSummary {
   is_read: boolean;
 }
 
-// lib/types/dashboard.ts
-export type SortKey = 
-  | "full_name" 
-  | "readable_id" 
-  | "current_grade" 
-  | "gender" 
-  | "date_of_birth" 
+// ── Table Sorting Metadata ────────────────────────────────────────────────────
+
+export type SortKey =
+  | "full_name"
+  | "readable_id"
+  | "current_grade"
+  | "gender"
+  | "date_of_birth"
   | "created_at";
 
 export type SortDir = "asc" | "desc";

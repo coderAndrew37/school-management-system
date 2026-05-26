@@ -8,15 +8,9 @@ import { getAuthConfirmUrl } from "@/lib/utils/site-url";
 import { normalizeKenyanPhone } from "@/lib/utils/phone";
 import type { ActionResult } from "@/lib/types/dashboard";
 
-// ── Generate a short staff ID: KIB-YYYY-XXXX ─────────────────────────────────
-
-function generateStaffId(): string {
-  const year = new Date().getFullYear();
-  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `KIB-${year}-${suffix}`;
-}
-
-// ── Resolve the acting admin's school_id & profile_id ────────────────────────
+// ============================================================================
+// CONTEXT RESOLUTION
+// ============================================================================
 
 async function resolveAdminContext(): Promise<{
   schoolId: string;
@@ -45,10 +39,12 @@ async function resolveAdminContext(): Promise<{
   return { schoolId: profile.school_id, profileId: user.id };
 }
 
-// ── Main Action ───────────────────────────────────────────────────────────────
+// ============================================================================
+// SERVER ACTION
+// ============================================================================
 
 export async function addTeacherAction(
-  formData: FormData,
+  formData: FormData
 ): Promise<ActionResult> {
   const fullName = formData.get("fullName") as string;
   const email = formData.get("email") as string;
@@ -65,10 +61,8 @@ export async function addTeacherAction(
   }
   const { schoolId, profileId: actorProfileId } = adminCtx;
 
-  const staffId = generateStaffId();
-
   try {
-    // 1. Create Auth User
+    // 1. Create Auth User Row
     const { data: authData, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
         email,
@@ -101,37 +95,36 @@ export async function addTeacherAction(
       }
     }
 
-    // 3. Insert into Teachers table (school_id scoped)
-    const { error: teacherError } = await supabaseAdmin
+    // 3. Insert into the clean professional extensions table
+    // staff_id is omitted here because your tr_set_teacher_staff_id database trigger generates it automatically.
+    const { data: teacherData, error: teacherError } = await supabaseAdmin
       .from("teachers")
       .insert({
-        id: userId,
-        school_id: schoolId,          // ← scoped to acting admin's school
-        staff_id: staffId,
-        full_name: fullName,
-        email,
-        phone_number: phone,
+        school_id: schoolId,
         tsc_number: tscNumber || null,
-        avatar_url: avatarUrl,
         status: "active",
         invite_accepted: false,
         last_invite_sent: new Date().toISOString(),
-      });
+      })
+      .select("id, staff_id")
+      .single();
 
     if (teacherError) {
+      // Rollback newly created user on failure
       await supabaseAdmin.auth.admin.deleteUser(userId);
       throw teacherError;
     }
 
-    // 4. Update Profile — set school_id, role, teacher_id link, avatar
-    // The trigger creates a bare profile row on auth.users insert;
-    // we complete it here with all the required fields.
+    const generatedTeacherId = teacherData.id;
+    const generatedStaffId = teacherData.staff_id ?? "—";
+
+    // 4. Populate Profiles entry with unified identity info and the generated teacher reference link
     const { error: profileError } = await supabaseAdmin
       .from("profiles")
       .update({
-        school_id: schoolId,          // ← multi-tenant anchor
-        role: "admin",                // ← teachers are admin-portal users
-        teacher_id: userId,           // ← explicit FK link profile → teachers
+        school_id: schoolId,
+        role: "admin", // Teachers utilize admin portal controls
+        teacher_id: generatedTeacherId,
         avatar_url: avatarUrl,
         full_name: fullName,
         phone_number: phone,
@@ -139,42 +132,47 @@ export async function addTeacherAction(
       })
       .eq("id", userId);
 
-    if (profileError) throw profileError;
+    if (profileError) {
+      // Rollback professional rows if identity placement fails
+      await supabaseAdmin.from("teachers").delete().eq("id", generatedTeacherId);
+      await supabaseAdmin.auth.admin.deleteUser(userId);
+      throw profileError;
+    }
 
-    // 5. Sync JWT claims so the new teacher's session has correct permissions
+    // 5. Sync custom JWT application claims
     const { error: jwtError } = await supabaseAdmin.rpc(
       "sync_user_jwt_claims",
-      { p_profile_id: userId },
+      { p_profile_id: userId }
     );
     if (jwtError) {
-      // Non-fatal — log but don't fail the whole action
       console.error("[addTeacher] JWT sync failed:", jwtError.message);
     }
 
-    // 6. Audit log — record the teacher creation
+    // 6. Record Multi-Tenant Audit Entry
     await supabaseAdmin.from("security_audit_logs").insert({
       school_id: schoolId,
       actor_id: actorProfileId,
       target_id: userId,
       action_type: "user_created",
       target_table: "teachers",
-      record_id: userId,
+      record_id: generatedTeacherId,
       old_values: null,
       new_values: {
+        teacher_id: generatedTeacherId,
+        staff_id: generatedStaffId,
         full_name: fullName,
         email,
-        staff_id: staffId,
         tsc_number: tscNumber || null,
         school_id: schoolId,
         role: "admin",
       },
       context: {
-        description: `Teacher "${fullName}" registered by admin`,
+        description: `Teacher "${fullName}" (${generatedStaffId}) registered by administrator`,
         actor_profile_id: actorProfileId,
       },
     });
 
-    // 7. Generate magic-link and send welcome email
+  // 7. Dispatch Invitation Link
     const { data: linkData, error: linkError } =
       await supabaseAdmin.auth.admin.generateLink({
         type: "magiclink",
@@ -195,11 +193,11 @@ export async function addTeacherAction(
 
     return {
       success: true,
-      message: `${fullName} has been registered and a welcome email sent.`,
+      message: `${fullName} has been successfully registered with Staff ID: ${generatedStaffId}`,
     };
   } catch (error) {
     const msg =
-      error instanceof Error ? error.message : "An unknown error occurred";
+      error instanceof Error ? error.message : "An unknown internal error occurred";
     console.error("[addTeacherAction] failed:", msg);
     return { success: false, message: msg };
   }
