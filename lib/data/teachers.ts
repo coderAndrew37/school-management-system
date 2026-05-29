@@ -1,9 +1,24 @@
 // lib/data/teachers.ts
 // Kibali Academy — Teacher Data Fetchers
 //
-// All queries are school_id scoped via Supabase RLS + explicit .eq() filters.
-// Zero usage of `any` — every join shape is explicitly typed.
-// Core identity attributes are resolved directly from the normalized profiles relation.
+// KEY ARCHITECTURAL NOTE — PostgREST back-reference joins
+// ──────────────────────────────────────────────────────────────────────────────
+// The FK `profiles_teacher_id_fkey` is defined ON the `profiles` table:
+//   profiles.teacher_id → teachers.id
+//
+// This means when querying FROM `teachers`, the `profiles` join is a
+// REVERSE / BACK-REFERENCE (one teacher → many profiles rows).
+// PostgREST therefore always returns an ARRAY for this side of the join.
+//
+// Correct FK-hint syntax for an explicit constraint name in PostgREST is:
+//   profiles!profiles_teacher_id_fkey ( ... )
+//                 ↑ bang (!) not colon (:)
+//
+// The colon syntax  profiles:profiles_teacher_id_fkey(...)  is the
+// *output-key aliasing* syntax — it does NOT disambiguate which FK to use,
+// which caused PostgREST to either skip the join or use the wrong path,
+// resulting in every teacher resolving to "Unknown Teacher".
+// ──────────────────────────────────────────────────────────────────────────────
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
@@ -17,6 +32,11 @@ import {
 // INTERNAL JOIN TYPES
 // ============================================================================
 
+/**
+ * Shape of a single profiles row as returned by the back-reference join.
+ * PostgREST always yields an array for reverse FK relationships, so the
+ * parent type wraps this in RawProfileJoin[].
+ */
 interface RawProfileJoin {
   full_name: string;
   email: string | null;
@@ -24,6 +44,18 @@ interface RawProfileJoin {
   avatar_url: string | null;
 }
 
+/**
+ * Raw row returned by Supabase when selecting from `teachers` with the
+ * `profiles!profiles_teacher_id_fkey` back-reference join.
+ *
+ * `profiles` is typed as an array because PostgREST models the back-reference
+ * as one-to-many (one teacher can theoretically have multiple profile rows),
+ * even though in practice exactly one profile exists per teacher.
+ *
+ * We intentionally keep it as RawProfileJoin[] | null rather than
+ * RawProfileJoin | null to match what PostgREST actually sends over the wire.
+ * The mapTeacherRow helper safely plucks index [0].
+ */
 interface RawTeacherRow {
   id: string;
   staff_id: string | null;
@@ -32,7 +64,12 @@ interface RawTeacherRow {
   last_invite_sent: string | null;
   invite_accepted: boolean;
   created_at: string;
-  profiles: RawProfileJoin[] | RawProfileJoin | null;
+  /**
+   * PostgREST returns the aliased key exactly as written in the SELECT string.
+   * Because we write `profiles!profiles_teacher_id_fkey(...)` the returned
+   * JSON key is `profiles`.  It is always an array for a back-reference join.
+   */
+  profiles: RawProfileJoin[] | null;
 }
 
 interface RawAllocationRow {
@@ -53,13 +90,31 @@ interface RawAssignmentRow {
 }
 
 // ============================================================================
-// HELPERS
+// SELECT FRAGMENT
 // ============================================================================
 
 /**
- * Resolves the calling user's school_id from their profile.
- * Returns null if unauthenticated or profile missing.
+ * `!profiles_teacher_id_fkey` tells PostgREST exactly which FK constraint to
+ * traverse when joining profiles from the teachers table.
+ *
+ * Do NOT use the colon syntax (`profiles:profiles_teacher_id_fkey`) here —
+ * that is purely an output key alias and does not influence FK resolution.
  */
+const TEACHER_SELECT = `
+  id,
+  staff_id,
+  tsc_number,
+  status,
+  last_invite_sent,
+  invite_accepted,
+  created_at,
+  profiles!profiles_teacher_id_fkey ( full_name, email, phone_number, avatar_url )
+` as const;
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
 async function resolveSchoolId(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>
 ): Promise<string | null> {
@@ -69,11 +124,9 @@ async function resolveSchoolId(
 
   if (!user) return null;
 
-  // Prefer JWT app_metadata (zero DB call path) — written by sync_user_jwt_claims trigger
   const jwtSchoolId = user.app_metadata?.school_id as string | undefined;
   if (jwtSchoolId) return jwtSchoolId;
 
-  // Fallback: read from profiles
   const { data: profile } = await supabase
     .from("profiles")
     .select("school_id")
@@ -83,30 +136,31 @@ async function resolveSchoolId(
   return profile?.school_id ?? null;
 }
 
+/**
+ * Maps a raw Supabase teacher row (including the back-reference profiles join)
+ * to the clean Teacher domain type.
+ *
+ * Because the join is a back-reference, `profiles` is always RawProfileJoin[]
+ * on the wire. We take index [0] — the one canonical profile per teacher.
+ */
 function mapTeacherRow(row: RawTeacherRow): Teacher {
-  // Handle both array or single object returns gracefully based on cache state
-  const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+  // Back-reference joins always arrive as arrays; take the first (and only) element.
+  const profile = Array.isArray(row.profiles) ? row.profiles[0] ?? null : null;
 
   return {
     id: row.id,
     staff_id: row.staff_id ?? "—",
     full_name: profile?.full_name ?? "Unknown Teacher",
-    tsc_number: row.tsc_number,
+    tsc_number: row.tsc_number ?? null,
     email: profile?.email ?? "",
     phone_number: profile?.phone_number ?? null,
-    status: (row.status as Teacher["status"]) ?? "active",
-    last_invite_sent: row.last_invite_sent,
+    status: row.status as Teacher["status"],
+    last_invite_sent: row.last_invite_sent ?? null,
     created_at: row.created_at,
     invite_accepted: row.invite_accepted,
     avatar_url: profile?.avatar_url ?? null,
   };
 }
-
-// Explicitly pointing to the verified foreign key constraint that targets 'teachers' from 'profiles'
-const TEACHER_SELECT = `
-  id, staff_id, tsc_number, status, last_invite_sent, invite_accepted, created_at,
-  profiles:profiles_teacher_id_fkey ( full_name, email, phone_number, avatar_url )
-` as const;
 
 // ============================================================================
 // TEACHER FETCHERS
@@ -127,10 +181,9 @@ export async function fetchTeachers(): Promise<Teacher[]> {
     return [];
   }
 
-  const mapped = (data as unknown as RawTeacherRow[]).map(mapTeacherRow);
-
-  // Keep rendering order strictly alphabetical by teacher's real name
-  return mapped.sort((a, b) => a.full_name.localeCompare(b.full_name));
+  return (data as unknown as RawTeacherRow[])
+    .map(mapTeacherRow)
+    .sort((a, b) => a.full_name.localeCompare(b.full_name));
 }
 
 export async function fetchTeachersByStatus(
@@ -156,8 +209,9 @@ export async function fetchTeachersByStatus(
     return [];
   }
 
-  const mapped = (data as unknown as RawTeacherRow[]).map(mapTeacherRow);
-  return mapped.sort((a, b) => a.full_name.localeCompare(b.full_name));
+  return (data as unknown as RawTeacherRow[])
+    .map(mapTeacherRow)
+    .sort((a, b) => a.full_name.localeCompare(b.full_name));
 }
 
 export async function fetchTeacherByStaffId(
@@ -236,7 +290,12 @@ export async function fetchTeacherStats(
   const supabase = await createSupabaseServerClient();
   const schoolId = await resolveSchoolId(supabase);
   if (!schoolId) {
-    return { totalClasses: 0, totalStudents: 0, yearsAtKibali: 0, assessedStrands: 0 };
+    return {
+      totalClasses: 0,
+      totalStudents: 0,
+      yearsAtKibali: 0,
+      assessedStrands: 0,
+    };
   }
 
   const [allocRes, assessRes, teacherRes] = await Promise.all([
@@ -358,6 +417,6 @@ export async function fetchClassTeacherAssignments(
     academicYear: r.academic_year,
     isActive: r.is_active,
     assignedAt: r.assigned_at,
-    relievedAt: r.relieved_at,
+    relievedAt: r.relieved_at ?? null,
   }));
 }
