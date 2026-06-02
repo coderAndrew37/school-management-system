@@ -1,12 +1,14 @@
 // app/admin/allocation/page.tsx
 
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   BookMarked,
   Calendar,
   LayoutDashboard,
   UserRoundPlus,
 } from "lucide-react";
+import { getSession } from "@/lib/actions/auth";
 import { createServerClient } from "@/lib/supabase/client";
 import { fetchSubjects, fetchAllocations } from "@/lib/data/allocation";
 import type { Teacher } from "@/lib/types/dashboard";
@@ -14,7 +16,7 @@ import { GenerateTimetableButton } from "../../../_components/allocation/Generat
 import { AllocationPanel } from "../../../_components/allocation/AllocationPanel";
 import { SubjectManagerModal } from "../../../_components/allocation/SubjectManagerModal";
 import { getActiveTermYear } from "@/lib/utils/settings";
-import { Class } from "@/lib/types/allocation"; // Import the type
+import { Class } from "@/lib/types/allocation";
 
 export const metadata = { title: "Subject Allocation | Kibali Academy" };
 export const revalidate = 60;
@@ -29,7 +31,6 @@ async function fetchTeachers(): Promise<Teacher[]> {
   return (data ?? []) as Teacher[];
 }
 
-// FIXED: Included academic_year and added explicit Return Type
 async function fetchClasses(): Promise<Class[]> {
   const supabase = createServerClient();
   const { data, error } = await supabase
@@ -45,6 +46,21 @@ async function fetchClasses(): Promise<Class[]> {
 }
 
 export default async function AllocationPage() {
+  // ── Access Control Guard ───────────────────────────────────────────────────
+  const session = await getSession();
+  
+  if (!session || !session.profile) {
+    redirect("/login?redirectTo=/admin/allocation");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
+  }
+
+  // ── Data Loading ───────────────────────────────────────────────────────────
   const { academicYear } = await getActiveTermYear();
 
   const [teachers, subjects, allocations, classes] = await Promise.all([
@@ -56,7 +72,7 @@ export default async function AllocationPage() {
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] font-[family-name:var(--font-body)]">
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+      <div className="pointer-events-none fixed inset-0 overflow-hidden -z-10">
         <div className="absolute top-0 right-1/4 w-[500px] h-[500px] rounded-full bg-amber-500/[0.04] blur-[130px]" />
         <div className="absolute bottom-0 left-0 w-80 h-80 rounded-full bg-sky-500/[0.03] blur-[100px]" />
       </div>
@@ -108,7 +124,7 @@ export default async function AllocationPage() {
         </header>
 
         {/* Summary strip */}
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <SummaryChip label="Teachers" value={teachers.length} color="amber" />
           <SummaryChip
             label="CBC Subjects"
@@ -132,7 +148,7 @@ export default async function AllocationPage() {
           <EmptyState message="No teachers found. Add teachers to the system first." />
         ) : subjects.length === 0 ? (
           <EmptyState
-            message={`No subjects found. Click 'Manage Subjects' above to add CBC subjects.`}
+            message="No subjects found. Click 'Manage Subjects' above to add CBC subjects."
           />
         ) : classes.length === 0 ? (
           <EmptyState message="No classes found. Set up your grades and streams before allocating." />

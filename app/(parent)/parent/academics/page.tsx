@@ -1,3 +1,4 @@
+// app/parent/academics/page.tsx
 import { getSession } from "@/lib/actions/auth";
 import { fetchMyChildren } from "@/lib/data/parent";
 import { redirect } from "next/navigation";
@@ -13,14 +14,22 @@ interface PageProps {
 export default async function AcademicsPage({ searchParams }: PageProps) {
   const session = await getSession();
 
-  // Guard: Ensure session and user email exist
-  if (!session || !session.user?.email || session.profile.role !== "parent") {
+  // Guard: Ensure session and profile exist
+  if (!session || !session.profile || !session.user?.email) {
+    redirect("/login");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect the route using the updated BaseRole structural check for parents
+  if (base_role !== "parent" && !isPlatformAdmin) {
     redirect("/login");
   }
 
   const { child: childParam } = await searchParams;
 
-  // Pass session email to fix the "Expected 1 argument" error
+  // Pass session email to fetch children bounded to this parent account
   const children = await fetchMyChildren(session.user.email);
   
   if (children.length === 0) {

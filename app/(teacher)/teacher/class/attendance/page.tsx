@@ -1,5 +1,7 @@
 // app/teacher/class/attendance/page.tsx
+
 import { fetchMyClassTeacherAssignments } from "@/lib/actions/class-teacher";
+import { getSession } from "@/lib/actions/auth";
 import { fetchClassStudents } from "@/lib/data/assessment";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -10,11 +12,12 @@ import type { ParentContact, Status } from "./attendance-types";
 export const metadata = { title: "Class Register | Kibali Teacher Portal" };
 export const revalidate = 0; 
 
+// ── Strict Structural Interfaces ─────────────────────────────────────────────
+
 interface Props {
   searchParams: Promise<{ classId?: string; date?: string; tab?: string }>;
 }
 
-// Strict interface for Supabase Attendance rows
 interface AttendanceRow {
   student_id: string;
   status: Status;
@@ -22,7 +25,6 @@ interface AttendanceRow {
   remarks: string | null;
 }
 
-// Strict interface for Supabase Parent Join
 interface RawParentJoin {
   student_id: string;
   parents: {
@@ -48,17 +50,19 @@ export default async function ClassAttendancePage({ searchParams }: Props) {
   const supabase = await createSupabaseServerClient();
   const sp = await searchParams;
 
-  // 1. Auth & Teacher Identity Check
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  // 1. Unified Access Control Guard
+  const session = await getSession();
+  if (!session || !session.profile) {
+    redirect("/login");
+  }
 
-  const { data: teacher } = await supabase
-    .from("teachers")
-    .select("id, full_name")
-    .eq("id", user.id)
-    .single();
+  const { base_role, is_super_admin, is_dev, full_name } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
 
-  if (!teacher) redirect("/login");
+  // Protect route with structural check for staff (teachers) and administration overrides
+  if (base_role !== "staff" && base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
+  }
 
   // 2. Fetch Assigned Classes
   const assignment = await fetchMyClassTeacherAssignments();
@@ -112,7 +116,7 @@ export default async function ClassAttendancePage({ searchParams }: Props) {
         attendanceHistory={{}}
         classWeeklyTrend={[]}
         activeTab={tabParam}
-        teacherName={teacher.full_name}
+        teacherName={full_name ?? "" }
       />
     );
   }
@@ -156,23 +160,25 @@ export default async function ClassAttendancePage({ searchParams }: Props) {
 
   // 7. Data Transformation
   const preFill: Record<string, { status: Status; remarks: string }> = {};
-  (dateAttRes.data as AttendanceRow[] ?? []).forEach((r) => {
+  const rawDateAttendance = (dateAttRes.data ?? []) as unknown as AttendanceRow[];
+  rawDateAttendance.forEach((r) => {
     preFill[r.student_id] = { status: r.status, remarks: r.remarks ?? "" };
   });
 
   const weekDatesRecorded = [
-    ...new Set((weekAttRes.data as { date: string }[] ?? []).map((r) => r.date)),
+    ...new Set(((weekAttRes.data ?? []) as { date: string }[]).map((r) => r.date)),
   ];
 
   const attendanceHistory: Record<string, { date: string; status: Status }[]> = {};
-  (historyRes.data as AttendanceRow[] ?? []).forEach((r) => {
+  const rawHistoryAttendance = (historyRes.data ?? []) as unknown as AttendanceRow[];
+  rawHistoryAttendance.forEach((r) => {
     if (!attendanceHistory[r.student_id]) attendanceHistory[r.student_id] = [];
     attendanceHistory[r.student_id].push({ date: r.date, status: r.status });
   });
 
   // 8. Weekly Trend Aggregation
   const weekBuckets: Record<string, { present: number; total: number }> = {};
-  (historyRes.data as AttendanceRow[] ?? []).forEach((r) => {
+  rawHistoryAttendance.forEach((r) => {
     const d = new Date(r.date + "T00:00:00");
     const mon = new Date(d);
     mon.setDate(d.getDate() - ((d.getDay() + 6) % 7));
@@ -200,8 +206,9 @@ export default async function ClassAttendancePage({ searchParams }: Props) {
 
   // 9. Parent Mapping with Null-to-String Transformation
   const parentsByStudent: Record<string, ParentContact[]> = {};
+  const rawParentData = (parentsRes.data ?? []) as unknown as RawParentJoin[];
   
-  (parentsRes.data as unknown as RawParentJoin[] ?? []).forEach((r) => {
+  rawParentData.forEach((r) => {
     if (r.parents) {
       if (!parentsByStudent[r.student_id]) parentsByStudent[r.student_id] = [];
       
@@ -241,7 +248,7 @@ export default async function ClassAttendancePage({ searchParams }: Props) {
       attendanceHistory={attendanceHistory}
       classWeeklyTrend={classWeeklyTrend}
       activeTab={tabParam}
-      teacherName={teacher.full_name}
+      teacherName={full_name ?? ""}
     />
   );
 }

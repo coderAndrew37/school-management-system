@@ -10,8 +10,17 @@ export const revalidate = 0;
 
 export default async function SettingsPage() {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+  
+  if (!session || !session.profile) {
     redirect("/login?redirectTo=/admin/settings");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect the route using the updated BaseRole structural check
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
   }
 
   const settings = await fetchSchoolSettings();

@@ -1,3 +1,4 @@
+// app/parent/page.tsx
 import { getSession } from "@/lib/actions/auth";
 import { fetchAllChildData, fetchMyChildren } from "@/lib/data/parent";
 import type { ChildWithAssessments } from "@/lib/types/parent";
@@ -26,14 +27,23 @@ interface PageProps {
 }
 
 export default async function ParentDashboard({ searchParams }: PageProps) {
-  // 1. Verify Session & Role
+  // 1. Verify Session, Profile & Structural Roles
   const session = await getSession();
-  if (!session || session.profile.role !== "parent") {
+  
+  if (!session || !session.profile) {
+    redirect("/login");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect route with uniform structural role guard
+  if (base_role !== "parent" && !isPlatformAdmin) {
     redirect("/login");
   }
 
   // 2. Fetch Children linked to this specific parent email
-  const parentEmail = session.user.email;
+  const parentEmail = session.user?.email;
   if (!parentEmail) {
     redirect("/login");
   }
@@ -58,12 +68,15 @@ export default async function ParentDashboard({ searchParams }: PageProps) {
   // 4. Identify Active Child (from URL or default to first child)
   const activeChild = children.find((c) => c.id === _sp?.child) ?? children[0]!;
 
-  // 5. Fetch all specific data for the active child
-  // Parameters: (studentId, classId, gradeLabel)
+  // 5. Fetch all specific data for the active child using class_id (UUID)
+  if (!activeChild.class_id) {
+    redirect("/parent");
+  }
+
   const childData = await fetchAllChildData(
     activeChild.id,
-    activeChild.class_id ?? "", // Ensure your fetchMyChildren query includes class_id
-    activeChild.current_grade
+    activeChild.class_id,
+    activeChild.grade_label
   );
 
   // ── Attendance stats (this month) ─────────────────────────────────────────

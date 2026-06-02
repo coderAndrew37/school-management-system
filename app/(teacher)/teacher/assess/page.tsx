@@ -53,13 +53,20 @@ interface PageProps {
 
 export default async function AssessPage({ searchParams }: PageProps) {
   const session = await getSession();
-  if (
-    !session ||
-    (session.profile.role !== "teacher" && session.profile.role !== "admin")
-  )
+  
+  if (!session || !session.profile) {
     redirect("/login");
+  }
 
-  const teacherId = session.profile.teacher_id;
+  const { base_role, is_super_admin, is_dev, teacher_id } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect route with structural check for teachers and administration overrides
+  if (base_role !== "staff" && base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
+  }
+
+  const teacherId = teacher_id;
   if (!teacherId) return <NoTeacherLinked />;
 
   const { alloc: allocId, term: termParam } = await searchParams;
@@ -73,9 +80,8 @@ export default async function AssessPage({ searchParams }: PageProps) {
     teacherId,
     academicYear,
   );
+  
   // Security: allocations are already filtered to this teacher's ID above.
-  // If ?alloc= doesn't match any of their allocations, treat as not found —
-  // the teacher either guessed a UUID or the allocation was removed.
   const selectedAlloc = allocId
     ? (allocations.find((a) => a.id === allocId) ?? null)
     : null;
@@ -313,7 +319,7 @@ function NoTeacherLinked() {
       <p className="text-4xl mb-4">⚠️</p>
       <p className="text-slate-800 font-bold text-lg">Account not linked</p>
       <p className="text-slate-500 text-sm mt-2 max-w-sm leading-relaxed">
-        Your account hasn't been linked to a teacher record. Contact the school
+        Your account hasn&apos;t been linked to a teacher record. Contact the school
         administrator.
       </p>
       <Link

@@ -5,19 +5,27 @@
 
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/actions/auth";
 import { fetchMyClassTeacherAssignments } from "@/lib/actions/class-teacher";
 import { CalendarCheck, ArrowRight, Info } from "lucide-react";
 
 export const metadata = { title: "Attendance | Kibali Teacher Portal" };
 
 export default async function AttendancePage() {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const session = await getSession();
 
-  if (!user) redirect("/login");
+  // Guard: Ensure session and profile exist
+  if (!session || !session.profile) {
+    redirect("/login");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect route with structural check for staff (teachers) and administration overrides
+  if (base_role !== "staff" && base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
+  }
 
   const assignment = await fetchMyClassTeacherAssignments();
 

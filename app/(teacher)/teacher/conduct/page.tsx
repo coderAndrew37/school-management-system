@@ -1,5 +1,7 @@
+// app/teacher/conduct/page.tsx
+
 import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/actions/auth";
 import { fetchMyClassTeacherAssignments } from "@/lib/actions/class-teacher";
 import {
   fetchTeacherAssessmentAllocations,
@@ -24,28 +26,26 @@ interface AssignmentClass {
 }
 
 export default async function ConductPage() {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  
-  if (!user) redirect("/login");
+  // ── Access Control Guard ───────────────────────────────────────────────────
+  const session = await getSession();
+  if (!session || !session.profile) {
+    redirect("/login");
+  }
 
-  // Fetch teacher profile
-  const { data: teacher } = await supabase
-    .from("teachers")
-    .select("id, full_name")
-    .eq("id", user.id)
-    .single();
+  const { base_role, is_super_admin, is_dev, full_name, id: teacherId } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
 
-  if (!teacher) redirect("/login");
+  // Protect route with structural check for staff (teachers) and administrator overrides
+  if (base_role !== "staff" && base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
+  }
 
   const { term, academicYear } = await getActiveTermYear();
 
   // 1. Fetch all possible class sources in parallel
   const [assignment, allocations] = await Promise.all([
     fetchMyClassTeacherAssignments(),
-    fetchTeacherAssessmentAllocations(teacher.id, academicYear),
+    fetchTeacherAssessmentAllocations(teacherId, academicYear),
   ]);
 
   // 2. Aggregate unique classes using a Map to prevent duplicates
@@ -83,7 +83,7 @@ export default async function ConductPage() {
   if (classes.length === 0) {
     return (
       <ConductClient
-        teacherName={teacher.full_name}
+        teacherName={full_name ?? ""}
         classes={[]}
         studentsByClass={{}}
         initialRecords={[]}
@@ -108,7 +108,7 @@ export default async function ConductPage() {
 
   return (
     <ConductClient
-      teacherName={teacher.full_name}
+      teacherName={full_name ?? ""}
       classes={classes}
       studentsByClass={studentsByClass}
       initialRecords={records}

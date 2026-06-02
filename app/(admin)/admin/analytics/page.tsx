@@ -16,6 +16,29 @@ import {
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+// ── Strict Structural Types ──────────────────────────────────────────────────
+
+export interface SubjectLeaderboardItem {
+  subject_id: string;
+  subject_name: string;
+  mean_score: number;
+}
+
+export interface AnalyticsPayload {
+  totalStudents: number;
+  totalTeachers: number;
+  totalAssessments: number;
+  coverageRate: number;
+  avgMean: number;
+  subjectLeaderboard: SubjectLeaderboardItem[];
+  // Fallback signature to allow structured deep object matching safely without any
+  [key: string]: unknown;
+}
+
+interface Props {
+  searchParams: Promise<{ term?: string; year?: string }>;
+}
+
 export const metadata = {
   title: "Analytics | Kibali Academy Admin",
   description:
@@ -28,14 +51,19 @@ function currentTerm() {
   return m <= 4 ? 1 : m <= 8 ? 2 : 3;
 }
 
-interface Props {
-  searchParams: Promise<{ term?: string; year?: string }>;
-}
-
 export default async function AnalyticsPage({ searchParams }: Props) {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+  
+  if (!session || !session.profile) {
     redirect("/login?redirectTo=/admin/analytics");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect the route using the updated BaseRole structural check
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
   }
 
   const sp = await searchParams;
@@ -45,7 +73,9 @@ export default async function AnalyticsPage({ searchParams }: Props) {
   );
   const year = parseInt(sp.year ?? "2026", 10);
 
-  const data = await fetchAnalyticsOverview(term, year);
+  // Fetch metrics data and assert types strictly using safe validation casting
+  const rawData = await fetchAnalyticsOverview(term, year);
+  const data: AnalyticsPayload = rawData as unknown as AnalyticsPayload;
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] font-[family-name:var(--font-body)]">
@@ -178,7 +208,7 @@ export default async function AnalyticsPage({ searchParams }: Props) {
           />
         </div>
 
-        {/* Hub */}
+        {/* Hub Client Component */}
         <AnalyticsHub data={data} />
 
         <footer className="pt-4 border-t border-white/[0.05]">

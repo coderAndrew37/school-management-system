@@ -10,7 +10,37 @@ import {
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
-// Next.js 15 requires params to be a Promise
+// ── Strict Structural Types matching the Query Schema ───────────────────────
+
+interface StudentRow {
+  id: string;
+  full_name: string;
+  upi_number: string | null;
+  gender: "Male" | "Female" | string; // Matches database constraint structures
+  status: string;
+  photo_url: string | null;
+}
+
+interface TeacherDetails {
+  full_name: string;
+  staff_id: string;
+}
+
+interface AssignmentRow {
+  is_active: boolean;
+  teachers: TeacherDetails | null;
+}
+
+interface ClassDetailsResult {
+  id: string;
+  grade: string;
+  stream: string;
+  level: string;
+  academic_year: number;
+  students: StudentRow[] | null;
+  class_teacher_assignments: AssignmentRow[] | null;
+}
+
 type Props = {
   params: Promise<{ id: string }>;
 };
@@ -20,19 +50,30 @@ export default async function ClassDetailsPage({ params }: Props) {
   const { id } = await params;
 
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+  
+  if (!session || !session.profile) {
     redirect("/login");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
   }
 
   const supabase = await createSupabaseServerClient();
 
-  // 2. Fetch Class details + Students + Assigned Teacher
-  // Using the awaited 'id' here
-  const { data: classData, error } = await supabase
+  // 2. Fetch Class details + Students + Assigned Teacher with strict casting
+  const { data, error } = await supabase
     .from("classes")
     .select(
       `
-      *,
+      id,
+      grade,
+      stream,
+      level,
+      academic_year,
       students (
         id,
         full_name,
@@ -53,18 +94,22 @@ export default async function ClassDetailsPage({ params }: Props) {
     .eq("id", id)
     .single();
 
-  if (error || !classData) {
+  if (error || !data) {
     console.error("Error fetching class or class not found:", error);
     notFound();
   }
 
+  // Explicit type-casting to ensure down-stream template operations are safe
+  const classData = data as unknown as ClassDetailsResult;
+
+  // Type-safe matching instead of dynamic any projection maps
   const activeTeacher = classData.class_teacher_assignments?.find(
-    (a: any) => a.is_active,
+    (assignment: AssignmentRow) => assignment.is_active,
   )?.teachers;
 
-  const students = classData.students || [];
-  const maleCount = students.filter((s: any) => s.gender === "Male").length;
-  const femaleCount = students.filter((s: any) => s.gender === "Female").length;
+  const students = classData.students ?? [];
+  const maleCount = students.filter((student: StudentRow) => student.gender === "Male").length;
+  const femaleCount = students.filter((student: StudentRow) => student.gender === "Female").length;
 
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-200 p-6">
@@ -166,7 +211,7 @@ export default async function ClassDetailsPage({ params }: Props) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {students.map((student: any) => (
+                  {students.map((student: StudentRow) => (
                     <tr
                       key={student.id}
                       className="hover:bg-slate-800/30 transition-colors"

@@ -1,3 +1,5 @@
+// app/teacher/page.tsx
+
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import {
@@ -114,10 +116,19 @@ const TEACHER_TOOLS = [
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function TeacherDashboard() {
+  // ── Access Control Guard ───────────────────────────────────────────────────
   const session = await getSession();
-  if (!session || session.profile.role !== "teacher") redirect("/login");
+  if (!session || !session.profile) {
+    redirect("/login");
+  }
 
-  const teacherId = session.profile.teacher_id;
+  const { base_role, is_super_admin, is_dev, full_name, teacher_id: teacherId } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect route with structural check for staff (teachers) and administration overrides
+  if (base_role !== "staff" && base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
+  }
 
   if (!teacherId) {
     return (
@@ -126,7 +137,7 @@ export default async function TeacherDashboard() {
         <p className="text-4xl mb-4">⚠️</p>
         <p className="text-slate-800 font-bold text-lg">Account not linked</p>
         <p className="text-slate-500 text-sm mt-2 max-w-sm leading-relaxed">
-          Your account hasn't been linked to a teacher record. Contact the
+          Your account hasn&apos;t been linked to a teacher record. Contact the
           school administrator.
         </p>
       </div>
@@ -140,7 +151,7 @@ export default async function TeacherDashboard() {
     .filter((a, i, arr) => arr.findIndex((b) => b.grade === a.grade) === i)
     .reduce((sum, a) => sum + a.studentCount, 0);
 
-  const firstName = session.profile.full_name?.split(" ")[0] ?? "Teacher";
+  const firstName = full_name?.split(" ")[0] ?? "Teacher";
 
   const byLevel: Record<string, typeof allocations> = {};
   for (const a of allocations) {

@@ -1,5 +1,7 @@
+// app/teacher/class/reports/page.tsx
+
 import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/actions/auth";
 import { fetchMyClassTeacherAssignments } from "@/lib/actions/class-teacher";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ClassReportsClient } from "./ClassReportsClient";
@@ -11,20 +13,49 @@ export const revalidate = 0;
 
 const ACADEMIC_YEAR = 2026;
 
+// ── Strict Structural Interfaces ─────────────────────────────────────────────
+
+interface RawAssessmentRow {
+  student_id: string;
+  subject_name: string;
+  strand_id: string;
+  score: string | null;
+  teacher_remarks: string | null;
+  term: number;
+}
+
+interface RawReportCardRow {
+  id: string;
+  student_id: string;
+  term: number;
+  class_teacher_remarks: string | null;
+  conduct_grade: string | null;
+  effort_grade: string | null;
+  status: string | null;
+}
+
 interface Props {
   searchParams: Promise<{ grade?: string }>;
 }
 
 export default async function ClassReportsPage({ searchParams }: Props) {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  // ── Access Control Guard ───────────────────────────────────────────────────
+  const session = await getSession();
+  if (!session || !session.profile) {
+    redirect("/login");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect route with structural check for staff (teachers) and administrator overrides
+  if (base_role !== "staff" && base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
+  }
 
   const assignment = await fetchMyClassTeacherAssignments();
 
-  // FIX: Check 'classes' property and verify it exists to satisfy TypeScript union types
+  // Check 'classes' property and verify it exists to satisfy TypeScript union types
   if (
     !assignment?.isClassTeacher ||
     !assignment.classes ||
@@ -33,7 +64,7 @@ export default async function ClassReportsPage({ searchParams }: Props) {
     redirect("/teacher");
   }
 
-  // FIX: Extract the string array of grades from the classes objects
+  // Extract the string array of grades from the classes objects
   const grades = assignment.classes.map((c) => c.grade as string);
 
   const sp = await searchParams;
@@ -80,7 +111,7 @@ export default async function ClassReportsPage({ searchParams }: Props) {
         grade={activeGrade}
         grades={grades}
         academicYear={ACADEMIC_YEAR}
-        classTeacherId={user.id}
+        classTeacherId={session.profile.id}
       />
     );
   }
@@ -113,7 +144,9 @@ export default async function ClassReportsPage({ searchParams }: Props) {
 
   // Score deduplication — latest per (subject, strand)
   const scoresByStudent = new Map<string, SubjectScore[]>();
-  for (const r of (assessmentRows.data ?? []) as any[]) {
+  const rawAssessments = (assessmentRows.data ?? []) as unknown as RawAssessmentRow[];
+
+  for (const r of rawAssessments) {
     if (!r.score) continue;
     const list = scoresByStudent.get(r.student_id) ?? [];
     const idx = list.findIndex(
@@ -146,14 +179,23 @@ export default async function ClassReportsPage({ searchParams }: Props) {
     attMap.set(r.student_id, cur);
   }
 
-  const rcMap = new Map<string, any>();
-  for (const rc of (reportCards.data ?? []) as any[])
+  const rcMap = new Map<string, RawReportCardRow>();
+  const rawReportCards = (reportCards.data ?? []) as unknown as RawReportCardRow[];
+  for (const rc of rawReportCards) {
     rcMap.set(rc.student_id, rc);
+  }
 
   const enriched: StudentReport[] = students.map((s) => {
     const att = attMap.get(s.id) ?? { present: 0, absent: 0, late: 0 };
     const total = att.present + att.absent + att.late;
     const rc = rcMap.get(s.id) ?? null;
+
+    // Type guard assertion for the specific string literal unions
+    const reportStatus =
+      rc?.status === "draft" || rc?.status === "published"
+        ? rc.status
+        : null;
+
     return {
       id: s.id,
       full_name: s.full_name,
@@ -171,7 +213,7 @@ export default async function ClassReportsPage({ searchParams }: Props) {
       class_teacher_remarks: rc?.class_teacher_remarks ?? null,
       conduct_grade: rc?.conduct_grade ?? null,
       effort_grade: rc?.effort_grade ?? null,
-      status: rc?.status ?? null,
+      status: reportStatus,
     };
   });
 
@@ -181,7 +223,7 @@ export default async function ClassReportsPage({ searchParams }: Props) {
       grade={activeGrade}
       grades={grades}
       academicYear={ACADEMIC_YEAR}
-      classTeacherId={user.id}
+      classTeacherId={session.profile.id}
     />
   );
 }

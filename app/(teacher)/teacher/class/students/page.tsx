@@ -1,5 +1,7 @@
+// app/teacher/class/students/page.tsx
+
 import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/actions/auth";
 import { fetchMyClassTeacherAssignments } from "@/lib/actions/class-teacher";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ClassStudentsClient } from "./ClassStudentsClient";
@@ -9,20 +11,52 @@ import { ClassGradeSelector } from "@/app/(teacher)/_components/ClassGradeSelect
 export const metadata = { title: "My Class | Kibali Teacher" };
 export const revalidate = 0;
 
+// ── Strict Structural Interfaces ─────────────────────────────────────────────
+
+interface ParentRecord {
+  full_name: string | null;
+  phone_number: string | null;
+  email: string | null;
+}
+
+interface StudentParentLink {
+  is_primary_contact: boolean;
+  parents: ParentRecord | null;
+}
+
+interface RawStudentJoined {
+  id: string;
+  full_name: string;
+  readable_id: string | null;
+  upi_number: string | null;
+  gender: "Female" | "Male" | string | null; // Allow loose strings from DB for checking
+  date_of_birth: string | null;
+  current_grade: string;
+  student_parents: StudentParentLink[] | StudentParentLink | null;
+}
+
 interface Props {
   searchParams: Promise<{ grade?: string }>;
 }
 
 export default async function ClassStudentsPage({ searchParams }: Props) {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  // ── Access Control Guard ───────────────────────────────────────────────────
+  const session = await getSession();
+  if (!session || !session.profile) {
+    redirect("/login");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect route with structural check for staff (teachers) and administrator overrides
+  if (base_role !== "staff" && base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
+  }
 
   const assignment = await fetchMyClassTeacherAssignments();
 
-  // FIX: Check 'classes' property instead of 'grades' to satisfy TypeScript union types
+  // Check 'classes' property instead of 'grades' to satisfy TypeScript union types
   if (
     !assignment?.isClassTeacher ||
     !assignment.classes ||
@@ -31,7 +65,7 @@ export default async function ClassStudentsPage({ searchParams }: Props) {
     redirect("/teacher");
   }
 
-  // FIX: Extract the string array of grades for compatibility with the rest of the file
+  // Extract the string array of grades for compatibility with the rest of the file
   const grades = assignment.classes.map((c) => c.grade as string);
 
   // Grade resolution
@@ -70,8 +104,8 @@ export default async function ClassStudentsPage({ searchParams }: Props) {
     .eq("status", "active")
     .order("full_name");
 
-  const students = (rawStudents ?? []) as any[];
-  const studentIds = students.map((s) => s.id as string);
+  const students = (rawStudents ?? []) as unknown as RawStudentJoined[];
+  const studentIds = students.map((s) => s.id);
 
   // ── Attendance + assessments (parallel) ──────────────────────────────────
   const [attendanceRows, assessmentRows] = await Promise.all([
@@ -107,8 +141,9 @@ export default async function ClassStudentsPage({ searchParams }: Props) {
   }
 
   const assessMap = new Map<string, number>();
-  for (const r of assessmentRows as { student_id: string }[])
+  for (const r of assessmentRows as { student_id: string }[]) {
     assessMap.set(r.student_id, (assessMap.get(r.student_id) ?? 0) + 1);
+  }
 
   const enriched: StudentWithStats[] = students.map((s) => {
     const att = attMap.get(s.id) ?? { present: 0, absent: 0, late: 0 };
@@ -116,19 +151,26 @@ export default async function ClassStudentsPage({ searchParams }: Props) {
     const rate =
       total > 0 ? Math.round(((att.present + att.late) / total) * 100) : 0;
 
-    const links: any[] = Array.isArray(s.student_parents)
+    const links: StudentParentLink[] = Array.isArray(s.student_parents)
       ? s.student_parents
-      : [];
+      : s.student_parents
+        ? [s.student_parents]
+        : [];
+
     const primary =
-      links.find((l: any) => l.is_primary_contact) ?? links[0] ?? null;
+      links.find((l) => l.is_primary_contact) ?? links[0] ?? null;
     const parent = primary?.parents ?? null;
+
+    // Type guard assertion matching the exact 'StudentWithStats' literal type requirements
+    const studentGender =
+      s.gender === "Female" || s.gender === "Male" ? s.gender : null;
 
     return {
       id: s.id,
       full_name: s.full_name,
       readable_id: s.readable_id ?? null,
       upi_number: s.upi_number ?? null,
-      gender: s.gender ?? null,
+      gender: studentGender,
       date_of_birth: s.date_of_birth ?? "",
       current_grade: s.current_grade,
       present: att.present,

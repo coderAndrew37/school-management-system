@@ -2,7 +2,7 @@
 // Server component — auth, data fetching only. No UI logic.
 
 import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/actions/auth";
 import {
   fetchTeacherAssessmentAllocations,
   fetchClassStudents,
@@ -11,25 +11,29 @@ import { fetchTeacherDiaryEntries, fetchClassOptions } from "@/lib/data/diary";
 import { getActiveTermYear } from "@/lib/utils/settings";
 import DiaryClient from "./DiaryClient";
 
-export default async function DiaryPage() {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+export const metadata = { title: "Teacher Diary | Kibali Teacher" };
+export const revalidate = 0;
 
-  const { data: teacher } = await supabase
-    .from("teachers")
-    .select("id, full_name")
-    .eq("id", user.id)
-    .single<{ id: string; full_name: string }>();
-  if (!teacher) redirect("/login");
+export default async function DiaryPage() {
+  // ── Access Control Guard ───────────────────────────────────────────────────
+  const session = await getSession();
+  if (!session || !session.profile) {
+    redirect("/login");
+  }
+
+  const { base_role, is_super_admin, is_dev, full_name, id: teacherId } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect route with structural check for staff (teachers) and administration overrides
+  if (base_role !== "staff" && base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
+  }
 
   const { academicYear } = await getActiveTermYear();
 
   // 1. Get allocations to find exactly which classes (UUIDs) this teacher handles
   const allocations = await fetchTeacherAssessmentAllocations(
-    teacher.id,
+    teacherId,
     academicYear,
   );
   
@@ -61,7 +65,7 @@ export default async function DiaryPage() {
 
   return (
     <DiaryClient
-      teacherName={teacher.full_name}
+      teacherName={full_name ?? ""}
       classOptions={teacherClassOptions}
       studentsByClass={studentsByClass}
       initialEntries={initialEntries}

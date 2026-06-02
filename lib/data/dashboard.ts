@@ -3,7 +3,22 @@
 //
 // All queries are school_id scoped via Supabase RLS + explicit .eq() filters.
 // Zero usage of `any` — every join shape is explicitly typed.
-// The session user's school_id is read once and reused across all queries.
+//
+// ARCHITECTURE NOTE — "parents" table does not exist
+// ─────────────────────────────────────────────────────────────────────────────
+// Parents are rows in `profiles` where role = 'parent'.
+// The link between students and their parents is the `student_parents`
+// junction table, whose `parent_id` FK points to `profiles.id`.
+//
+// The correct PostgREST join path from students is therefore:
+//   student_parents (
+//     parent:profiles!student_parents_parent_id_profiles_fkey ( ... )
+//   )
+//
+// The alias key in the raw response will be `parent` (singular, not `profiles`)
+// because we used the bang-syntax alias form. The shape is a single object
+// (not an array) because student_parents.parent_id is a many-to-one FK.
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { GRADE_LEVEL_MAP } from "@/lib/types/assessment";
@@ -24,10 +39,15 @@ interface RawProfileRow {
   email: string | null;
 }
 
+/**
+ * A single row from the student_parents junction table.
+ * `parent` is the aliased join to profiles via student_parents_parent_id_profiles_fkey.
+ * It is a single object (not an array) because parent_id is a many-to-one FK.
+ */
 interface RawParentLink {
   is_primary_contact: boolean;
   relationship_type: string;
-  parent: RawProfileRow | null;  // was: profiles
+  parent: RawProfileRow | null;
 }
 
 interface RawStudentRow {
@@ -50,10 +70,6 @@ interface RawStudentRow {
 // HELPERS
 // ============================================================================
 
-/**
- * Resolves the calling user's school_id from their profile.
- * Throws if unauthenticated or profile missing.
- */
 async function resolveSchoolId(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>
 ): Promise<string> {
@@ -63,7 +79,7 @@ async function resolveSchoolId(
 
   if (!user) throw new Error("[dashboard] Unauthenticated request.");
 
-  // Prefer JWT app_metadata (zero DB call path) — written by sync_user_jwt_claims trigger
+  // Prefer JWT app_metadata (zero DB call) — written by sync_user_jwt_claims
   const jwtSchoolId = user.app_metadata?.school_id as string | undefined;
   if (jwtSchoolId) return jwtSchoolId;
 
@@ -100,18 +116,18 @@ function mapStudentRow(row: RawStudentRow): Student {
     status:         (row.status as Student["status"]) ?? "active",
     parents: primary?.parent
       ? {
-          id:              primary.parent.id,
-          full_name:       primary.parent.full_name,
-          phone_number:    primary.parent.phone_number,
-          email:           primary.parent.email ?? "",
+          id:           primary.parent.id,
+          full_name:    primary.parent.full_name,
+          phone_number: primary.parent.phone_number,
+          email:        primary.parent.email ?? "",
           invite_accepted: true,
         }
       : null,
     all_parents: links.map((l) => ({
-      parent_id:          l.parent?.id            ?? "",
-      full_name:          l.parent?.full_name      ?? "",
-      phone_number:       l.parent?.phone_number   ?? null,
-      email:              l.parent?.email          ?? "",
+      parent_id:          l.parent?.id          ?? "",
+      full_name:          l.parent?.full_name    ?? "",
+      phone_number:       l.parent?.phone_number ?? null,
+      email:              l.parent?.email        ?? "",
       relationship_type:  l.relationship_type,
       is_primary_contact: l.is_primary_contact,
       invite_accepted:    true,
@@ -119,7 +135,12 @@ function mapStudentRow(row: RawStudentRow): Student {
   };
 }
 
-// Explicit foreign key constraint tracking to bypass old cached relation mappings
+/**
+ * `profiles!student_parents_parent_id_profiles_fkey` — bang syntax tells
+ * PostgREST to traverse the FK from student_parents.parent_id → profiles.id.
+ * The alias `parent:` makes the JSON key `parent` (singular object) rather
+ * than the raw table name.
+ */
 const STUDENT_SELECT = `
   id, readable_id, upi_number, full_name,
   date_of_birth, gender, current_grade, class_id, photo_url, status, created_at,
@@ -127,23 +148,24 @@ const STUDENT_SELECT = `
   student_parents (
     is_primary_contact,
     relationship_type,
-    parent:profiles!student_parents_parent_id_profiles_fkey ( 
-      id, full_name, phone_number, email 
+    parent:profiles!student_parents_parent_id_profiles_fkey (
+      id, full_name, phone_number, email
     )
   )
 ` as const;
+
 // ============================================================================
 // STUDENT FETCHERS
 // ============================================================================
 
 export async function fetchStudents(limit?: number): Promise<Student[]> {
-  const supabase   = await createSupabaseServerClient();
-  const school_id  = await resolveSchoolId(supabase);
+  const supabase  = await createSupabaseServerClient();
+  const school_id = await resolveSchoolId(supabase);
 
   let query = supabase
     .from("students")
     .select(STUDENT_SELECT)
-    .eq("school_id", school_id)           // ← explicit tenant fence
+    .eq("school_id", school_id)
     .order("created_at", { ascending: false });
 
   if (limit) query = query.limit(limit);
@@ -187,7 +209,7 @@ export async function fetchAllStudents(
   let query = supabase
     .from("students")
     .select(STUDENT_SELECT)
-    .eq("school_id", school_id)           // ← explicit tenant fence
+    .eq("school_id", school_id)
     .order(sortBy, { ascending: sortDir === "asc" });
 
   if (search) {
@@ -227,6 +249,7 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
       .from("teachers")
       .select("id", { count: "exact", head: true })
       .eq("school_id", school_id),
+    // Count distinct parent_id entries in student_parents — not a `parents` table
     supabase
       .from("student_parents")
       .select("parent_id", { count: "exact", head: true })
@@ -327,7 +350,7 @@ export async function fetchDashboardChartData(
     supabase
       .from("students")
       .select("id, current_grade, gender, created_at")
-      .eq("school_id", school_id)         // ← tenant fence
+      .eq("school_id", school_id)
       .order("created_at", { ascending: false }),
     supabase
       .from("assessments")

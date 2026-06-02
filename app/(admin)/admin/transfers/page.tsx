@@ -96,7 +96,7 @@ export default async function TransfersPage() {
             <code className="text-amber-400/60 text-[10px]">
               approve_inbound_transfer()
             </code>{" "}
-            PostgreSQL function which atomically restores the student's G7 + G8
+            PostgreSQL function which atomically restores the student&apos;s G7 + G8
             SBA records from the archive table — ensuring the KESSCE 3-year
             aggregator has a complete record.
           </p>

@@ -1,8 +1,26 @@
-import { redirect }           from "next/navigation";
-import { getSession }         from "@/lib/actions/auth";
-import { fetchApplications, ApplicationStatus }  from "@/lib/actions/applications";
+// app/admin/applications/page.tsx
+import { redirect } from "next/navigation";
+import { getSession } from "@/lib/actions/auth";
+import { fetchApplications, ApplicationStatus } from "@/lib/actions/applications";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ApplicationsClient } from "./ApplicationsClient";
+
+// ── Strict Structural Types ──────────────────────────────────────────────────
+
+interface ApplicationClassItem {
+  id: string;
+  name: string;
+}
+
+// Added index signature to satisfy Record<string, number> expectation
+interface ApplicationCounts {
+  all: number;
+  pending: number;
+  reviewing: number;
+  approved: number;
+  declined: number;
+  [key: string]: number; 
+}
 
 export const metadata = { title: "Applications | Kibali Academy Admin" };
 export const revalidate = 0;
@@ -13,31 +31,40 @@ export default async function ApplicationsPage({
   searchParams: Promise<{ status?: string; page?: string }>;
 }) {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+  
+  if (!session || !session.profile) {
     redirect("/login?redirectTo=/admin/applications");
   }
 
-  const sp     = await searchParams;
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect the route using the updated BaseRole structural check
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
+  }
+
+  const sp = await searchParams;
   const status = (sp.status ?? "all") as ApplicationStatus | "all";
-  const page   = Number(sp.page ?? 1);
+  const page = Number(sp.page ?? 1);
 
   // 1. Fetch applications and counts
   const { data, count } = await fetchApplications(status, page);
 
   const [pendingResult, reviewingResult, approvedResult, declinedResult] =
     await Promise.all([
-      fetchApplications("pending",   1, 1),
+      fetchApplications("pending", 1, 1),
       fetchApplications("reviewing", 1, 1),
-      fetchApplications("approved",  1, 1),
-      fetchApplications("declined",  1, 1),
+      fetchApplications("approved", 1, 1),
+      fetchApplications("declined", 1, 1),
     ]);
 
-  const counts = {
-    all:       count,
-    pending:   pendingResult.count,
+  const counts: ApplicationCounts = {
+    all: count,
+    pending: pendingResult.count,
     reviewing: reviewingResult.count,
-    approved:  approvedResult.count,
-    declined:  declinedResult.count,
+    approved: approvedResult.count,
+    declined: declinedResult.count,
   };
 
   // 2. Fetch classes for the conversion dropdown
@@ -47,7 +74,7 @@ export default async function ApplicationsPage({
     .select("id, name")
     .order("name", { ascending: true });
 
-  const classes = classesData ?? [];
+  const classes: ApplicationClassItem[] = (classesData ?? []) as unknown as ApplicationClassItem[];
 
   return (
     <ApplicationsClient

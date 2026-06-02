@@ -1,3 +1,4 @@
+// app/parent/diary/page.tsx
 import { getSession } from "@/lib/actions/auth";
 import { fetchAllChildData, fetchMyChildren } from "@/lib/data/parent";
 import { redirect } from "next/navigation";
@@ -13,8 +14,16 @@ interface PageProps {
 export default async function DiaryPage({ searchParams }: PageProps) {
   const session = await getSession();
 
-  // Guard: Ensure session and email exist
-  if (!session || !session.user?.email || session.profile.role !== "parent") {
+  // Guard: Ensure session, profile, and user email exist
+  if (!session || !session.profile || !session.user?.email) {
+    redirect("/login");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect the route using the updated BaseRole structural check for parents
+  if (base_role !== "parent" && !isPlatformAdmin) {
     redirect("/login");
   }
 

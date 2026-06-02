@@ -1,3 +1,4 @@
+// app/parent/announcements/page.tsx
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/actions/auth";
 import { fetchMyChildren, fetchAllChildData } from "@/lib/data/parent";
@@ -9,12 +10,16 @@ export const revalidate = 0;
 export default async function ParentAnnouncementsPage() {
   const session = await getSession();
 
-  // Guard: Ensure session exists, role is parent, and email is present
-  if (
-    !session || 
-    !session.user?.email || 
-    session.profile.role !== "parent"
-  ) {
+  // Guard: Ensure session, profile, and user email exist
+  if (!session || !session.profile || !session.user?.email) {
+    redirect("/login");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect the route using the updated BaseRole structural check for parents
+  if (base_role !== "parent" && !isPlatformAdmin) {
     redirect("/login");
   }
 

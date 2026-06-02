@@ -1,6 +1,7 @@
 // app/teacher/gallery/page.tsx
 
 import { redirect } from "next/navigation";
+import { getSession } from "@/lib/actions/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   fetchTeacherAssessmentAllocations,
@@ -20,24 +21,27 @@ export const revalidate = 0;
 
 export default async function GalleryPage() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
 
-  const { data: teacher } = await supabase
-    .from("teachers")
-    .select("id, full_name")
-    .eq("id", user.id)
-    .single();
-  if (!teacher) redirect("/login");
+  // ── Access Control Guard ───────────────────────────────────────────────────
+  const session = await getSession();
+  if (!session || !session.profile) {
+    redirect("/login");
+  }
+
+  const { base_role, is_super_admin, is_dev, full_name, id: teacherId } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect route with structural check for staff (teachers) and administrator overrides
+  if (base_role !== "staff" && base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
+  }
 
   // Get current school year from settings
   const { academicYear } = await getActiveTermYear();
 
   // 1. Get all allocations for this teacher to identify their classes
   const allocations = await fetchTeacherAssessmentAllocations(
-    teacher.id,
+    teacherId,
     academicYear,
   );
 
@@ -63,7 +67,7 @@ export default async function GalleryPage() {
   );
 
   // 4. Fetch gallery items and hydrate with temporary signed URLs
-  const rawItems = await fetchTeacherGallery(teacher.id, 80);
+  const rawItems = await fetchTeacherGallery(teacherId, 80);
   const galleryItems: GalleryItem[] = await Promise.all(
     rawItems.map(async (item) => ({
       ...item,
@@ -81,8 +85,8 @@ export default async function GalleryPage() {
 
   return (
     <GalleryClient
-      teacherName={teacher.full_name}
-      teacherId={teacher.id}
+      teacherName={full_name ?? ""}
+      teacherId={teacherId}
       classes={classes}
       studentsByClass={studentsByClass}
       studentNameMap={studentNameMap}

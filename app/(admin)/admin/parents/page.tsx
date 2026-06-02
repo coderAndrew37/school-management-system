@@ -14,8 +14,17 @@ export const revalidate = 0;
 
 export default async function ParentsPage() {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+
+  if (!session || !session.profile) {
     redirect("/login?redirectTo=/admin/parents");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect the route using the updated BaseRole type criteria
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
   }
 
   const parents = await fetchAllParents();

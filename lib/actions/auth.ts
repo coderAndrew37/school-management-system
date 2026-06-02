@@ -2,18 +2,6 @@
 
 // lib/actions/auth.ts
 // Kibali Academy — Auth Server Actions (hardened)
-//
-// KEY FIXES vs previous version:
-//   1. loginAction no longer calls getSession() after signInWithPassword —
-//      that extra DB round-trip can fail if the JWT sync trigger is mid-flight.
-//      We read role from the session returned by signInWithPassword directly.
-//   2. getSession() has an explicit try/catch so a profiles query failure
-//      doesn't surface as an unhandled error.
-//   3. resolvePrimaryRole / resolveAllRoles imported from CORRECT service layer path:
-//      @/lib/services/auth-utils (not @/lib/actions/auth-utils).
-//   4. Parent invite check uses supabaseAdmin with maybeSingle() — never throws.
-//   5. All redirectTo values are validated against an allowlist to prevent
-//      open-redirect attacks.
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin }           from "@/lib/supabase/admin";
@@ -33,7 +21,6 @@ import {
   type AuthActionResult,
 } from "@/lib/types/auth";
 
-// ✅ FIXED: Corrected import path pointing to services utility layer instead of actions wrapper
 import {
   resolvePrimaryRole,
   resolveAllRoles,
@@ -59,19 +46,6 @@ function checkRateLimit(
   return true;
 }
 
-// ── Redirect allowlist guard ───────────────────────────────────────────────
-// Prevents open-redirect attacks on the redirectTo param.
-
-const SAFE_REDIRECT_PREFIXES = [
-  "/admin",
-  "/teacher",
-  "/parent",
-  "/support",
-  "/auth",
-];
-
-
-
 // ============================================================================
 // SESSION RESULT TYPE
 // ============================================================================
@@ -85,9 +59,6 @@ export interface SessionResult {
 
 // ============================================================================
 // getSession
-// The single trusted entry point for resolving a live server-side session.
-// Reads the full Profile row including override arrays.
-// NEVER throws — returns null on any failure.
 // ============================================================================
 
 export async function getSession(): Promise<SessionResult | null> {
@@ -102,53 +73,51 @@ export async function getSession(): Promise<SessionResult | null> {
     if (userError || !user) return null;
 
     const { data: profile, error: profileError } = await supabase
-  .from("profiles")
-  .select(`
-    id,
-    school_id,
-    full_name,
-    phone_number,
-    email,
-    avatar_url,
-    role,
-    roles,
-    is_super_admin,
-    is_dev,
-    teacher_id,
-    allowed_permissions_override,
-    denied_permissions_override,
-    created_at,
-    updated_at
-  `)
-  .eq("id", user.id)
-  .single();
+      .from("profiles")
+      .select(`
+        id,
+        school_id,
+        full_name,
+        phone_number,
+        email,
+        avatar_url,
+        role,
+        roles,
+        is_super_admin,
+        is_dev,
+        teacher_id,
+        allowed_permissions_override,
+        denied_permissions_override,
+        created_at,
+        updated_at
+      `)
+      .eq("id", user.id)
+      .single();
 
     if (profileError || !profile) {
-      // Profile doesn't exist yet (new user, trigger hasn't fired) — still
-      // return a minimal session so the layout doesn't hard-crash.
       console.warn("[getSession] profile not found for uid:", user.id, profileError?.message);
       return null;
     }
 
-    // ✅ FIXED: Maps role columns correctly, preserving database enum states (super_admin, admin, staff)
+    // Aligned to conform explicitly with the structural definitions inside types/auth.ts
     const typedProfile: Profile = {
-  id:                           profile.id as string,
-  school_id:                    (profile.school_id        as string | null) ?? null,
-  full_name:                    (profile.full_name         as string | null) ?? null,
-  phone_number:                 (profile.phone_number      as string | null) ?? null,
-  email:                        (profile.email             as string | null) ?? null,
-  avatar_url:                   (profile.avatar_url        as string | null) ?? null,
-  base_role:                    (profile.role              as BaseRole) ?? "staff",
-  admin_role:                   null,
-  roles:                        (profile.roles             as BaseRole[] | null) ?? null,
-  teacher_id:                   (profile.teacher_id        as string | null) ?? null,
-  is_super_admin:               (profile.is_super_admin    as boolean) ?? false,
-  is_dev:                       (profile.is_dev            as boolean) ?? false,
-  allowed_permissions_override: (profile.allowed_permissions_override as string[]) ?? [],
-  denied_permissions_override:  (profile.denied_permissions_override  as string[]) ?? [],
-  created_at:                   profile.created_at as string,
-  updated_at:                   profile.updated_at as string,
-};
+      id:                           profile.id as string,
+      school_id:                    (profile.school_id        as string | null) ?? null,
+      full_name:                    (profile.full_name         as string | null) ?? null,
+      phone_number:                 (profile.phone_number      as string | null) ?? null,
+      email:                        (profile.email             as string | null) ?? null,
+      avatar_url:                   (profile.avatar_url        as string | null) ?? null,
+      base_role:                    (profile.role              as BaseRole) ?? "staff",
+      admin_role:                   null,
+      roles:                        (profile.roles             as string[] | null) ?? null,
+      teacher_id:                   (profile.teacher_id        as string | null) ?? null,
+      is_super_admin:               (profile.is_super_admin    as boolean) ?? false,
+      is_dev:                       (profile.is_dev            as boolean) ?? false,
+      allowed_permissions_override: (profile.allowed_permissions_override as string[] | null) ?? null,
+      denied_permissions_override:  (profile.denied_permissions_override  as string[] | null) ?? null,
+      created_at:                   profile.created_at as string,
+      updated_at:                   profile.updated_at as string,
+    };
 
     return {
       user:        { id: user.id, email: user.email ?? "" },
@@ -220,13 +189,9 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
     return { success: false, message: "Session error. Please try again." };
   }
 
-  // ── Read role directly from the session JWT app_metadata ─────────────────
-  // Try JWT first (fast path — no DB call)
   let primaryRole = authUser.app_metadata?.role as BaseRole | undefined;
   let allRoles:     BaseRole[] = (authUser.app_metadata?.roles as BaseRole[]) ?? (primaryRole ? [primaryRole] : []);
 
-  // Fall back to a live profile read if JWT doesn't have role yet
-  // (brand new user, or JWT hasn't been synced by the trigger yet)
   if (!primaryRole) {
     const { data: profileRow } = await supabase
       .from("profiles")
@@ -243,12 +208,10 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
     }
   }
 
-  // Ensure primary role exists within the unified roles collection block
   if (primaryRole && !allRoles.includes(primaryRole)) {
     allRoles = [primaryRole, ...allRoles];
   }
 
-  // ✅ FIXED: Parent invite guard checks allRoles for the target 'parent' entry explicitly
   if (allRoles.includes("parent")) {
     try {
       const { data: parentRow } = await supabaseAdmin
@@ -258,9 +221,7 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
         .limit(1)
         .maybeSingle();
 
-      // If no student-parent link exists, the account isn't fully set up
       if (!parentRow && allRoles.length === 1) {
-        // Sign them out so they don't have a dangling session
         await supabase.auth.signOut();
         return {
           success: false,
@@ -269,14 +230,12 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
         };
       }
     } catch (err: unknown) {
-      // Non-blocking — don't let a parent check crash the login
       console.warn("[loginAction] parent check failed:", err instanceof Error ? err.message : err);
     }
   }
 
   revalidatePath("/", "layout");
 
-  // Multi-role checks: send to portal landing role layout picker view
   if (allRoles.length > 1) {
     return {
       success:    true,
@@ -286,7 +245,6 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
     };
   }
 
-  // ✅ FIXED: Properly looks up target route mappings matching updated configuration sets
   return {
     success:    true,
     message:    "Signed in successfully.",
@@ -325,9 +283,7 @@ export async function forgotPasswordAction(
 
   const email = parsed.data.email.toLowerCase().trim();
 
-  // Rate limit: 3 attempts per 15 minutes per email
   if (!checkRateLimit(`forgot:${email}`, 3, 15 * 60 * 1000)) {
-    // Return the safe response even on rate limit — don't reveal account existence
     return {
       success: true,
       message:
@@ -353,7 +309,6 @@ export async function forgotPasswordAction(
     return SAFE_RESPONSE;
   }
 
-  // Resolve the display name non-blockingly
   let recipientName = email.split("@")[0] ?? "there";
   try {
     const { data: p } = await supabaseAdmin
@@ -428,16 +383,14 @@ export async function resetPasswordAction(
     };
   }
 
-  // Mark parent invite accepted (non-blocking — ignore failures)
   try {
     await supabaseAdmin
       .from("profiles")
       .update({ role: "parent" })
       .eq("id", user.id)
-      .eq("role", "parent"); // no-op if not a parent
+      .eq("role", "parent");
   } catch { /* non-blocking */ }
 
-  // Determine where to redirect after password reset
   const roleFromJwt =
     (user.app_metadata?.role as BaseRole | undefined) ?? "parent";
 
