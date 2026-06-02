@@ -20,9 +20,19 @@ const REVALIDATE = "/admin/governance";
 
 async function requireAdmin(): Promise<string> {
   const session = await getSession();
-  if (!session || session.profile.role !== "admin") {
+  
+  if (!session || !session.profile) {
+    throw new Error("Forbidden: Unauthorized access");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Aligning strictly with your guard context structural constraints
+  if (base_role !== "admin" && !isPlatformAdmin) {
     throw new Error("Forbidden: admin access required");
   }
+
   return session.user.id;
 }
 
@@ -48,7 +58,7 @@ export async function createAnnouncementAction(
     title: z.string().min(2).max(200),
     body: z.string().min(10).max(10000),
     audience: z.enum(["all", "parents", "teachers", "grade"]),
-    target_class_id: z.string().uuid().nullable().optional(), // Refactored from target_grade
+    target_class_id: z.string().uuid().nullable().optional(), 
     priority: z.enum(["low", "normal", "high", "urgent"]),
     pinned: z.boolean(),
     expires_at: z.string().nullable().optional(),
@@ -132,11 +142,10 @@ export async function createEventAction(fd: FormData): Promise<ActionResult> {
     start_time: z.string().nullable().optional(),
     end_time: z.string().nullable().optional(),
     location: z.string().max(200).nullable().optional(),
-    target_class_ids: z.array(z.string().uuid()).nullable().optional(), // Refactored from target_grades
+    target_class_ids: z.array(z.string().uuid()).nullable().optional(), 
     is_public: z.boolean(),
   });
 
-  // Handle target_class_ids as an array from FormData if applicable
   const rawClassIds = fd.get("target_class_ids");
   const targetClassIds = typeof rawClassIds === "string" ? rawClassIds.split(",") : null;
 
@@ -220,7 +229,7 @@ export async function createInventoryItemAction(
     category: str(fd, "category") ?? "other",
     sku: str(fd, "sku"),
     unit: str(fd, "unit") ?? "piece",
-    quantity: 0, // always start at 0; use opening stock tx
+    quantity: 0, 
     minimum_stock: num(fd, "minimum_stock") ?? 0,
     unit_cost: num(fd, "unit_cost"),
     location: str(fd, "location"),
@@ -246,13 +255,12 @@ export async function createInventoryItemAction(
     return { success: false, message: "Failed to add inventory item." };
   }
 
-  // Record opening stock as a transaction (DB trigger updates qty)
   if (openingQty > 0) {
     await supabase.from("inventory_transactions").insert({
       item_id: data.id,
       tx_type: "received",
       quantity: openingQty,
-      balance_after: 0, // overwritten by DB AFTER trigger
+      balance_after: 0, 
       notes: "Opening stock",
     });
   }
@@ -299,7 +307,6 @@ export async function recordTransactionAction(
   if (!parsed.success)
     return { success: false, message: parsed.error.issues[0]!.message };
 
-  // Guard: outgoing must not exceed current stock
   if (outgoing.includes(txType)) {
     const { data: item } = await supabase
       .from("inventory_items")
@@ -319,7 +326,7 @@ export async function recordTransactionAction(
     item_id: parsed.data.item_id,
     tx_type: txType,
     quantity: signedQty,
-    balance_after: 0, // overwritten by AFTER trigger
+    balance_after: 0, 
     notes: parsed.data.notes,
     reference: parsed.data.reference,
     performed_by: userId,
@@ -342,7 +349,7 @@ export async function upsertFeeStructureAction(
   const supabase = await createSupabaseServerClient();
 
   const schema = z.object({
-    class_id: z.string().uuid("Invalid class selection"), // Refactored from grade
+    class_id: z.string().uuid("Invalid class selection"), 
     term: z.number().int().min(1).max(3),
     academic_year: z.number().int(),
     tuition_fee: z.number().min(0),
@@ -431,7 +438,7 @@ export async function recordPaymentAction(fd: FormData): Promise<ActionResult> {
   return { success: true, message: "Payment recorded.", id: data?.id };
 }
 
-// ── ATTENDANCE OVERVIEW (server action wrapper for client components) ──────────
+// ── ATTENDANCE OVERVIEW ────────────────────────────────────────────────────────
 
 import type { AttendanceOverview } from "@/lib/types/governance";
 import { fetchAttendanceOverview as _fetchAttendanceOverview } from "@/lib/data/governance";

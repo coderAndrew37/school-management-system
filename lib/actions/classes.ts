@@ -22,7 +22,15 @@ export async function createClassAction(data: CreateClassInput) {
   try {
     // Check Authorization
     const session = await getSession();
-    if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+    if (!session || !session.profile) {
+      return { success: false, message: "Unauthorised" };
+    }
+
+    const { base_role, is_super_admin, is_dev } = session.profile;
+    const isPlatformAdmin = is_super_admin || is_dev;
+
+    // Structural guard matching your access pattern
+    if (base_role !== "admin" && !isPlatformAdmin) {
       return { success: false, message: "Unauthorised" };
     }
 

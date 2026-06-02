@@ -61,6 +61,12 @@ const STATUS_CFG = {
     badge: "bg-amber-400/10 border-amber-400/30 text-amber-400",
     pulse: false,
   },
+  transferred: {
+    label: "Transferred",
+    dot: "bg-purple-400",
+    badge: "bg-purple-400/10 border-purple-400/30 text-purple-400",
+    pulse: false,
+  },
   resigned: {
     label: "Resigned",
     dot: "bg-rose-400",
@@ -71,6 +77,18 @@ const STATUS_CFG = {
     label: "Terminated",
     dot: "bg-slate-500",
     badge: "bg-slate-500/10 border-slate-500/30 text-slate-400",
+    pulse: false,
+  },
+  deceased: {
+    label: "Deceased",
+    dot: "bg-gray-500",
+    badge: "bg-gray-500/10 border-gray-500/30 text-gray-400",
+    pulse: false,
+  },
+  retired: {
+    label: "Retired",
+    dot: "bg-indigo-500",
+    badge: "bg-indigo-500/10 border-indigo-500/30 text-indigo-400",
     pulse: false,
   },
 };
@@ -85,11 +103,20 @@ function fmtDate(iso: string) {
 
 // ── Status Badge ──────────────────────────────────────────────────────────────
 
-function StatusBadge({ status }: { status: keyof typeof STATUS_CFG }) {
+function StatusBadge({ status }: { status: Teacher["status"] }) {
   const cfg = STATUS_CFG[status];
+  if (!cfg) {
+    // Fallback for any unknown status
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border bg-gray-500/10 border-gray-500/30 text-gray-400">
+        <span className="w-1.5 h-1.5 rounded-full bg-gray-500" />
+        {status.replace("_", " ")}
+      </span>
+    );
+  }
   return (
     <span
-      className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${cfg.badge}`}
+      className={`inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${cfg.badge}`}
     >
       <span
         className={`w-1.5 h-1.5 rounded-full ${cfg.dot} ${cfg.pulse ? "animate-pulse" : ""}`}
@@ -186,11 +213,8 @@ export function TeacherDetailClient({
     });
   }
 
-  // Determine current active class teacher roles from assignments
   const activeAssignments = classAssignments.filter((a) => a.isActive);
 
-  // Unique grade identifiers (ID + Stream) teacher covers in subjects
-  // We use this to allow clicking a button to assign them
   const allocGrades = Array.from(
     new Map(allocations.map((a) => [`${a.grade}-${a.stream}`, a])).values(),
   ).sort((a, b) => a.grade.localeCompare(b.grade));
@@ -215,7 +239,6 @@ export function TeacherDetailClient({
 
   return (
     <div className="min-h-screen bg-[#090c18] text-white">
-      {/* Top nav bar */}
       <div className="sticky top-0 z-20 bg-[#090c18]/80 backdrop-blur-md border-b border-white/[0.06] px-6 py-3 flex items-center gap-4">
         <Link
           href="/admin/teachers"
@@ -236,7 +259,6 @@ export function TeacherDetailClient({
       </div>
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8">
-        {/* ── HERO HEADER ── */}
         <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-6 sm:p-8 overflow-hidden relative">
           <div className="pointer-events-none absolute -top-20 -right-20 w-64 h-64 rounded-full bg-amber-400/[0.04] blur-3xl" />
 
@@ -532,7 +554,7 @@ export function TeacherDetailClient({
               <p className="text-[10px] font-black uppercase tracking-widest text-white/25 mb-3">
                 Employment Status
               </p>
-              {(["active", "on_leave", "resigned", "terminated"] as const).map(
+              {(["active", "on_leave", "transferred", "resigned", "terminated", "deceased", "retired"] as const).map(
                 (s) => {
                   const cfg = STATUS_CFG[s];
                   return (

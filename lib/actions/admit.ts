@@ -161,13 +161,13 @@ export async function admitStudentAction(
         };
       }
 
-      // Create Auth User
+      // Create Auth User with structural base_role metadata mapping
       const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email,
         phone,
         email_confirm: true,
         phone_confirm: true,
-        user_metadata: { full_name: d.parentName, role: "parent" },
+        user_metadata: { full_name: d.parentName, base_role: "parent" },
       });
 
       if (authError) throw new Error(`Auth creation failed: ${authError.message}`);

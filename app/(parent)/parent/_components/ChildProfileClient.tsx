@@ -178,7 +178,7 @@ export function ChildProfileClient({ child }: ChildProfileClientProps) {
             Student Profile
           </p>
           <h1 className="text-base font-black text-slate-800">
-            {firstName}'s Card
+            {firstName}&apos;s Card
           </h1>
         </div>
       </div>

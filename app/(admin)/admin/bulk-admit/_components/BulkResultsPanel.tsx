@@ -3,10 +3,10 @@
 
 import { CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
 import type { BulkAdmitResult } from "@/lib/actions/bulk-admit";
-import type { BulkTeacherResult } from "@/lib/actions/bulk-teacher";
+import type { BulkStaffResult } from "@/lib/actions/bulk-teacher";
 
 interface Props {
-  results: (BulkAdmitResult | BulkTeacherResult)[];
+  results: (BulkAdmitResult | BulkStaffResult)[];
   summary: { success: number; failed: number };
 }
 
@@ -34,7 +34,7 @@ export function BulkResultsPanel({ results, summary }: Props) {
           const isSuccess = result.success;
           const name = "studentName" in result 
             ? result.studentName 
-            : (result as BulkTeacherResult).fullName;
+            : (result as BulkStaffResult).fullName;
 
           return (
             <div

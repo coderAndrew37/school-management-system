@@ -31,7 +31,7 @@ interface ParentNotif {
     id: string;
     full_name: string;
     phone_number: string | null;
-    email: string;
+    email: string | null; // Changed from string to string | null
   } | null;
 }
 
@@ -47,7 +47,6 @@ interface CommsLogEntry {
   sent_at: string | null;
   created_at: string;
 }
-
 interface InAppNotif {
   id: string;
   type: string;

@@ -13,20 +13,24 @@ interface PageProps {
 export default async function MessagesPage({ searchParams }: PageProps) {
   const session = await getSession();
 
-  // Guard: Ensure session, email, and ID exist
-  if (
-    !session || 
-    !session.user?.email || 
-    !session.user?.id || 
-    session.profile.role !== "parent"
-  ) {
+  // Guard: Ensure foundational session data layers exist safely
+  if (!session || !session.user?.email || !session.user?.id || !session.profile) {
+    redirect("/login");
+  }
+
+  const { base_role, is_dev, is_super_admin } = session.profile;
+
+  // Master Bypass: Allow dev/super_admin overrides, otherwise restrict strictly to parents
+  const hasAccess = base_role === "parent" || is_dev === true || is_super_admin === true;
+
+  if (!hasAccess) {
     redirect("/login");
   }
 
   const _sp = await searchParams;
   const childParam = _sp?.child;
 
-  // Fix: Pass session email to fetchMyChildren
+  // Fetch children tied to the parent email account
   const children = await fetchMyChildren(session.user.email);
   if (children.length === 0) redirect("/parent");
 

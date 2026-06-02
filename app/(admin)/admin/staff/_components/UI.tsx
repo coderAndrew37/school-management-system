@@ -128,9 +128,8 @@ export function Button({ variant = "primary", loading, children, className = "",
 
 const baseStyles: Partial<Record<BaseRole, string>> = {
   admin:   "bg-amber-50   text-amber-800   ring-amber-200",
-  teacher: "bg-sky-50     text-sky-800     ring-sky-200",
+  staff: "bg-sky-50     text-sky-800     ring-sky-200",
   parent:  "bg-emerald-50 text-emerald-800 ring-emerald-200",
-  support: "bg-stone-100  text-stone-600   ring-stone-200",
 };
 
 // Admin role colours — keyed by slug for seeded roles, fallback for custom
@@ -178,10 +177,33 @@ const PALETTE = [
 
 interface AvatarProps { id: string; name: string | null; src?: string | null; size?: "sm" | "md"; }
 
+import Image from "next/image";
+
 export function Avatar({ id, name, src, size = "md" }: AvatarProps) {
   const color = PALETTE[id.charCodeAt(0) % PALETTE.length];
   const dim   = size === "sm" ? "h-8 w-8 text-xs" : "h-9 w-9 text-sm";
-  const ini   = (name ?? "?").split(" ").slice(0,2).map(n => n[0]).join("").toUpperCase();
-  if (src) return <img src={src} alt={name ?? ""} className={`${dim} rounded-full object-cover ring-2 ring-white`} />;
-  return <div className={`${dim} ${color} rounded-full flex items-center justify-center font-semibold shrink-0`}>{ini}</div>;
+  const ini   = (name ?? "?").split(" ").slice(0, 2).map(n => n[0]).join("").toUpperCase();
+
+  // Convert size keys to explicit pixel dimensions required by Next.js Image
+  const pixelSize = size === "sm" ? 32 : 36;
+
+  if (src) {
+    return (
+      <div className={`${dim} relative shrink-0`}>
+        <Image
+          src={src}
+          alt={name ?? "User avatar"}
+          width={pixelSize}
+          height={pixelSize}
+          className="rounded-full object-cover ring-2 ring-white"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${dim} ${color} rounded-full flex items-center justify-center font-semibold shrink-0`}>
+      {ini}
+    </div>
+  );
 }

@@ -65,7 +65,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
 }> {
   const session = await getSession();
 
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+  if (!session || !["admin", "superadmin"].includes(session.profile.base_role)) {
     return {
       results: rows.map((r, i) => ({
         index: i,
@@ -146,13 +146,13 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
           parentId = existingByContact.id;
           isExistingParent = true;
         } else {
-          // Create auth user
+          // Create auth user with base_role in user_metadata
           const { data: authUser, error: authErr } = await supabaseAdmin.auth.admin.createUser({
             email,
             phone,
             email_confirm: true,
             phone_confirm: true,
-            user_metadata: { full_name: row.parentName, role: "parent" },
+            user_metadata: { full_name: row.parentName, base_role: "parent" },
           });
 
           if (authErr) throw new Error(`Auth creation failed: ${authErr.message}`);

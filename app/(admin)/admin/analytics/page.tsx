@@ -1,6 +1,6 @@
 // app/admin/analytics/page.tsx
 import { getSession } from "@/lib/actions/auth";
-import { fetchAnalyticsOverview } from "@/lib/data/analytics";
+import { fetchAnalyticsOverview, type AnalyticsOverview } from "@/lib/data/analytics";
 import { AnalyticsHub } from "@/app/_components/analytics/AnalyticsHub";
 import {
   BarChart3,
@@ -22,17 +22,6 @@ export interface SubjectLeaderboardItem {
   subject_id: string;
   subject_name: string;
   mean_score: number;
-}
-
-export interface AnalyticsPayload {
-  totalStudents: number;
-  totalTeachers: number;
-  totalAssessments: number;
-  coverageRate: number;
-  avgMean: number;
-  subjectLeaderboard: SubjectLeaderboardItem[];
-  // Fallback signature to allow structured deep object matching safely without any
-  [key: string]: unknown;
 }
 
 interface Props {
@@ -73,9 +62,8 @@ export default async function AnalyticsPage({ searchParams }: Props) {
   );
   const year = parseInt(sp.year ?? "2026", 10);
 
-  // Fetch metrics data and assert types strictly using safe validation casting
-  const rawData = await fetchAnalyticsOverview(term, year);
-  const data: AnalyticsPayload = rawData as unknown as AnalyticsPayload;
+  // Fetch metrics data directly using the native return type contract
+  const data: AnalyticsOverview = await fetchAnalyticsOverview(term, year);
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] font-[family-name:var(--font-body)]">

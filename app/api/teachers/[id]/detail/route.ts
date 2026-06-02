@@ -1,7 +1,7 @@
 // app/api/teachers/[id]/detail/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/actions/auth";
-import { hasPermission } from "@/lib/services/auth-utils";
+import { hasPermission } from "@/lib/actions/auth-utils";
 import {
   fetchTeacherStats,
   fetchTeacherAllocations,

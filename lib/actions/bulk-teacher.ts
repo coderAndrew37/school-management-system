@@ -15,9 +15,9 @@ const rowSchema = z.object({
   tscNumber: z.string().max(30).optional().transform(v => v || null),
 });
 
-export type BulkTeacherRow = z.infer<typeof rowSchema>;
+export type BulkStaffRow = z.infer<typeof rowSchema>;
 
-export interface BulkTeacherResult {
+export interface BulkStaffResult {
   index: number;
   fullName: string;
   success: boolean;
@@ -26,18 +26,26 @@ export interface BulkTeacherResult {
 
 // ── 2. Bulk Action ─────────────────────────────────────────────────────────────
 
-export async function bulkAddTeachersAction(rows: BulkTeacherRow[]): Promise<{
-  results: BulkTeacherResult[];
+export async function bulkAddStaffAction(rows: BulkStaffRow[]): Promise<{
+  results: BulkStaffResult[];
   successCount: number;
   failCount: number;
 }> {
   const session = await getSession();
   
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+  if (!session || !session.profile) {
+    throw new Error("Unauthorized");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Aligning strictly with your guard context structural constraints
+  if (base_role !== "admin" && !isPlatformAdmin) {
     throw new Error("Unauthorized"); 
   }
 
-  const results: BulkTeacherResult[] = [];
+  const results: BulkStaffResult[] = [];
 
   for (const [i, row] of rows.entries()) {
     try {
@@ -52,21 +60,21 @@ export async function bulkAddTeachersAction(rows: BulkTeacherRow[]): Promise<{
         continue;
       }
 
-      // 1. Create Auth User
+      // 1. Create Auth User — Metadata mapped perfectly to base_role: "staff"
       const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
         email: data.email,
         phone: data.phone,
         email_confirm: true,
         user_metadata: { 
           full_name: data.fullName, 
-          role: "teacher" 
+          base_role: "staff" 
         },
       });
 
       if (authErr) throw new Error(`Auth: ${authErr.message}`);
       const userId = authData.user.id;
 
-      // 2. Insert Teacher record
+      // 2. Insert into teachers table (retaining model targeting for references)
       const { error: tErr } = await supabaseAdmin.from("teachers").insert({
         id: userId,
         full_name: data.fullName,
@@ -81,7 +89,7 @@ export async function bulkAddTeachersAction(rows: BulkTeacherRow[]): Promise<{
         throw new Error(`DB Error: ${tErr.message}`);
       }
 
-      // 3. Update profile (Non-blocking)
+      // 3. Link Profile (Non-blocking)
       supabaseAdmin
         .from("profiles")
         .update({ teacher_id: userId })
@@ -90,7 +98,7 @@ export async function bulkAddTeachersAction(rows: BulkTeacherRow[]): Promise<{
           if (error) console.error(`Profile link failed for ${userId}:`, error.message);
         });
 
-      // 4. Handle Email
+      // 4. Verification Setup
       const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
         type: "recovery",
         email: data.email,
@@ -115,8 +123,7 @@ export async function bulkAddTeachersAction(rows: BulkTeacherRow[]): Promise<{
         message: "Success",
       });
 
-    } catch (err: unknown) { // Use 'unknown' instead of 'any'
-      // Use Type Narrowing to safely access the error message
+    } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error occurred";
       
       results.push({
@@ -130,6 +137,7 @@ export async function bulkAddTeachersAction(rows: BulkTeacherRow[]): Promise<{
     if (rows.length > 3) await new Promise((r) => setTimeout(r, 100));
   }
 
+  // Paths revalidated matching your exact view setup
   revalidatePath("/admin/teachers");
   
   const successCount = results.filter((r) => r.success).length;

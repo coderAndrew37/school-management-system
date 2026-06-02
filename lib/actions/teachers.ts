@@ -3,10 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { sendTeacherWelcomeEmail } from "@/lib/mail";
 import { getAuthConfirmUrl } from "@/lib/utils/site-url";
 import { ActionResult, TeacherStatus } from "@/lib/types/dashboard";
+import { getSession } from "@/lib/actions/auth";
 
 // ── 1. Validation ─────────────────────────────────────────────────────────────
 
@@ -35,20 +35,15 @@ type ArchiveReason = z.infer<typeof archiveReasonSchema>;
  * Ensures the requester is authenticated and has administrative privileges.
  */
 async function ensureAdmin(): Promise<void> {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const session = await getSession();
+  if (!session || !session.profile) {
+    throw new Error("Unauthorized");
+  }
 
-  if (!user) throw new Error("Unauthorized");
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (!profile || !["admin", "superadmin"].includes(profile.role)) {
+  if (base_role !== "admin" && !isPlatformAdmin) {
     throw new Error("Forbidden: Admin access required.");
   }
 }
@@ -221,7 +216,6 @@ export async function archiveTeacherAction(
     await ensureAdmin();
 
     // 1. Check for active subject allocations 
-    // Removed 'is_active' filter because it's not in your schema
     const { data: activeAllocations } = await supabaseAdmin
       .from("teacher_subject_allocations")
       .select("id")
@@ -245,8 +239,6 @@ export async function archiveTeacherAction(
       .eq("id", teacherId);
 
     if (error) {
-       // If this throws a 400, ensure you updated the DB constraint 
-       // to include the reason words.
        throw error;
     }
 
@@ -261,11 +253,8 @@ export async function archiveTeacherAction(
       .eq("is_active", true);
 
     // 4. Disable Auth Access
-    // We update metadata so the UI can show they are inactive, 
-    // and we could optionally ban the user.
     await supabaseAdmin.auth.admin.updateUserById(teacherId, {
       user_metadata: { status: reason, is_archived: true },
-      // app_metadata: { role: 'inactive' }
     });
 
     revalidatePath("/admin/teachers");

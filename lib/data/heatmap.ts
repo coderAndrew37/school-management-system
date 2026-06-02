@@ -1,3 +1,5 @@
+"use server";
+
 // lib/data/heatmap.ts
 // Fetches grade × subject CBC score averages for the class performance heatmap.
 // Uses supabaseAdmin (service role) since this is admin-only data.
@@ -31,6 +33,21 @@ export interface HeatmapData {
   year: number;
 }
 
+// ── Raw PostgREST Response Interfaces ─────────────────────────────────────────
+
+interface RawStudentRelation {
+  current_grade: string;
+}
+
+interface RawAssessmentRow {
+  student_id: string;
+  subject_name: string;
+  score: string | null;
+  students: RawStudentRelation | null;
+}
+
+// ── Heatmap Fetcher ───────────────────────────────────────────────────────────
+
 export async function fetchHeatmapData(
   term: number,
   academicYear: number,
@@ -41,7 +58,8 @@ export async function fetchHeatmapData(
     .select("student_id, subject_name, score, students(current_grade)")
     .eq("term", term)
     .eq("academic_year", academicYear)
-    .not("score", "is", null);
+    .not("score", "is", null)
+    .returns<RawAssessmentRow[]>();
 
   if (error) {
     console.error("[fetchHeatmapData]", error.message);
@@ -51,17 +69,19 @@ export async function fetchHeatmapData(
   // Aggregate: grade × subject → list of numeric scores
   const map = new Map<string, { nums: number[]; students: Set<string> }>();
 
-  for (const row of (data ?? []) as any[]) {
+  for (const row of (data ?? [])) {
     const grade = row.students?.current_grade;
-    const subject = row.subject_name as string;
-    const score = row.score as string;
-    if (!grade || !subject || !SCORE_NUMERIC[score]) continue;
+    const subject = row.subject_name;
+    const score = row.score;
+    
+    if (!grade || !subject || !score || !SCORE_NUMERIC[score]) continue;
 
     const key = `${grade}||${subject}`;
     if (!map.has(key)) map.set(key, { nums: [], students: new Set() });
+    
     const entry = map.get(key)!;
     entry.nums.push(SCORE_NUMERIC[score]);
-    entry.students.add(row.student_id as string);
+    entry.students.add(row.student_id);
   }
 
   const cells: HeatmapCell[] = [];
@@ -71,8 +91,10 @@ export async function fetchHeatmapData(
   for (const [key, { nums, students }] of map.entries()) {
     const [grade, subject] = key.split("||") as [string, string];
     const avg = nums.reduce((s, n) => s + n, 0) / nums.length;
+    
     gradeSet.add(grade);
     subjectSet.add(subject);
+    
     cells.push({
       grade,
       subject,

@@ -1,28 +1,22 @@
 "use client";
 
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { X, Loader2 } from "lucide-react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+// @/app/admin/staff/_components/CreateStaffModal.tsx
+
 import { createStaffUserAction } from "@/lib/actions/role-management";
-import type { BaseRole, AdminRole } from "@/lib/types/auth";
+import { BASE_ROLES, BASE_ROLE_LABELS } from "@/lib/types/auth";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { AnimatePresence, motion } from "framer-motion";
+import { Loader2, X } from "lucide-react";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { z } from "zod";
 
 const createStaffSchema = z.object({
   full_name: z.string().min(3, "Full name must be at least 3 characters"),
   email: z.string().email("Please enter a valid email address"),
-  base_role: z.enum(["admin", "teacher", "parent", "support"]),
-  admin_role: z.enum([
-    "super_admin",
-    "headteacher",
-    "deputy_headteacher",
-    "bursar",
-    "dos",
-    "school_doctor",
-    "librarian",
-  ]).nullable().optional(),
+  base_role: z.enum(BASE_ROLES),
+  admin_role: z.string().nullable().optional(),
   phone_number: z.string().optional(),
 });
 
@@ -46,7 +40,7 @@ export function CreateStaffModal({ isOpen, onClose, onSuccess }: CreateStaffModa
   } = useForm<CreateStaffForm>({
     resolver: zodResolver(createStaffSchema),
     defaultValues: {
-      base_role: "teacher",
+      base_role: "staff", // Aligned default fallback to the correct domain model type
       admin_role: null,
     },
   });
@@ -105,6 +99,7 @@ export function CreateStaffModal({ isOpen, onClose, onSuccess }: CreateStaffModa
                   <p className="text-slate-600 text-sm mt-1">Create a new staff account</p>
                 </div>
                 <button
+                aria-label="Close modal"
                   onClick={onClose}
                   className="text-slate-400 hover:text-slate-600 transition-colors"
                 >
@@ -112,7 +107,7 @@ export function CreateStaffModal({ isOpen, onClose, onSuccess }: CreateStaffModa
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-6">
+              <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-6" noValidate>
                 {/* Full Name */}
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -145,7 +140,7 @@ export function CreateStaffModal({ isOpen, onClose, onSuccess }: CreateStaffModa
                   )}
                 </div>
 
-                {/* Phone Number (Optional) */}
+                {/* Phone Number */}
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">
                     Phone Number
@@ -167,9 +162,11 @@ export function CreateStaffModal({ isOpen, onClose, onSuccess }: CreateStaffModa
                     {...register("base_role")}
                     className="w-full px-4 py-3 border border-slate-200 rounded-2xl focus:outline-none focus:border-amber-400"
                   >
-                    <option value="admin">Administrator</option>
-                    <option value="teacher">Teacher</option>
-                    <option value="support">Support Staff</option>
+                    {BASE_ROLES.map((role) => (
+                      <option key={role} value={role}>
+                        {BASE_ROLE_LABELS[role]}
+                      </option>
+                    ))}
                   </select>
                 </div>
 

@@ -34,13 +34,14 @@ async function ensureAdmin(): Promise<string> {
 
   if (!user) throw new Error("Unauthorized");
 
+  // Updated lookup to query structural 'base_role' field
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("base_role")
     .eq("id", user.id)
     .single();
 
-  if (!profile || !["admin", "superadmin"].includes(profile.role)) {
+  if (!profile || !["admin", "superadmin"].includes(profile.base_role)) {
     throw new Error("Forbidden: Admin access required.");
   }
   return user.id;

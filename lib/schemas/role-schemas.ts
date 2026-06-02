@@ -1,15 +1,10 @@
 // @/lib/schemas/role-schemas.ts
-
 import { z } from "zod";
 import { BASE_ROLES } from "@/lib/types/auth";
-
-// ── Assign / revoke a role to a user ─────────────────────────
 
 export const assignRoleSchema = z
   .object({
     base_role:  z.enum(BASE_ROLES),
-    // admin_role is a free text slug referencing admin_role_definitions.id
-    // Empty string "" means "revoke admin title" (set to null)
     admin_role: z.string().nullable(),
     reason:     z
       .string()
@@ -35,8 +30,6 @@ export const assignRoleSchema = z
 
 export type AssignRoleFormValues = z.infer<typeof assignRoleSchema>;
 
-// ── Create a new admin role definition ───────────────────────
-
 const slugRegex = /^[a-z][a-z0-9_]*$/;
 
 export const createRoleDefinitionSchema = z.object({
@@ -44,7 +37,7 @@ export const createRoleDefinitionSchema = z.object({
     .string()
     .min(2,   "ID must be at least 2 characters")
     .max(64,  "ID must be under 64 characters")
-    .regex(slugRegex, "ID must be lowercase letters, numbers and underscores only (e.g. sports_director)"),
+    .regex(slugRegex, "ID must be lowercase letters, numbers and underscores only"),
   label: z
     .string()
     .min(2,  "Label must be at least 2 characters")
@@ -68,10 +61,11 @@ export const createRoleDefinitionSchema = z.object({
     .default(100),
 });
 
-export type CreateRoleDefinitionFormValues = z.infer<typeof createRoleDefinitionSchema>;
-
-// ── Update an existing role definition ───────────────────────
-// id is read-only after creation (it's the PK slug)
+// Helper type: Get the input type (without defaults)
+// This is what React Hook Form expects
+export type CreateRoleDefinitionFormInput = z.input<typeof createRoleDefinitionSchema>;
+// Helper type: Get the output type (with defaults applied)
+export type CreateRoleDefinitionFormValues = z.output<typeof createRoleDefinitionSchema>;
 
 export const updateRoleDefinitionSchema = createRoleDefinitionSchema
   .omit({ id: true })
@@ -79,4 +73,7 @@ export const updateRoleDefinitionSchema = createRoleDefinitionSchema
     is_active: z.boolean().default(true),
   });
 
-export type UpdateRoleDefinitionFormValues = z.infer<typeof updateRoleDefinitionSchema>;
+// Use z.input for the form values (user input before defaults)
+export type UpdateRoleDefinitionFormInput = z.input<typeof updateRoleDefinitionSchema>;
+// Keep this for the actual values after defaults (e.g., when submitting to API)
+export type UpdateRoleDefinitionFormValues = z.output<typeof updateRoleDefinitionSchema>;

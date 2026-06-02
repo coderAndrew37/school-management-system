@@ -6,9 +6,9 @@ import {
   fetchEventsAdmin,
 } from "@/lib/actions/engagement";
 import { AdminEngagementClient } from "./EngagementPageClient";
+import { Announcement, SchoolEvent } from "./types";
 
 // Import your existing components' exact prop interface shapes
-import type { Announcement, SchoolEvent } from "../components/types";
 
 export const metadata = { title: "Communications | Kibali Admin" };
 export const revalidate = 0;

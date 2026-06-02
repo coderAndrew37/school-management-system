@@ -17,8 +17,16 @@ export interface TimetableActionResult {
 
 async function requireAdmin() {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role))
+  if (!session || !session.profile) {
     throw new Error("Forbidden");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    throw new Error("Forbidden");
+  }
 }
 
 // ── 1. Swap two slots ─────────────────────────────────────────────────────────

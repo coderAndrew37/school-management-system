@@ -11,11 +11,16 @@ import { BulkAdmitTeacherEditor } from "./_components/BulkAdmitTeacherEditor";
 import { BulkResultsPanel } from "./_components/BulkResultsPanel";
 
 import type { BulkAdmitRow, BulkAdmitResult } from "@/lib/actions/bulk-admit";
-import type { BulkTeacherRow, BulkTeacherResult } from "@/lib/actions/bulk-teacher";
+// Alias backend Staff types to avoid matching errors locally
+import type { 
+  BulkStaffRow as BulkTeacherRow, 
+  BulkStaffResult as BulkTeacherResult 
+} from "@/lib/actions/bulk-teacher";
 import { parseStudentCSV, parseTeacherCSV, getCSVTemplate } from "./utils";
 
 import { bulkAdmitStudentsAction } from "@/lib/actions/bulk-admit";
-import { bulkAddTeachersAction } from "@/lib/actions/bulk-teacher";
+// Alias backend bulkAddStaffAction to match local handler call
+import { bulkAddStaffAction as bulkAddTeachersAction } from "@/lib/actions/bulk-teacher";
 
 type Mode = "students" | "teachers";
 

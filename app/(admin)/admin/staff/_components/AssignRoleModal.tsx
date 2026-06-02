@@ -32,7 +32,7 @@ export function AssignRoleModal({ user, roleDefs, isOpen, onClose, onSuccess }: 
   } = useForm<AssignRoleFormValues>({
     resolver: zodResolver(assignRoleSchema),
     values: {
-      base_role:  user?.base_role  ?? "teacher",
+      base_role:  user?.base_role  ?? "staff", // Changed from "teacher" to match the new BaseRole schema
       admin_role: user?.admin_role ?? null,
       reason:     "",
     },

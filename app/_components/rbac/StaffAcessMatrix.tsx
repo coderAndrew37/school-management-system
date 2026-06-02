@@ -404,7 +404,7 @@ export function StaffAccessMatrix({ staff, roles, permissions }: StaffAccessMatr
       !q ||
       s.full_name.toLowerCase().includes(q) ||
       (s.tsc_number ?? '').toLowerCase().includes(q) ||
-      s.email.toLowerCase().includes(q);
+      s.email?.toLowerCase().includes(q);
 
     return matchesFilter && matchesSearch;
   });

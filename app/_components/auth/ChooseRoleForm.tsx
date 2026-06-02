@@ -5,13 +5,14 @@ import { GraduationCap, ShieldCheck, BookOpen, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { AuthLayout } from "./AuthLayout";
 
-const ROLE_META: Record<UserRole, {
+// Changing from Record to Partial layout handles missing keys cleanly
+const ROLE_META: Partial<Record<UserRole, {
   label: string;
   description: string;
   icon: React.ReactNode;
   accent: string;
   bg: string;
-}> = {
+}>> = {
   admin: {
     label: "Administrator",
     description: "School management & reports",
@@ -19,7 +20,7 @@ const ROLE_META: Record<UserRole, {
     accent: "border-amber-300 text-amber-700",
     bg: "bg-amber-50 hover:bg-amber-100/60",
   },
-  teacher: {
+  staff: {
     label: "Teacher",
     description: "CBC assessments & timetable",
     icon: <BookOpen className="h-5 w-5" />,
@@ -33,7 +34,6 @@ const ROLE_META: Record<UserRole, {
     accent: "border-sky-300 text-sky-700",
     bg: "bg-sky-50 hover:bg-sky-100/60",
   },
-  
 };
 
 interface Props {
@@ -44,13 +44,11 @@ interface Props {
 export function ChooseRoleForm({ roles, redirectTo }: Props) {
   const router = useRouter();
 
-  // Fallback: if no roles passed (direct URL access), send to login
   if (roles.length === 0) {
     router.replace("/login");
     return null;
   }
 
-  // If somehow only one role, skip the picker entirely
   if (roles.length === 1) {
     router.replace(redirectTo ?? ROLE_ROUTES[roles[0]]);
     return null;
@@ -83,6 +81,10 @@ export function ChooseRoleForm({ roles, redirectTo }: Props) {
       <div className="space-y-3">
         {roles.map((role) => {
           const meta = ROLE_META[role];
+          
+          // Defensive fallback step in case an undefined role is listed
+          if (!meta) return null;
+
           return (
             <button
               key={role}

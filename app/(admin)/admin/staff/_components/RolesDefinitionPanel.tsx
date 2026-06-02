@@ -11,7 +11,9 @@ import {
 import {
     createRoleDefinitionSchema,
     updateRoleDefinitionSchema,
+    type CreateRoleDefinitionFormInput,
     type CreateRoleDefinitionFormValues,
+    type UpdateRoleDefinitionFormInput,
     type UpdateRoleDefinitionFormValues,
 } from "@/lib/schemas/role-schemas";
 import type { AdminRoleDefinition } from "@/lib/types/auth";
@@ -22,7 +24,7 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { Button, Field, Input, Modal, ModalHeader, Textarea } from "./UI";
 
-// ── Deactivate confirmation ───────────────────────────────────
+// ── Deactivate confirmation ───────────────────────────────────────────────────
 
 function DeactivateModal({ def, isOpen, onClose, onSuccess }: {
   def: AdminRoleDefinition | null; isOpen: boolean; onClose: () => void; onSuccess: () => void;
@@ -76,7 +78,7 @@ function DeactivateModal({ def, isOpen, onClose, onSuccess }: {
   );
 }
 
-// ── Path list editor ──────────────────────────────────────────
+// ── Path list editor ──────────────────────────────────────────────────────────
 
 function PathListEditor({ value, onChange, error }: {
   value: string[]; onChange: (v: string[]) => void; error?: string;
@@ -127,22 +129,38 @@ function PathListEditor({ value, onChange, error }: {
   );
 }
 
-// ── Create Modal ──────────────────────────────────────────────
+// ── Create Modal ──────────────────────────────────────────────────────────────
 
 function CreateRoleModal({ isOpen, onClose, onSuccess }: {
   isOpen: boolean; onClose: () => void; onSuccess: () => void;
 }) {
+  // Use the INPUT type (without defaults) for the form
   const { register, handleSubmit, setValue, watch, reset, formState: { errors, isSubmitting } } =
-    useForm<CreateRoleDefinitionFormValues>({
+    useForm<CreateRoleDefinitionFormInput>({
       resolver: zodResolver(createRoleDefinitionSchema),
-      defaultValues: { id: "", label: "", description: "", allowed_paths: [], sort_order: 100 },
+      defaultValues: { 
+        id: "", 
+        label: "", 
+        description: "", 
+        allowed_paths: [], 
+        sort_order: 100 
+      },
     });
 
-  const paths = watch("allowed_paths");
+  const paths = watch("allowed_paths") ?? [];
   const handleClose = () => { reset(); onClose(); };
 
-  const onSubmit = async (data: CreateRoleDefinitionFormValues) => {
-    const result = await createRoleDefinitionAction(data);
+  const onSubmit = async (data: CreateRoleDefinitionFormInput) => {
+    // Parse to get the full type with defaults applied for the API
+    const fullData = createRoleDefinitionSchema.parse(data) as CreateRoleDefinitionFormValues;
+    
+    // Add the required baseline_permissions array
+    const payload = {
+      ...fullData,
+      baseline_permissions: [], // New roles start with empty permissions
+    };
+    
+    const result = await createRoleDefinitionAction(payload);
     if (result.success) { toast.success(result.message); handleClose(); onSuccess(); }
     else toast.error(result.message);
   };
@@ -159,7 +177,6 @@ function CreateRoleModal({ isOpen, onClose, onSuccess }: {
               <input {...register("id")}
                 placeholder="sports_director"
                 className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 text-sm font-mono text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-500/40" />
-              {errors.id && <p className="mt-1 text-xs text-red-500 font-medium">{errors.id.message}</p>}
             </Field>
             <Field label="Sort Order" hint="Lower = appears first in lists">
               <Input {...register("sort_order", { valueAsNumber: true })} type="number" min={1} max={9999}
@@ -199,30 +216,58 @@ function CreateRoleModal({ isOpen, onClose, onSuccess }: {
   );
 }
 
-// ── Edit Modal ────────────────────────────────────────────────
+// ── Edit Modal ────────────────────────────────────────────────────────────────
 
 function EditRoleDefModal({ def, isOpen, onClose, onSuccess }: {
   def: AdminRoleDefinition | null; isOpen: boolean; onClose: () => void; onSuccess: () => void;
 }) {
+  // Use the INPUT type (without defaults) for the form
   const { register, handleSubmit, setValue, watch, reset, formState: { errors, isSubmitting } } =
-    useForm<UpdateRoleDefinitionFormValues>({
+    useForm<UpdateRoleDefinitionFormInput>({
       resolver: zodResolver(updateRoleDefinitionSchema),
-      values: def ? {
-        label:         def.label,
-        description:   def.description,
-        allowed_paths: def.allowed_paths,
-        sort_order:    def.sort_order,
-        is_active:     def.is_active,
-      } : undefined,
+      defaultValues: {
+        label: "",
+        description: "",
+        allowed_paths: [],
+        sort_order: 100,
+        is_active: true,
+      },
     });
 
   const paths    = watch("allowed_paths") ?? [];
-  const isActive = watch("is_active");
+  const isActive = watch("is_active") ?? true;
   const handleClose = () => { reset(); onClose(); };
 
-  const onSubmit = async (data: UpdateRoleDefinitionFormValues) => {
+  // Reset form when the modal opens with new data
+  useState(() => {
+    if (isOpen && def) {
+      reset({
+        label: def.label,
+        description: def.description,
+        allowed_paths: def.allowed_paths,
+        sort_order: def.sort_order,
+        is_active: def.is_active,
+      });
+    }
+  });
+
+  const onSubmit = async (data: UpdateRoleDefinitionFormInput) => {
     if (!def) return;
-    const result = await updateRoleDefinitionAction(def.id, data);
+    
+    // Parse to get the full type with defaults applied for the API
+    const fullData = updateRoleDefinitionSchema.parse(data) as UpdateRoleDefinitionFormValues;
+    
+    // Create the payload with required baseline_permissions
+    const payload = {
+      label: fullData.label,
+      description: fullData.description,
+      allowed_paths: fullData.allowed_paths,
+      sort_order: fullData.sort_order,
+      is_active: fullData.is_active,
+      baseline_permissions: def.baseline_permissions ?? [], // Preserve existing permissions
+    };
+    
+    const result = await updateRoleDefinitionAction(def.id, payload);
     if (result.success) { toast.success(result.message); handleClose(); onSuccess(); }
     else toast.error(result.message);
   };
@@ -266,6 +311,7 @@ function EditRoleDefModal({ def, isOpen, onClose, onSuccess }: {
                 <p className="text-xs text-stone-500">Inactive roles cannot be assigned to new users</p>
               </div>
               <button type="button"
+               aria-label={`${isActive ? "Deactivate" : "Activate"} role`}
                 onClick={() => setValue("is_active", !isActive)}
                 className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${isActive ? "bg-amber-500" : "bg-stone-300"}`}>
                 <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${isActive ? "translate-x-5" : "translate-x-0"}`} />
@@ -285,7 +331,7 @@ function EditRoleDefModal({ def, isOpen, onClose, onSuccess }: {
   );
 }
 
-// ── Main Panel ────────────────────────────────────────────────
+// ── Main Panel ────────────────────────────────────────────────────────────────
 
 interface RoleDefinitionsPanelProps {
   roleDefs:  AdminRoleDefinition[];

@@ -7,13 +7,13 @@
 // ── Teacher Status & Core ─────────────────────────────────────────────────────
 
 export type TeacherStatus =
-  | "active"
-  | "on_leave"
-  | "transferred"
-  | "terminated"
-  | "resigned"
-  | "deceased"
-  | "retired";
+  | 'active'
+  | 'on_leave'
+  | 'transferred'
+  | 'terminated'
+  | 'resigned'
+  | 'deceased'
+  | 'retired';
 
 export interface Teacher {
   id: string;
@@ -94,7 +94,7 @@ export interface Student {
   date_of_birth: string;
   gender: "Male" | "Female" | null;
   class_id: string | null;
-  current_grade: string; // Kept for UI layout fallbacks
+  current_grade: string; 
   current_stream: string;
   photo_url: string | null;
   status: StudentStatus;
@@ -104,8 +104,8 @@ export interface Student {
     id: string;
     full_name: string;
     phone_number: string | null;
-    email: string;
-    invite_accepted: boolean;
+    email?: string;             // Made optional using ?
+    invite_accepted?: boolean;  // Made optional using ?
   } | null;
 }
 

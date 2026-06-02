@@ -9,8 +9,8 @@ export function StatsBar({ stats }: { stats: RoleStatistics }) {
   const cards = [
     { label: "Total Staff",      value: stats.total,                    icon: <Users           className="h-4 w-4" />, accent: "text-stone-600",  bg: "bg-stone-50",   border: "border-stone-100"  },
     { label: "Administrators",   value: stats.byBaseRole.admin   ?? 0,  icon: <ShieldCheck     className="h-4 w-4" />, accent: "text-amber-700",  bg: "bg-amber-50",   border: "border-amber-100"  },
-    { label: "Teachers",         value: stats.byBaseRole.teacher ?? 0,  icon: <GraduationCap   className="h-4 w-4" />, accent: "text-sky-700",    bg: "bg-sky-50",     border: "border-sky-100"    },
-    { label: "Support Staff",    value: stats.byBaseRole.support ?? 0,  icon: <Headphones      className="h-4 w-4" />, accent: "text-teal-700",   bg: "bg-teal-50",    border: "border-teal-100"   },
+    { label: "Teachers",         value: stats.byBaseRole.staff ?? 0,  icon: <GraduationCap   className="h-4 w-4" />, accent: "text-sky-700",    bg: "bg-sky-50",     border: "border-sky-100"    },
+    { label: "Support Staff",    value: stats.byBaseRole.staff ?? 0,  icon: <Headphones      className="h-4 w-4" />, accent: "text-teal-700",   bg: "bg-teal-50",    border: "border-teal-100"   },
   ];
 
   return (

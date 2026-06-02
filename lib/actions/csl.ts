@@ -118,7 +118,15 @@ export async function reviewCSLEntryAction(
   formData: FormData,
 ): Promise<ActionResult> {
   const session = await getSession();
-  if (!session || !["admin", "teacher"].includes(session.profile.role)) {
+  if (!session || !session.profile) {
+    return { success: false, message: "Unauthorised" };
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Teachers and Staff execute reviews using base_role check structural mapping
+  if (base_role !== "staff" && base_role !== "admin" && !isPlatformAdmin) {
     return { success: false, message: "Unauthorised" };
   }
 
@@ -154,15 +162,21 @@ export async function reviewCSLEntryAction(
 }
 
 // ── Transfer: Initiate outbound ───────────────────────────────────────────────
-// Records the student's current class_id in the transfer audit trail so the
-// destination school (and our own history) knows exactly which class they left.
 
 export async function initiateOutboundTransferAction(
   formData: FormData,
 ): Promise<ActionResult> {
   const session = await getSession();
-  if (!session || session.profile.role !== "admin")
+  if (!session || !session.profile) {
     return { success: false, message: "Unauthorised" };
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    return { success: false, message: "Unauthorised" };
+  }
 
   const parsed = outboundTransferSchema.safeParse({
     studentId: formData.get("studentId"),
@@ -178,9 +192,6 @@ export async function initiateOutboundTransferAction(
 
   const supabase = await createSupabaseServerClient();
 
-  // Resolve the student's current class_id so it is captured on the transfer
-  // record — the RPC uses it to set the student's status to transfer_pending
-  // and to embed a denormalised grade label in the QR payload.
   const { data: studentRow, error: studentErr } = await supabase
     .from("students")
     .select("class_id")
@@ -221,23 +232,26 @@ export async function initiateOutboundTransferAction(
 }
 
 // ── Transfer: Record inbound from QR scan ────────────────────────────────────
-// Validates the QR payload from the source school and creates a pending
-// transfer_request. Note: current_grade in the payload is the *source school's*
-// grade string — it is stored for display/audit, not used to assign a class here.
-// Class assignment happens at approval time (see approveInboundTransferAction).
 
 export async function recordInboundScanAction(
   input: InboundScanInput,
 ): Promise<ActionResult> {
   const session = await getSession();
-  if (!session || session.profile.role !== "admin")
+  if (!session || !session.profile) {
     return { success: false, message: "Unauthorised" };
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    return { success: false, message: "Unauthorised" };
+  }
 
   const parsed = inboundScanSchema.safeParse(input.payload);
   if (!parsed.success)
     return { success: false, message: "Invalid QR code data." };
 
-  // Reject QR codes older than 30 days
   const generated = new Date(parsed.data.generated_at);
   const ageDays = (Date.now() - generated.getTime()) / 86400000;
   if (ageDays > 30) {
@@ -249,8 +263,6 @@ export async function recordInboundScanAction(
 
   const supabase = await createSupabaseServerClient();
 
-  // Look up the student by UPI — they may already exist (prior enrolment here)
-  // or be completely new. A null studentId is valid for the insert below.
   const { data: studentRow, error: sErr } = await supabase
     .from("students")
     .select("id, full_name, status")
@@ -273,8 +285,6 @@ export async function recordInboundScanAction(
       source_school_code: parsed.data.current_school_code,
       source_upi: parsed.data.upi,
       source_assessment_no: parsed.data.assessment_number,
-      // Preserve the source grade string verbatim for the admin's reference and
-      // for the audit trail — it is NOT used to derive a local class_id.
       source_grade: parsed.data.current_grade,
       scanned_qr_payload: input.payload,
       initiated_by: session.user.id,
@@ -296,23 +306,24 @@ export async function recordInboundScanAction(
 }
 
 // ── Transfer: Approve inbound ─────────────────────────────────────────────────
-// The admin selects the local class the student should be placed into.
-// This class_id is passed to the RPC which:
-//   1. Sets student.class_id = p_class_id
-//   2. Sets student.status = "active"
-//   3. Marks the transfer_request as approved
-//   4. Restores any SBA history for that student
 
 export async function approveInboundTransferAction(
   transferId: string,
   studentId: string,
-  classId: string, // ← local classes.id selected by admin at approval time
+  classId: string,
 ): Promise<ActionResult> {
   const session = await getSession();
-  if (!session || session.profile.role !== "admin")
+  if (!session || !session.profile) {
     return { success: false, message: "Unauthorised" };
+  }
 
-  // Validate that the supplied classId is a real UUID before hitting the DB.
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    return { success: false, message: "Unauthorised" };
+  }
+
   const classIdParsed = z.string().uuid("Invalid class ID.").safeParse(classId);
   if (!classIdParsed.success) {
     return {
@@ -326,7 +337,7 @@ export async function approveInboundTransferAction(
   const { error } = await supabase.rpc("approve_inbound_transfer", {
     p_transfer_id: transferId,
     p_student_id: studentId,
-    p_class_id: classIdParsed.data, // ← new param; RPC sets student.class_id
+    p_class_id: classIdParsed.data,
     p_approved_by: session.user.id,
   });
 
@@ -348,8 +359,16 @@ export async function rejectTransferAction(
   rejectionReason: string,
 ): Promise<ActionResult> {
   const session = await getSession();
-  if (!session || session.profile.role !== "admin")
+  if (!session || !session.profile) {
     return { success: false, message: "Unauthorised" };
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    return { success: false, message: "Unauthorised" };
+  }
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase

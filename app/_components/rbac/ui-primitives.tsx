@@ -60,7 +60,6 @@ const statusBadgeMap: Record<TeacherStatus, { variant: BadgeVariant; label: stri
   resigned:    { variant: 'slate',   label: 'Resigned'    },
   deceased:    { variant: 'slate',   label: 'Deceased'    },
   retired:     { variant: 'sky',     label: 'Retired'     },
-  suspended:   { variant: 'amber',   label: 'Suspended'   },
 };
 
 interface StatusBadgeProps {

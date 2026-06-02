@@ -19,7 +19,6 @@ interface Props {
   currentStatus: string;
   currentPage: number;
   totalCount: number;
-  // Note: You might want to pass your classes here from the server component
   classes?: { id: string; name: string }[]; 
 }
 
@@ -47,12 +46,10 @@ function StatusBadge({ status }: { status: ApplicationStatus }) {
 export function ApplicationsClient({
   applications, counts, currentStatus, currentPage, totalCount, classes = []
 }: Props) {
-  const router        = useRouter();
+  const router = useRouter();
   const [selected, setSelected] = useState<PublicApplication | null>(null);
   const [isPending, startTransition] = useTransition();
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  
-  // State for class selection during conversion
   const [selectedClassId, setSelectedClassId] = useState<string>("");
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
@@ -86,7 +83,6 @@ export function ApplicationsClient({
     }
     
     startTransition(async () => {
-      // FIX: Passing both applicationId and the selected classId
       const result = await convertApplicationToStudent(selected.id, selectedClassId);
       showToast(result.success ? "success" : "error", result.message);
       if (result.success) {
@@ -107,14 +103,12 @@ export function ApplicationsClient({
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] font-[family-name:var(--font-body)]">
-      {/* Ambient */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden -z-10">
         <div className="absolute top-10 right-1/4 w-[500px] h-[300px] rounded-full bg-amber-500/[0.03] blur-[120px]" />
         <div className="absolute bottom-0 left-0 w-80 h-80 rounded-full bg-violet-500/[0.03] blur-[100px]" />
       </div>
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
-        {/* Header */}
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-amber-400/70">
@@ -136,7 +130,6 @@ export function ApplicationsClient({
           </a>
         </header>
 
-        {/* Summary cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
             { label: "Pending",   count: counts.pending,   color: "amber" },
@@ -153,7 +146,6 @@ export function ApplicationsClient({
           ))}
         </div>
 
-        {/* Tab bar */}
         <div className="flex items-center gap-1 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-1.5 w-max flex-wrap">
           {TABS.map((t) => (
             <button key={t.id}
@@ -173,7 +165,6 @@ export function ApplicationsClient({
           ))}
         </div>
 
-        {/* Table */}
         <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] overflow-hidden">
           {applications.length === 0 ? (
             <div className="py-20 text-center">
@@ -226,7 +217,6 @@ export function ApplicationsClient({
           )}
         </div>
 
-        {/* Pagination */}
         {totalPages > 1 && (
           <div className="flex items-center justify-between text-xs text-white/40">
             <span>{totalCount} application{totalCount !== 1 ? "s" : ""} total</span>
@@ -252,10 +242,8 @@ export function ApplicationsClient({
       {/* ── Detail drawer ────────────────────────────────────────────────────── */}
       {selected && (
         <div className="fixed inset-0 z-50 flex">
-          {/* Backdrop */}
           <div className="flex-1 bg-black/60 backdrop-blur-sm" onClick={() => setSelected(null)} />
 
-          {/* Panel */}
           <div className="w-full max-w-lg bg-[#0f1220] border-l border-white/[0.08] overflow-y-auto">
             <div className="sticky top-0 bg-[#0f1220] border-b border-white/[0.06] px-6 py-4 flex items-center justify-between">
               <div>
@@ -271,7 +259,6 @@ export function ApplicationsClient({
             </div>
 
             <div className="p-6 space-y-6">
-              {/* Status */}
               <div className="flex items-center gap-3">
                 <StatusBadge status={selected.status} />
                 {selected.reviewed_at && (
@@ -286,16 +273,14 @@ export function ApplicationsClient({
                 )}
               </div>
 
-              {/* Student */}
               <Section title="Student Details">
-                <Row label="Name"       value={`${selected.student_first_name} ${selected.student_last_name}`} />
-                <Row label="Gender"     value={selected.student_gender} />
+                <Row label="Name"     value={`${selected.student_first_name} ${selected.student_last_name}`} />
+                <Row label="Gender"    value={selected.student_gender} />
                 <Row label="DOB"        value={new Date(selected.student_dob).toLocaleDateString("en-KE")} />
                 <Row label="Current"     value={selected.current_grade} />
                 <Row label="Applying"   value={selected.applying_for_grade} />
               </Section>
 
-              {/* Parent */}
               <Section title="Parent / Guardian">
                 <Row label="Name"         value={`${selected.parent_first_name} ${selected.parent_last_name}`} />
                 <Row label="Relationship" value={selected.parent_relationship} />
@@ -305,7 +290,6 @@ export function ApplicationsClient({
                 {selected.address && <Row label="Address" value={selected.address} />}
               </Section>
 
-              {/* Extras */}
               {(selected.previous_school || selected.special_needs || selected.interests) && (
                 <Section title="Additional Info">
                   {selected.previous_school && <Row label="Prev. School" value={selected.previous_school} />}
@@ -314,7 +298,6 @@ export function ApplicationsClient({
                 </Section>
               )}
 
-              {/* Admin notes */}
               <AdminNotesSection
                 applicationId={selected.id}
                 currentStatus={selected.status}
@@ -323,7 +306,6 @@ export function ApplicationsClient({
                 onStatusChange={handleStatusChange}
                 onConvert={handleConvert}
                 isConverted={!!selected.converted_student_id}
-                // Selection logic
                 classes={classes}
                 selectedClassId={selectedClassId}
                 setSelectedClassId={setSelectedClassId}
@@ -333,7 +315,6 @@ export function ApplicationsClient({
         </div>
       )}
 
-      {/* Toast */}
       {toast && (
         <div onClick={() => setToast(null)}
           className={[
@@ -364,19 +345,19 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+// Fixed parameter types to accept string layout explicitly
+function Row({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div className="flex items-start gap-4 px-4 py-2.5">
       <span className="text-xs text-white/30 w-24 shrink-0 pt-0.5">{label}</span>
-      <span className="text-sm text-white/80 break-all">{value}</span>
+      <span className="text-sm text-white/80 break-all">{value ?? "—"}</span>
     </div>
   );
 }
 
 function AdminNotesSection({
-  applicationId, currentStatus, existingNotes,
-  isPending, onStatusChange, onConvert, isConverted,
-  classes, selectedClassId, setSelectedClassId
+  currentStatus, existingNotes, isPending, onStatusChange, onConvert, 
+  isConverted, classes, selectedClassId, setSelectedClassId
 }: {
   applicationId: string;
   currentStatus: ApplicationStatus;
@@ -406,7 +387,6 @@ function AdminNotesSection({
         />
       </div>
 
-      {/* Status actions */}
       {currentStatus !== "approved" && currentStatus !== "declined" && (
         <div className="flex gap-2">
           {currentStatus === "pending" && (
@@ -435,7 +415,6 @@ function AdminNotesSection({
         </div>
       )}
 
-      {/* Convert to student UI */}
       {currentStatus === "approved" && !isConverted && (
         <div className="space-y-3 pt-2">
           <div>
@@ -443,7 +422,7 @@ function AdminNotesSection({
               Assign to Class
             </label>
             <select
-            aria-label="select class id"
+              aria-label="select class id"
               value={selectedClassId}
               onChange={(e) => setSelectedClassId(e.target.value)}
               className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5 text-sm text-white outline-none focus:border-amber-400/50 transition-colors"
@@ -469,7 +448,6 @@ function AdminNotesSection({
         </div>
       )}
 
-      {/* Re-open declined */}
       {currentStatus === "declined" && (
         <ActionBtn
           label="Re-open Application"

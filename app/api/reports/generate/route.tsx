@@ -2,11 +2,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { renderToBuffer, Document } from "@react-pdf/renderer";
 import React from "react";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ReportCardPage } from "@/lib/pdf/ReportCardDocument";
 import { getLogoPublicUrl, getActiveTermYear } from "@/lib/utils/settings";
 import { getStudentPhotoUrl } from "@/lib/utils/photo-utils";
+import { getSession } from "@/lib/actions/auth";
 
 // ── Local row types ───────────────────────────────────────────────────────────
 
@@ -59,20 +59,19 @@ function computeOverall(scores: string[]): string {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const supabase = await createSupabaseServerClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user)
+    const session = await getSession();
+    if (!session || !session.profile) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single<{ role: string }>();
-    if (!profile || !["admin", "superadmin", "teacher"].includes(profile.role))
+    const { base_role, is_super_admin, is_dev } = session.profile;
+    const isPlatformAdmin = is_super_admin || is_dev;
+
+    // Authorized roles: admin, superadmin, dev, or teacher
+    const isAuthorized = base_role === "admin" || base_role === "staff" || isPlatformAdmin;
+    if (!isAuthorized) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const body = (await req.json()) as {
       grade?: string;
@@ -84,26 +83,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const { academicYear: defaultYear } = await getActiveTermYear();
     const academicYear = Number(body.academic_year ?? defaultYear);
 
-    if (!grade || ![1, 2, 3].includes(term))
+    if (!grade || ![1, 2, 3].includes(term)) {
       return NextResponse.json(
         { error: "Invalid grade or term" },
         { status: 400 },
       );
+    }
 
     // Teachers must be the class teacher for the requested grade
-    if (profile.role === "teacher") {
+    if (base_role === "staff" && !isPlatformAdmin) {
       const { data: assignment } = await supabaseAdmin
         .from("class_teacher_assignments")
         .select("id")
-        .eq("teacher_id", user.id)
+        .eq("teacher_id", session.profile.id)
         .eq("grade", grade)
         .eq("academic_year", academicYear)
         .maybeSingle();
-      if (!assignment)
+
+      if (!assignment) {
         return NextResponse.json(
           { error: "Not your assigned grade" },
           { status: 403 },
         );
+      }
     }
 
     // ── Fetch all data in parallel ────────────────────────────────────────────
@@ -148,11 +150,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const reportCards = (rcRes.data ?? []) as unknown as BulkRC[];
     const settings = settingsRes.data;
 
-    if (students.length === 0)
+    if (students.length === 0) {
       return NextResponse.json(
         { error: "No active students in this grade" },
         { status: 404 },
       );
+    }
 
     // ── Class teacher name — look up from assignments first ───────────────────
     let classTeacherName = "Class Teacher";
@@ -257,8 +260,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       pages,
     );
 
-    // Cast the document to satisfy renderToBuffer's strict type requirements
-    const pdfBuffer = await renderToBuffer(doc as React.ReactElement<any>);
+    // Cast the document to safe ReactElement configuration for execution
+    const pdfBuffer = await renderToBuffer(doc as React.ReactElement<Record<string, unknown>>);
 
     const filename = `${grade.replace(/\s+/g, "_")}_Term${term}_${academicYear}_Reports.pdf`;
 

@@ -2,22 +2,22 @@
 
 import { useRef, KeyboardEvent } from "react";
 import { Plus, Trash2, UserCheck, Save, ClipboardList, Copy } from "lucide-react";
-import type { BulkTeacherRow } from "@/lib/actions/bulk-teacher";
+import type { BulkStaffRow } from "@/lib/actions/bulk-teacher";
 
 interface Props {
-  rows: BulkTeacherRow[];
-  setRows: React.Dispatch<React.SetStateAction<BulkTeacherRow[]>>;
+  rows: BulkStaffRow[];
+  setRows: React.Dispatch<React.SetStateAction<BulkStaffRow[]>>;
   isPending: boolean;
   onSubmit: () => void;
 }
 
-const BLANK_TEACHER: BulkTeacherRow = { fullName: "", email: "", phone: "", tscNumber: "" };
+const BLANK_TEACHER: BulkStaffRow = { fullName: "", email: "", phone: "", tscNumber: "" };
 
 export function BulkAdmitTeacherEditor({ rows, setRows, isPending, onSubmit }: Props) {
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
 
   // ── Mutations ──────────────────────────────────────────────────────────
-  const addRow = (after?: Partial<BulkTeacherRow>) => {
+  const addRow = (after?: Partial<BulkStaffRow>) => {
     setRows((prev) => [...prev, { ...BLANK_TEACHER, ...after, fullName: "", email: "" }]);
     requestAnimationFrame(() => {
       const cells = tbodyRef.current?.querySelectorAll<HTMLElement>(
@@ -40,7 +40,7 @@ export function BulkAdmitTeacherEditor({ rows, setRows, isPending, onSubmit }: P
     setRows((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
   };
 
-  const updateRow = (index: number, field: keyof BulkTeacherRow, value: string) => {
+  const updateRow = (index: number, field: keyof BulkStaffRow, value: string) => {
     setRows((prev) =>
       prev.map((row, i) => (i === index ? { ...row, [field]: value } : row))
     );

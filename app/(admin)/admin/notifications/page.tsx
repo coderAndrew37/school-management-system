@@ -9,16 +9,64 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ArrowLeft, Bell } from "lucide-react";
 import Link from "next/link";
 import { NotificationsClient } from "./NotificationsClient";
-import { getActiveTermYear } from "@/lib/utils/settings";
 
 export const metadata = { title: "Notifications | Kibali Admin" };
 export const revalidate = 0;
 
+// ── Strict Structural Interfaces ─────────────────────────────────────────────
+
+export interface ParentNotificationItem {
+  id: string;
+  type: string;
+  channel: string;
+  status: string;
+  subject: string;
+  body: string;
+  created_at: string;
+  parents: {
+    id: string;
+    full_name: string;
+    phone_number: string | null;
+    email: string | null;
+  } | null;
+}
+
+export interface CommunicationsLogItem {
+  id: string;
+  audience_type: string;
+  audience_label: string;
+  subject: string;
+  body_preview: string;
+  recipient_count: number;
+  status: string;
+  channel: string;
+  sent_at: string | null;
+  created_at: string;
+}
+
+export interface InAppNotificationItem {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  is_read: boolean;
+  created_at: string;
+  students: {
+    id: string;
+    full_name: string;
+    current_grade: string;
+  } | null;
+}
+
+interface NotificationDataPayload {
+  parentNotifs: ParentNotificationItem[];
+  commsLog: CommunicationsLogItem[];
+  inAppNotifs: InAppNotificationItem[];
+}
+
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
-async function fetchNotificationData() {
-  const { academicYear } = await getActiveTermYear();
-
+async function fetchNotificationData(): Promise<NotificationDataPayload> {
   const [{ data: parentNotifs }, { data: commsLog }, { data: inAppNotifs }] =
     await Promise.all([
       // SMS/Email delivery log (absence alerts, report-ready, fee reminders)
@@ -56,9 +104,9 @@ async function fetchNotificationData() {
     ]);
 
   return {
-    parentNotifs: (parentNotifs ?? []) as any[],
-    commsLog: (commsLog ?? []) as any[],
-    inAppNotifs: (inAppNotifs ?? []) as any[],
+    parentNotifs: (parentNotifs ?? []) as unknown as ParentNotificationItem[],
+    commsLog: (commsLog ?? []) as unknown as CommunicationsLogItem[],
+    inAppNotifs: (inAppNotifs ?? []) as unknown as InAppNotificationItem[],
   };
 }
 
@@ -66,8 +114,17 @@ async function fetchNotificationData() {
 
 export default async function AdminNotificationsPage() {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role))
-    redirect("/login");
+  
+  if (!session || !session.profile) {
+    redirect("/login?redirectTo=/admin/notifications");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
+  }
 
   const { parentNotifs, commsLog, inAppNotifs } = await fetchNotificationData();
 
@@ -104,7 +161,6 @@ export default async function AdminNotificationsPage() {
             </div>
           </div>
 
-          {/* Quick stats */}
           <div className="flex items-center gap-3">
             <Chip
               label="Delivery log"
@@ -133,9 +189,9 @@ function Chip({
 }: {
   label: string;
   value: number;
-  color: string;
+  color: "sky" | "amber" | "emerald";
 }) {
-  const cls: Record<string, string> = {
+  const cls: Record<typeof color, string> = {
     sky: "bg-sky-400/10     border-sky-400/20     text-sky-400",
     amber: "bg-amber-400/10   border-amber-400/20   text-amber-400",
     emerald: "bg-emerald-400/10 border-emerald-400/20 text-emerald-400",

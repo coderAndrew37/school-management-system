@@ -7,16 +7,19 @@ import { getSession } from "@/lib/actions/auth";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const ADMIN_ROLES = ["admin", "superadmin"] as const;
-
 async function requireAdmin() {
   const session = await getSession();
-  if (
-    !session ||
-    !(ADMIN_ROLES as readonly string[]).includes(session.profile.role)
-  ) {
+  if (!session || !session.profile) {
     return null;
   }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    return null;
+  }
+
   return session;
 }
 
@@ -90,7 +93,6 @@ export async function updateStudentAction(
     fullName,
     gender,
     currentGrade,
-    currentStream,
     upiNumber,
     dateOfBirth,
   } = parsed.data;

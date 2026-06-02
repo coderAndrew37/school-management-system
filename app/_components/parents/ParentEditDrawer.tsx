@@ -96,17 +96,20 @@ export function ParentEditDrawer({ parent, onClose, onToast }: Props) {
   // ── Actions ─────────────────────────────────────────────────────────────────
 
   function handleSave() {
-    startTransition(async () => {
-      const fd = new FormData();
-      fd.set("parentId", parent.id);
-      fd.set("fullName", fullName.trim());
-      fd.set("phone", phone.trim());
-      fd.set("email", email.trim());
-      const res = await updateParentAction(fd);
-      onToast(res.success ? "success" : "error", res.message);
-      if (res.success) onClose();
-    });
-  }
+  startTransition(async () => {
+    const fd = new FormData();
+    fd.set("parentId", parent.id);
+    fd.set("fullName", fullName.trim());
+    fd.set("phone", phone.trim());
+    
+    // Safely defaults to "" if email is null, then trims
+    fd.set("email", (email ?? "").trim());
+    
+    const res = await updateParentAction(fd);
+    onToast(res.success ? "success" : "error", res.message);
+    if (res.success) onClose();
+  });
+}
 
   function handleDelete() {
     startTransition(async () => {
@@ -277,7 +280,7 @@ export function ParentEditDrawer({ parent, onClose, onToast }: Props) {
                     id="drawer-email"
                     aria-label="Parent email address"
                     type="email"
-                    value={email}
+                    value={email ?? ""}
                     onChange={(e) => setEmail(e.target.value)}
                     className={INP}
                   />
@@ -402,7 +405,7 @@ export function ParentEditDrawer({ parent, onClose, onToast }: Props) {
                 ) : (
                   <div className="space-y-2">
                     <p className="text-xs text-rose-400/80">
-                      Permanently deletes <strong>{parent.full_name}</strong>'s
+                      Permanently deletes <strong>{parent.full_name}</strong>&apos;s
                       account. Only allowed when they have no linked students.
                     </p>
                     <div className="flex gap-2">

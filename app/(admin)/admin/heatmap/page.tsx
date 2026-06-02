@@ -13,8 +13,17 @@ interface Props {
 
 export default async function HeatmapPage({ searchParams }: Props) {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
-    redirect("/login");
+  
+  if (!session || !session.profile) {
+    redirect("/login?redirectTo=/admin/heatmap");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Protect the route using the updated BaseRole structural check
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    redirect("/dashboard");
   }
 
   const sp = await searchParams;

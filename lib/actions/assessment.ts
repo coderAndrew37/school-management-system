@@ -1,4 +1,3 @@
-// lib/actions/assessment.ts
 "use server";
 
 import { getSession } from "@/lib/actions/auth";
@@ -32,7 +31,7 @@ interface AnthropicResponse {
     type: string;
   }>;
   id: string;
-  model: string;
+model: string;
   role: string;
 }
 
@@ -54,9 +53,11 @@ async function requireTeacher(): Promise<{
 }> {
   const session = await getSession();
   if (!session) throw new Error("Not authenticated");
-  if (session.profile.role !== "teacher" && session.profile.role !== "admin") {
+  
+  if (session.profile.base_role !== "staff" && session.profile.base_role !== "admin") {
     throw new Error("Forbidden");
   }
+  
   return {
     teacherId: session.profile.teacher_id ?? "",
     userId: session.user.id,

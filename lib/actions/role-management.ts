@@ -1,9 +1,6 @@
 "use server";
 
 // @/lib/actions/role-management.ts
-// Full CRUD:
-//   A) User role assignment / revocation (Super Admin assigns roles to staff)
-//   B) Role definition management (Super Admin creates / edits / deactivates role types)
 
 import { createSupabaseServerClient }         from "@/lib/supabase/server";
 import { supabaseAdmin }                       from "@/lib/supabase/admin";
@@ -84,18 +81,25 @@ export async function getAllStaffWithRoles(): Promise<StaffMember[] | null> {
   const defMap = new Map(defs.map((d) => [d.id, d]));
   const emailMap = await buildEmailMap(data.map((r) => r.id));
 
-  return data.map((row) => ({
-    id:                    row.id,
-    full_name:             row.full_name   ?? null,
-    avatar_url:            row.avatar_url  ?? null,
-    email:                 emailMap.get(row.id) ?? null,
-    base_role:             row.base_role   as BaseRole,
-    admin_role:            row.admin_role  ?? null,
-    admin_role_definition: row.admin_role ? (defMap.get(row.admin_role) ?? null) : null,
-    roles:                 (row.roles as string[]) ?? null,
-    created_at:            row.created_at,
-    updated_at:            row.updated_at,
-  }));
+  return data.map((row): StaffMember => {
+    const baseRole = (row.base_role as BaseRole) || "staff";
+    const adminRole = (row.admin_role as string) || null;
+
+    return {
+      id: String(row.id),
+      full_name: (row.full_name as string) ?? null,
+      avatar_url: (row.avatar_url as string) ?? null,
+      email: emailMap.get(String(row.id)) ?? null,
+      base_role: baseRole,
+      admin_role: adminRole,
+      admin_role_definition: adminRole ? (defMap.get(adminRole) ?? null) : null,
+      roles: (row.roles as string[]) ?? [],
+      is_super_admin: baseRole === "admin" && adminRole === "super_admin",
+      is_dev: adminRole === "dev" || adminRole === "developer", // Derived based on your system flags
+      created_at: String(row.created_at),
+      updated_at: String(row.updated_at),
+    };
+  });
 }
 
 // READ — single staff member
@@ -115,22 +119,27 @@ export async function getStaffMemberById(id: string): Promise<StaffMember | null
   ]);
 
   if (profileResult.error || !profileResult.data) return null;
-  const row  = profileResult.data;
+  const row = profileResult.data;
   const defs = (defsResult.data ?? []) as AdminRoleDefinition[];
   const defMap = new Map(defs.map((d) => [d.id, d]));
   const emailMap = await buildEmailMap([id]);
 
+  const baseRole = (row.base_role as BaseRole) || "staff";
+  const adminRole = (row.admin_role as string) || null;
+
   return {
-    id:                    row.id,
-    full_name:             row.full_name   ?? null,
-    avatar_url:            row.avatar_url  ?? null,
-    email:                 emailMap.get(id) ?? null,
-    base_role:             row.base_role   as BaseRole,
-    admin_role:            row.admin_role  ?? null,
-    admin_role_definition: row.admin_role ? (defMap.get(row.admin_role) ?? null) : null,
-    roles:                 (row.roles as string[]) ?? null,
-    created_at:            row.created_at,
-    updated_at:            row.updated_at,
+    id: String(row.id),
+    full_name: (row.full_name as string) ?? null,
+    avatar_url: (row.avatar_url as string) ?? null,
+    email: emailMap.get(id) ?? null,
+    base_role: baseRole,
+    admin_role: adminRole,
+    admin_role_definition: adminRole ? (defMap.get(adminRole) ?? null) : null,
+    roles: (row.roles as string[]) ?? [],
+    is_super_admin: baseRole === "admin" && adminRole === "super_admin",
+    is_dev: adminRole === "dev" || adminRole === "developer",
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
   };
 }
 
@@ -391,7 +400,6 @@ export async function updateRoleDefinitionAction(
 }
 
 // DEACTIVATE — soft delete (ON DELETE SET NULL in profiles FK handles cleanup)
-// We never hard-delete because the audit log references role IDs.
 export async function deactivateRoleDefinitionAction(
   id: string,
   reason: string
@@ -420,10 +428,6 @@ export async function deactivateRoleDefinitionAction(
     return { success: false, message: "Failed to deactivate role." };
   }
 
-  // The FK ON DELETE SET NULL will clear admin_role on profiles automatically
-  // when a hard-delete happens, but since we're doing a soft-delete (is_active=false),
-  // we manually clear admin_role for all affected users so they don't
-  // hold a reference to a disabled role.
   await supabaseAdmin
     .from("profiles")
     .update({ admin_role: null })
@@ -474,4 +478,84 @@ export async function getRoleAuditLog(targetUserId: string): Promise<AuditLogEnt
 
   if (error) { console.error("[getRoleAuditLog]", error.message); return []; }
   return (data ?? []) as AuditLogEntry[];
+}
+
+// CREATE — invite/create a brand new staff user account
+export async function createStaffUserAction(formData: FormData): Promise<ActionResult> {
+  const { user } = await getVerifiedSuperAdmin();
+  if (!user) return { success: false, message: "Unauthorized. Super Admin access required." };
+
+  // 1. Extract values from FormData
+  const full_name = formData.get("full_name") as string;
+  const email = formData.get("email") as string;
+  const base_role = formData.get("base_role") as BaseRole;
+  const admin_role = (formData.get("admin_role") as string) || null;
+  const phone_number = (formData.get("phone_number") as string) || null;
+
+  // Simple runtime validation guard
+  if (!full_name || !email || !base_role) {
+    return { success: false, message: "Missing required profile fields." };
+  }
+
+  if (base_role === "admin" && !admin_role) {
+    return { success: false, message: "An administrative title is required for administrator accounts." };
+  }
+
+  try {
+    // 2. Generate a secure random password for the invitation layer
+    const tempPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).toUpperCase().slice(-4) + "!0";
+
+    // 3. Create auth user via admin context (bypasses email confirmation loops automatically)
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password: tempPassword,
+      email_confirm: true,
+      user_metadata: { full_name, phone_number },
+    });
+
+    if (authError || !authData.user) {
+      console.error("[createStaffUserAction] auth creation failed:", authError?.message);
+      return { success: false, message: authError?.message || "Failed to provision authentication account." };
+    }
+
+    const newUserId = authData.user.id;
+
+    // 4. Initialize the profile entity explicitly to ensure transactional alignment
+    const { error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .update({
+        full_name,
+        base_role,
+        admin_role: base_role === "admin" ? admin_role : null,
+        roles: [base_role],
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", newUserId);
+
+    if (profileError) {
+      console.error("[createStaffUserAction] profile binding failed:", profileError.message);
+      // Clean up orphaned auth user if the profile database write faults out
+      await supabaseAdmin.auth.admin.deleteUser(newUserId);
+      return { success: false, message: "Failed to construct application user profile metadata." };
+    }
+
+    // 5. Audit Log Entry
+    supabaseAdmin.from("role_audit_logs").insert({
+      actor_id: user.id,
+      target_id: newUserId,
+      action: "user_created",
+      previous_values: {},
+      new_values: { email, base_role, admin_role },
+      reason: `Staff account initialized for ${full_name}`,
+    }).then(({ error: e }) => { if (e) console.warn("[audit]", e.message); });
+
+    // Optional: Send out custom credentials email notification loop here if needed
+
+    invalidate("/admin/staff");
+    return { success: true, message: `Staff account for ${full_name} established successfully.` };
+
+  } catch (err) {
+    console.error("[createStaffUserAction] unexpected fatal boundary:", err);
+    return { success: false, message: "An unexpected network error occurred." };
+  }
 }

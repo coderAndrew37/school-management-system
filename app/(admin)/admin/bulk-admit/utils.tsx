@@ -1,7 +1,7 @@
 // app/admin/bulk-admit/_lib/bulk-utils.ts
 
 import { BulkAdmitRow } from "@/lib/actions/bulk-admit";
-import { BulkTeacherRow } from "@/lib/actions/bulk-teacher";
+import { BulkStaffRow } from "@/lib/actions/bulk-teacher";
 
 // ── Grade to Level Mapping ──────────────────────────────────────────────────
 export const GRADE_CONFIG = {
@@ -81,14 +81,14 @@ export function parseStudentCSV(text: string): BulkAdmitRow[] {
 }
 
 // ── Teacher Utils (unchanged) ───────────────────────────────────────────────
-export const EMPTY_TEACHER = (): BulkTeacherRow => ({
+export const EMPTY_TEACHER = (): BulkStaffRow => ({
   fullName: "",
   email: "",
   phone: "",
   tscNumber: "",
 });
 
-export function parseTeacherCSV(text: string): BulkTeacherRow[] {
+export function parseTeacherCSV(text: string): BulkStaffRow[] {
   const lines = text.trim().split("\n").filter(Boolean);
   const header = lines[0]?.toLowerCase() ?? "";
   const dataLines = header.includes("name") || header.includes("email") ? lines.slice(1) : lines;

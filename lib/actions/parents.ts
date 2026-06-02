@@ -8,7 +8,6 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getSession } from "@/lib/actions/auth";
 
 // --- Types & Interfaces ---
-const ADMIN_ROLES = ["admin", "superadmin"] as const;
 
 interface ActionResult {
   success: boolean;
@@ -17,9 +16,8 @@ interface ActionResult {
 
 interface RawParentExportRow {
   full_name: string;
-  email: string;
+  email: string | null;
   phone_number: string | null;
-  invite_accepted: boolean | null;
   created_at: string;
   student_parents: {
     students: { full_name: string; current_grade: string } | null;
@@ -38,7 +36,12 @@ export interface ParentExportData {
 // --- Auth Guard ---
 async function requireAdmin() {
   const session = await getSession();
-  if (!session || !ADMIN_ROLES.includes(session.profile.role as (typeof ADMIN_ROLES)[number])) {
+  if (!session || !session.profile) return null;
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  if (base_role !== "admin" && !isPlatformAdmin) {
     return null;
   }
   return session;
@@ -75,16 +78,17 @@ export async function updateParentAction(
   try {
     const supabase = await createSupabaseServerClient();
 
-    // Email conflict check
+    // Email conflict check against profiles table
     const { data: existing } = await supabaseAdmin
-      .from("parents")
+      .from("profiles")
       .select("email")
       .eq("id", parentId)
+      .eq("role", "parent")
       .single();
 
     if (existing && existing.email !== email) {
       const { data: conflict } = await supabaseAdmin
-        .from("parents")
+        .from("profiles")
         .select("id")
         .eq("email", email)
         .neq("id", parentId)
@@ -101,9 +105,10 @@ export async function updateParentAction(
     }
 
     const { error } = await supabase
-      .from("parents")
+      .from("profiles")
       .update({ full_name: fullName, phone_number: phone, email })
-      .eq("id", parentId);
+      .eq("id", parentId)
+      .eq("role", "parent");
 
     if (error) throw error;
 
@@ -134,18 +139,18 @@ export async function deleteParentAction(
       };
     }
 
-    // 2. Get email for success message
+    // 2. Get email from profiles for success message
     const { data: parent } = await supabaseAdmin
-      .from("parents")
+      .from("profiles")
       .select("email")
       .eq("id", parentId)
+      .eq("role", "parent")
       .single();
 
     if (!parent) return { success: false, message: "Parent not found." };
 
-    // 3. Delete from public tables
+    // 3. Delete profile row from database
     const supabase = await createSupabaseServerClient();
-    await supabase.from("parents").delete().eq("id", parentId);
     await supabase.from("profiles").delete().eq("id", parentId);
 
     // 4. Delete Auth User with retry
@@ -169,7 +174,7 @@ export async function deleteParentAction(
     revalidatePath("/admin/parents");
     return {
       success: true,
-      message: `Parent account (${parent.email}) has been permanently deleted.`,
+      message: `Parent account (${parent.email ?? "No Email"}) has been permanently deleted.`,
     };
   } catch (err: unknown) {
     console.error("[deleteParentAction] Error:", err);
@@ -187,12 +192,15 @@ export async function resetParentPasswordAction(
   if (!(await requireAdmin())) return { success: false, message: "Unauthorised" };
 
   const { data: parent, error: pErr } = await supabaseAdmin
-    .from("parents")
+    .from("profiles")
     .select("email, full_name")
     .eq("id", parentId)
+    .eq("role", "parent")
     .single();
 
-  if (pErr || !parent) return { success: false, message: "Parent not found." };
+  if (pErr || !parent || !parent.email) {
+    return { success: false, message: "Parent or valid email address not found." };
+  }
 
   const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
     type: "recovery",
@@ -202,10 +210,12 @@ export async function resetParentPasswordAction(
 
   if (linkErr) return { success: false, message: linkErr.message };
 
+  // Note: Using profiles to keep track of system communication telemetry tags
   await supabaseAdmin
-    .from("parents")
+    .from("profiles")
     .update({ last_invite_sent: new Date().toISOString() })
-    .eq("id", parentId);
+    .eq("id", parentId)
+    .eq("role", "parent");
 
   revalidatePath("/admin/parents");
 
@@ -216,7 +226,6 @@ export async function resetParentPasswordAction(
   };
 }
 
-// Export function remains unchanged
 export async function fetchParentsForExport(): Promise<{
   success: boolean;
   data: ParentExportData[];
@@ -225,11 +234,12 @@ export async function fetchParentsForExport(): Promise<{
   if (!(await requireAdmin())) return { success: false, data: [], message: "Unauthorised" };
 
   const { data, error } = await supabaseAdmin
-    .from("parents")
+    .from("profiles")
     .select(`
-      full_name, email, phone_number, invite_accepted, created_at,
-      student_parents ( students ( full_name, current_grade ) )
+      full_name, email, phone_number, created_at,
+      student_parents!student_parents_parent_id_profiles_fkey ( students ( full_name, current_grade ) )
     `)
+    .eq("role", "parent")
     .order("full_name")
     .returns<RawParentExportRow[]>();
 
@@ -237,9 +247,10 @@ export async function fetchParentsForExport(): Promise<{
 
   const formattedData: ParentExportData[] = (data ?? []).map((p) => ({
     full_name: p.full_name,
-    email: p.email,
+    email: p.email ?? "",
     phone_number: p.phone_number ?? "",
-    invite_accepted: p.invite_accepted ?? false,
+    // Profiles doesn't hold auth properties directly; fallback safely or evaluate via connection status tracking
+    invite_accepted: false, 
     created_at: p.created_at,
     children: p.student_parents
       .map((sp) => sp.students)
@@ -251,7 +262,6 @@ export async function fetchParentsForExport(): Promise<{
   return { success: true, data: formattedData };
 }
 
-// Keep your other helper actions as they are
 export async function getParentFeeBalancesAction(childIds: string[], academicYear = 2026) {
   const { fetchParentFeeBalances } = await import("@/lib/data/parents");
   return fetchParentFeeBalances(childIds, academicYear);

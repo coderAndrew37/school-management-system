@@ -50,7 +50,7 @@ export async function fetchParentsInviteStatus(): Promise<{
   error?: string;
 }> {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+  if (!session || !["admin", "superadmin"].includes(session.profile.base_role)) {
     return { parents: [], error: "Unauthorized" };
   }
 
@@ -101,7 +101,7 @@ export async function resendParentInviteAction(parentId: string): Promise<{
   error?: string;
 }> {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+  if (!session || !["admin", "superadmin"].includes(session.profile.base_role)) {
     return { success: false, error: "Unauthorized" };
   }
 
@@ -163,7 +163,7 @@ export async function bulkResendInvitesAction(parentIds: string[]): Promise<{
   errors: string[];
 }> {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+  if (!session || !["admin", "superadmin"].includes(session.profile.base_role)) {
     return {
       success: false,
       sent: 0,

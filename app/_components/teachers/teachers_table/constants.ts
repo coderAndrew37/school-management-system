@@ -1,3 +1,4 @@
+// @/app/_components/teachers/teachers_table/constants.ts
 import type { TeacherStatus } from "@/lib/types/dashboard";
 
 export const AVATAR_COLORS = [
@@ -12,13 +13,19 @@ export const AVATAR_COLORS = [
 export const STATUS_STYLE: Record<TeacherStatus, string> = {
   active: "bg-emerald-400/10 text-emerald-400 border-emerald-400/20",
   on_leave: "bg-amber-400/10 text-amber-400 border-amber-400/20",
+  transferred: "bg-purple-400/10 text-purple-400 border-purple-400/20",
   resigned: "bg-slate-400/10 text-slate-400 border-slate-400/20",
   terminated: "bg-rose-400/10 text-rose-400 border-rose-400/20",
+  deceased: "bg-gray-400/10 text-gray-400 border-gray-400/20",
+  retired: "bg-indigo-400/10 text-indigo-400 border-indigo-400/20",
 };
 
 export const STATUS_LABEL: Record<TeacherStatus, string> = {
   active: "Active",
   on_leave: "On Leave",
+  transferred: "Transferred",
   resigned: "Resigned",
   terminated: "Terminated",
+  deceased: "Deceased",
+  retired: "Retired",
 };

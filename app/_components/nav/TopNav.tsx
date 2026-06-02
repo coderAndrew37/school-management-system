@@ -11,22 +11,28 @@ interface TopNavProps {
 }
 
 const ROLE_LABELS: Record<string, string> = {
+  super_admin: "Super Admin",
   admin: "Administrator",
-  teacher: "Teacher",
+  staff: "Teacher",
   parent: "Parent / Guardian",
+  student: "Student",
 };
 
 // Full class strings — no string concatenation so Tailwind can scan them
 const ROLE_COLORS: Record<string, string> = {
+  super_admin: "bg-purple-400/10 text-purple-400 border-purple-400/25",
   admin: "bg-amber-400/10 text-amber-400 border-amber-400/25",
-  teacher: "bg-emerald-400/10 text-emerald-400 border-emerald-400/25",
+  staff: "bg-emerald-400/10 text-emerald-400 border-emerald-400/25",
   parent: "bg-sky-400/10 text-sky-400 border-sky-400/25",
+  student: "bg-indigo-400/10 text-indigo-400 border-indigo-400/25",
 };
 
 const AVATAR_COLORS: Record<string, string> = {
+  super_admin: "bg-purple-400/15 border-purple-400/20 text-purple-400",
   admin: "bg-amber-400/15 border-amber-400/20 text-amber-400",
-  teacher: "bg-emerald-400/15 border-emerald-400/20 text-emerald-400",
+  staff: "bg-emerald-400/15 border-emerald-400/20 text-emerald-400",
   parent: "bg-sky-400/15 border-sky-400/20 text-sky-400",
+  student: "bg-indigo-400/15 border-indigo-400/20 text-indigo-400",
 };
 
 function getInitials(name: string | null, email: string): string {
@@ -42,10 +48,16 @@ function getInitials(name: string | null, email: string): string {
 }
 
 export function TopNav({ profile, email, onMenuClick }: TopNavProps) {
+  const currentRole = profile.base_role ?? "parent";
   const initials = getInitials(profile.full_name, email);
-  const roleLabel = ROLE_LABELS[profile.role] ?? profile.role;
-  const roleColor = ROLE_COLORS[profile.role] ?? ROLE_COLORS["parent"]!;
-  const avatarColor = AVATAR_COLORS[profile.role] ?? AVATAR_COLORS["parent"]!;
+  
+  // Account for developer overrides directly inside layout visual flags
+  const roleLabel = profile.is_dev 
+    ? `${ROLE_LABELS[currentRole]} (Dev)` 
+    : (ROLE_LABELS[currentRole] ?? currentRole);
+
+  const roleColor = ROLE_COLORS[currentRole] ?? ROLE_COLORS["parent"]!;
+  const avatarColor = AVATAR_COLORS[currentRole] ?? AVATAR_COLORS["parent"]!;
 
   return (
     <nav className="sticky top-0 z-40 w-full h-14 border-b border-white/[0.06] bg-[#0c0f1a]/80 backdrop-blur-xl flex items-center">

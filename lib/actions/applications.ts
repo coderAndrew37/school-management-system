@@ -102,7 +102,14 @@ export async function updateApplicationStatus(
   adminNotes?: string,
 ): Promise<{ success: boolean; message: string }> {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+  if (!session || !session.profile) {
+    return { success: false, message: "Unauthorised" };
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev || base_role === "admin";
+
+  if (!isPlatformAdmin) {
     return { success: false, message: "Unauthorised" };
   }
 
@@ -128,10 +135,17 @@ export async function updateApplicationStatus(
 
 export async function convertApplicationToStudent(
   applicationId: string,
-  classId: string, // Required for new implementation
+  classId: string,
 ): Promise<{ success: boolean; message: string }> {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+  if (!session || !session.profile) {
+    return { success: false, message: "Unauthorised" };
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev || base_role === "admin";
+
+  if (!isPlatformAdmin) {
     return { success: false, message: "Unauthorised" };
   }
 
@@ -150,11 +164,12 @@ export async function convertApplicationToStudent(
   }
 
   try {
-    // 1. Resolve Parent
+    // 1. Resolve Parent profile records from profiles table
     const { data: existingParent } = await supabaseAdmin
-      .from("parents")
+      .from("profiles")
       .select("id")
       .eq("email", app.parent_email)
+      .eq("role", "parent")
       .maybeSingle();
 
     let parentId: string;
@@ -162,29 +177,29 @@ export async function convertApplicationToStudent(
     if (existingParent) {
       parentId = existingParent.id;
     } else {
-      // Create auth user
+      // Create auth user with base_role metadata mapping
       const { data: authData, error: authError } =
         await supabaseAdmin.auth.admin.createUser({
           email: app.parent_email,
           email_confirm: true,
           user_metadata: {
             full_name: `${app.parent_first_name} ${app.parent_last_name}`,
-            role: "parent",
+            base_role: "parent",
           },
         });
         
       if (authError) throw new Error(authError.message);
       parentId = authData.user.id;
 
-      // Create parents row
+      // Create configuration schema setup targets within central profiles configuration 
       const { error: parentError } = await supabaseAdmin
-        .from("parents")
+        .from("profiles")
         .insert({
           id: parentId,
           full_name: `${app.parent_first_name} ${app.parent_last_name}`,
           email: app.parent_email,
           phone_number: app.parent_phone,
-          invite_accepted: false,
+          role: "parent",
         });
         
       if (parentError) {
@@ -245,7 +260,6 @@ export async function convertApplicationToStudent(
       });
       
     if (linkError) {
-      // Rollback student if linking fails
       await supabaseAdmin.from("students").delete().eq("id", newStudent.id);
       throw new Error(linkError.message);
     }
