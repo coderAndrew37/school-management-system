@@ -27,9 +27,19 @@ export interface GradeCount {
  */
 async function requireAdmin() {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.role)) {
+  
+  if (!session || !session.profile) {
+    throw new Error("Forbidden: Unauthorized access");
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Aligning strictly with your guard context structural constraints
+  if (base_role !== "admin" && !isPlatformAdmin) {
     throw new Error("Forbidden: admin access required");
   }
+
   return session;
 }
 
@@ -112,7 +122,7 @@ export async function promoteAllGradesAction(targetYear: number): Promise<Promot
           .eq("id", student.id);
         
         if (!error) promotedInThisGrade++;
-        else gradeErrors.push(`Failed to update student ID ${student.id}`);
+          else gradeErrors.push(`Failed to update student ID ${student.id}`);
       } else {
         gradeErrors.push(`Stream "${student.stream}" missing in ${toGrade} for year ${targetYear}.`);
       }

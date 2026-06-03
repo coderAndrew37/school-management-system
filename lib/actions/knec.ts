@@ -20,7 +20,16 @@ export async function saveHistoricalOverrideAction(
   input: ManualOverrideInput,
 ): Promise<SaveOverrideResult> {
   const session = await getSession();
-  if (!session || session.profile.role !== "admin") {
+  
+  if (!session || !session.profile) {
+    return { success: false, message: "Unauthorised" };
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Aligning strictly with your guard context structural constraints
+  if (base_role !== "admin" && !isPlatformAdmin) {
     return { success: false, message: "Unauthorised" };
   }
 
@@ -80,7 +89,16 @@ export async function saveAssessmentNumberAction(
   assessmentNumber: string,
 ): Promise<SaveAssessmentNumberResult> {
   const session = await getSession();
-  if (!session || session.profile.role !== "admin") {
+  
+  if (!session || !session.profile) {
+    return { success: false, message: "Unauthorised" };
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  // Aligning strictly with your guard context structural constraints
+  if (base_role !== "admin" && !isPlatformAdmin) {
     return { success: false, message: "Unauthorised" };
   }
 

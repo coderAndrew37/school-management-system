@@ -60,19 +60,24 @@ export async function getAllStaffMembers(): Promise<StaffMember[] | null> {
 
   if (!data) return [];
 
-  // Strictly typed transformation
-  return data.map((item) => ({
-    id: item.id,
-    full_name: item.full_name,
-    avatar_url: item.avatar_url,
-    email: item.users?.email ?? null,
-    phone_number: item.users?.phone_number ?? null,
-    base_role: item.base_role,
-    admin_role: item.admin_role,
-    roles: item.roles,
-    created_at: item.created_at,
-    updated_at: item.updated_at,
-  }));
+  // Strictly typed transformation accounting for Supabase array-relation inference
+  return data.map((item) => {
+    // Handle case where users returns as an object or single-item array
+    const userRelation = Array.isArray(item.users) ? item.users[0] : item.users;
+
+    return {
+      id: item.id,
+      full_name: item.full_name,
+      avatar_url: item.avatar_url,
+      email: userRelation?.email ?? null,
+      phone_number: userRelation?.phone_number ?? null,
+      base_role: item.base_role,
+      admin_role: item.admin_role,
+      roles: item.roles,
+      created_at: item.created_at,
+      updated_at: item.updated_at,
+    };
+  });
 }
 
 /**
@@ -102,12 +107,15 @@ export async function getStaffMemberById(id: string): Promise<StaffMember | null
 
   if (error || !data) return null;
 
+  // Handle case where users returns as an object or single-item array
+  const userRelation = Array.isArray(data.users) ? data.users[0] : data.users;
+
   return {
     id: data.id,
     full_name: data.full_name,
     avatar_url: data.avatar_url,
-    email: data.users?.email ?? null,
-    phone_number: data.users?.phone_number ?? null,
+    email: userRelation?.email ?? null,
+    phone_number: userRelation?.phone_number ?? null,
     base_role: data.base_role,
     admin_role: data.admin_role,
     roles: data.roles,

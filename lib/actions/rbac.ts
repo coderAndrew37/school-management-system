@@ -64,8 +64,8 @@ interface AuditPayload {
   actionType:  string;
   targetTable: string;
   recordId:    string;
-  oldValues?:  Record<string, unknown> | null;
-  newValues?:  Record<string, unknown> | null;
+  oldValues?:  Record<string, unknown> | object | null; // Added | object
+  newValues?:  Record<string, unknown> | object | null; // Added | object
   context?:    Record<string, unknown>;
 }
 
