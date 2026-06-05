@@ -50,19 +50,27 @@ export async function fetchParentsInviteStatus(): Promise<{
   error?: string;
 }> {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.base_role)) {
+  if (!session || !session.profile) {
     return { parents: [], error: "Unauthorized" };
   }
 
-  // Fetch parents with their children
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  if (base_role !== "admin" && !isPlatformAdmin) {
+    return { parents: [], error: "Unauthorized" };
+  }
+
+  // Fetch parents from profiles with their children mapped through parent_profile_id
   const { data: parents, error } = await supabaseAdmin
-    .from("parents")
+    .from("profiles")
     .select(`
       id, full_name, email, phone_number, last_invite_sent,
       student_parents (
         students ( id, full_name, current_grade )
       )
     `)
+    .eq("base_role", "parent")
     .order("full_name")
     .returns<RawInviteStatusRow[]>();
 
@@ -101,21 +109,29 @@ export async function resendParentInviteAction(parentId: string): Promise<{
   error?: string;
 }> {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.base_role)) {
+  if (!session || !session.profile) {
+    return { success: false, error: "Unauthorized" };
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  if (base_role !== "admin" && !isPlatformAdmin) {
     return { success: false, error: "Unauthorized" };
   }
 
   try {
     const { data: parent, error: pErr } = await supabaseAdmin
-      .from("parents")
+      .from("profiles")
       .select(`
         email, full_name,
         student_parents ( students ( full_name, current_grade ) )
       `)
       .eq("id", parentId)
-      .single();
+      .eq("base_role", "parent")
+      .maybeSingle();
 
-    if (pErr || !parent) throw new Error("Parent not found");
+    if (pErr || !parent) throw new Error("Parent profile not found");
     
     const typedParent = parent as unknown as RawResendInviteRow;
 
@@ -140,11 +156,12 @@ export async function resendParentInviteAction(parentId: string): Promise<{
       setupLink: linkData.properties.action_link,
     });
 
-    // Update last_invite_sent timestamp
+    // Update last_invite_sent timestamp directly on profiles table
     await supabaseAdmin
-      .from("parents")
+      .from("profiles")
       .update({ last_invite_sent: new Date().toISOString() })
-      .eq("id", parentId);
+      .eq("id", parentId)
+      .eq("base_role", "parent");
 
     revalidatePath("/admin/invites");
     return { success: true };
@@ -163,7 +180,19 @@ export async function bulkResendInvitesAction(parentIds: string[]): Promise<{
   errors: string[];
 }> {
   const session = await getSession();
-  if (!session || !["admin", "superadmin"].includes(session.profile.base_role)) {
+  if (!session || !session.profile) {
+    return {
+      success: false,
+      sent: 0,
+      failed: parentIds.length,
+      errors: ["Unauthorized"],
+    };
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  if (base_role !== "admin" && !isPlatformAdmin) {
     return {
       success: false,
       sent: 0,

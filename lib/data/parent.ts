@@ -130,17 +130,17 @@ type RawStudentRow = {
   student_parents: {
     is_primary_contact: boolean;
     relationship_type: string;
-    parents: {
+    profiles: {
       id: string;
       full_name: string;
       phone_number: string | null;
       email: string;
-      invite_accepted: boolean;
     } | null;
   }[];
   assessments: AssessmentRow[];
 };
 
+// Updated relation map to reference profiles (aliased back via foreign key configuration)
 const STUDENT_WITH_ASSESSMENTS_SELECT = `
   id, 
   readable_id, 
@@ -162,7 +162,7 @@ const STUDENT_WITH_ASSESSMENTS_SELECT = `
     parent_id,
     is_primary_contact, 
     relationship_type,
-    parents ( id, full_name, phone_number, email, invite_accepted )
+    profiles:parent_id ( id, full_name, phone_number, email )
   ),
   assessments (
     id, student_id, teacher_id, subject_name,
@@ -173,26 +173,24 @@ const STUDENT_WITH_ASSESSMENTS_SELECT = `
 
 // ── Mappers ───────────────────────────────────────────────────────────────────
 
-// ── Updated Mapper (Strict TypeScript) ─────────────────────────────────────────
-
 function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
   const primaryParentLink = 
     row.student_parents.find((l) => l.is_primary_contact) ?? 
     row.student_parents[0] ?? 
     null;
     
-  const primaryParent = primaryParentLink?.parents ?? null;
+  const primaryParent = primaryParentLink?.profiles ?? null;
 
   const allParents: StudentParentLink[] = row.student_parents
-    .filter((link) => link.parents !== null)
+    .filter((link) => link.profiles !== null)
     .map((link) => ({
-      parent_id: link.parents!.id,
-      full_name: link.parents!.full_name,
-      phone_number: link.parents!.phone_number,
-      email: link.parents!.email,
+      parent_id: link.profiles!.id,
+      full_name: link.profiles!.full_name,
+      phone_number: link.profiles!.phone_number,
+      email: link.profiles!.email,
       relationship_type: link.relationship_type,
       is_primary_contact: link.is_primary_contact,
-      invite_accepted: link.parents!.invite_accepted,
+      invite_accepted: true, // Derived structurally safe as profile exist
     }));
 
   return {
@@ -202,7 +200,7 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
     full_name: row.full_name,
     date_of_birth: row.date_of_birth,
     gender: row.gender,
-    class_id: row.class_id, // Now strictly typed in RawStudentRow
+    class_id: row.class_id, 
     current_grade: row.current_grade,
     current_stream: row.classes?.stream || "Main",
     grade_label: row.current_grade,
@@ -225,7 +223,7 @@ function mapStudentRow(row: RawStudentRow): ChildWithAssessments {
         teacher_id: r.teacher_id,
         subject_name: r.subject_name,
         strand_id: r.strand_id,
-        score: r.score, // Removed 'as any' - matches Assessment score union
+        score: r.score, 
         evidence_url: r.evidence_url,
         teacher_remarks: r.teacher_remarks,
         term: r.term as 1 | 2 | 3,
@@ -269,24 +267,80 @@ async function mapGalleryRow(row: RawGalleryRow): Promise<GalleryItem> {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+// Define the strict type for the nested join structure returned by Supabase
+interface RawProfileWithChildren {
+  id: string;
+  full_name: string;
+  email: string | null;
+  phone_number: string | null;
+  role: string;
+  school_id: string;
+  created_at: string;
+  student_parents: {
+    students: {
+      id: string;
+      full_name: string;
+      current_grade: string;
+      status: string;
+      photo_url: string | null;
+    } | null;
+  }[];
+}
+
 export async function fetchMyProfile(email: string): Promise<Parent | null> {
   const { data, error } = await supabaseAdmin
-    .from("parents")
-    .select("*, children:students(id, full_name, current_grade, status, photo_url)")
-    .eq("email", email)
+    .from("profiles")
+    .select(`
+      id,
+      full_name,
+      email,
+      phone_number,
+      role,
+      school_id,
+      created_at,
+      student_parents (
+        students (
+          id,
+          full_name,
+          current_grade,
+          status,
+          photo_url
+        )
+      )
+    `)
+    .eq("email", email.toLowerCase())
+    .eq("role", "parent")
     .single();
 
-  if (error) return null;
-  return data as Parent;
+  if (error || !data) return null;
+
+  // Typecast safely to our strict raw join interface
+  const rawProfile = data as unknown as RawProfileWithChildren;
+
+  // Extract and flatten the students cleanly with zero type-safety bypasses
+  const flattenedChildren = rawProfile.student_parents
+    .map((sp) => sp.students)
+    .filter((student): student is NonNullable<typeof student> => student !== null);
+
+  // Construct the finalized Parent payload matching your exact domain interface
+  return {
+    id: rawProfile.id,
+    full_name: rawProfile.full_name,
+    email: rawProfile.email ?? "",
+    phone_number: rawProfile.phone_number,
+    children: flattenedChildren,
+  } as Parent;
 }
 
 export async function fetchMyChildren(email: string): Promise<ChildWithAssessments[]> {
   const supabase = supabaseAdmin;
 
+  // Fetch parent tracking down the profiles table record
   const { data: parentRecord, error: pError } = await supabase
-    .from("parents")
+    .from("profiles")
     .select("id")
     .eq("email", email.toLowerCase())
+    .eq("role", "parent")
     .single();
 
   if (pError || !parentRecord) return [];

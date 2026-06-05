@@ -50,14 +50,16 @@ export async function searchParentsAction(
   const q = query.trim();
 
   try {
+    // Replaced 'parents' table with 'profiles' table filtered by role
     const { data, error } = await supabaseAdmin
-      .from("parents")
+      .from("profiles")
       .select(`
         id, full_name, email, phone_number,
         student_parents (
           students ( id, full_name, current_grade )
         )
       `)
+      .eq("role", "parent")
       .or(`full_name.ilike.%${q}%,email.ilike.%${q}%,phone_number.ilike.%${q}%`)
       .order("full_name")
       .limit(8)
@@ -113,10 +115,10 @@ export async function admitStudentAction(
   const d = parsed.data;
 
   try {
-    // ── 1. Resolve Class ──
+// ── 1. Resolve Class & School Association ──
     const { data: classRecord, error: classError } = await supabaseAdmin
       .from("classes")
-      .select("id, grade")
+      .select("id, grade, school_id") // Now this column safely exists!
       .eq("id", d.classId)
       .single();
 
@@ -127,19 +129,21 @@ export async function admitStudentAction(
       };
     }
 
+    // Capture the school directly from the class!
+    const schoolId = classRecord.school_id;
     let parentId: string;
     let isNewParent = false;
 
-    // ── 2. Resolve / Create Parent ──
+    // ── 2. Resolve / Create Parent Profile ──
     if (existingParentId) {
       parentId = existingParentId;
     } else {
       const email = d.parentEmail!.toLowerCase().trim();
       const phone = normalizeKenyanPhone(d.parentPhone!);
 
-      // Extra safety: Check both parents table and auth.users
+      // Check both profiles table and auth users
       const { data: existingParent } = await supabaseAdmin
-        .from("parents")
+        .from("profiles")
         .select("id")
         .or(`email.eq.${email},phone_number.eq.${phone}`)
         .maybeSingle();
@@ -147,11 +151,11 @@ export async function admitStudentAction(
       if (existingParent) {
         return {
           success: false,
-          message: "A parent with this email or phone already exists.",
+          message: "A user profile with this email or phone already exists.",
         };
       }
 
-      // Check if auth user already exists (important when parent was previously deleted)
+      // Check if auth user already exists
       const { data: existingAuth } = await supabaseAdmin.auth.admin.listUsers();
 
       if (existingAuth?.users && existingAuth.users.some(user => user.email === email)) {
@@ -175,19 +179,27 @@ export async function admitStudentAction(
       parentId = authUser.user.id;
       isNewParent = true;
 
-      // Create Parent Record
-      const { error: parentErr } = await supabaseAdmin.from("parents").insert({
+      // Create Profile Record instead of Parent Record
+      // Replaced .insert with .upsert to handle background auth trigger collisions safely
+      const { error: profileErr } = await supabaseAdmin.from("profiles").upsert({
         id: parentId,
         full_name: d.parentName!,
         email,
         phone_number: phone,
-        invite_accepted: false,
-        last_invite_sent: new Date().toISOString(),
+        role: "parent",
+        school_id: schoolId,
+      }, {
+        onConflict: 'id' // Informs Supabase to overwrite fields if the ID already exists
       });
 
-      if (parentErr) {
+      if (profileErr) {
         await supabaseAdmin.auth.admin.deleteUser(parentId).catch(console.error);
-        throw new Error(`Parent record creation failed: ${parentErr.message}`);
+        throw new Error(`Profile record creation failed: ${profileErr.message}`);
+      }
+
+      if (profileErr) {
+        await supabaseAdmin.auth.admin.deleteUser(parentId).catch(console.error);
+        throw new Error(`Profile record creation failed: ${profileErr}`);
       }
     }
 
@@ -200,6 +212,7 @@ export async function admitStudentAction(
         gender: d.gender,
         current_grade: classRecord.grade,
         class_id: classRecord.id,
+        school_id: schoolId,
         status: "active",
       })
       .select("id")
@@ -230,7 +243,7 @@ export async function admitStudentAction(
       }
     }
 
-    // ── 5. Link Student to Parent ──
+    // ── 5. Link Student to Parent Junction ──
     const { error: linkErr } = await supabaseAdmin
       .from("student_parents")
       .insert({
@@ -238,11 +251,12 @@ export async function admitStudentAction(
         parent_id: parentId,
         relationship_type: d.relationshipType,
         is_primary_contact: true,
+        school_id: schoolId,
       });
 
     if (linkErr) {
       await supabaseAdmin.from("students").delete().eq("id", newStudent.id);
-      throw new Error("Failed to link student to parent.");
+      throw new Error(`Failed to link student to parent: ${linkErr.message}`);
     }
 
     // ── 6. Send Welcome Email (New Parents Only) ──
@@ -256,7 +270,7 @@ export async function admitStudentAction(
       if (linkData?.properties?.action_link) {
         try {
           await sendWelcomeEmail({
-            parentEmail: d.parentEmail!,
+            parentEmail: d.parentEmail!.toLowerCase(),
             parentName: d.parentName!,
             studentName: d.studentName,
             grade: classRecord.grade,
@@ -288,8 +302,9 @@ export async function admitStudentAction(
 
 export async function resendInviteAction(parentId: string) {
   try {
-    const { data: parent, error: pError } = await supabaseAdmin
-      .from("parents")
+    // Replaced 'parents' table with 'profiles' table
+    const { data: profile, error: pError } = await supabaseAdmin
+      .from("profiles")
       .select(`
         email, full_name,
         student_parents (
@@ -297,11 +312,13 @@ export async function resendInviteAction(parentId: string) {
         )
       `)
       .eq("id", parentId)
+      .eq("role", "parent")
       .single();
 
-    if (pError || !parent) throw new Error("Parent record not found.");
+    if (pError || !profile) throw new Error("Parent profile record not found.");
 
-    const rawParent = parent as unknown as RawResendInviteRow;
+    const rawParent = profile as unknown as RawResendInviteRow;
+    if (!rawParent.email) throw new Error("Parent profile does not have a valid email address.");
 
     const { data: linkData, error: linkError } =
       await supabaseAdmin.auth.admin.generateLink({
@@ -312,7 +329,6 @@ export async function resendInviteAction(parentId: string) {
 
     if (linkError) throw linkError;
 
-    // Improved: Support multiple children
     const children = rawParent.student_parents
       ?.map((sp) => sp.students)
       .filter((s): s is NonNullable<typeof s> => !!s) || [];

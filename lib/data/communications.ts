@@ -15,10 +15,11 @@ type TeacherRow = {
   phone_number: string | null;
 };
 
-type ParentRow = {
+// Updated from ParentRow to match the profiles table schema fields
+type ParentProfileRow = {
   id: string;
   full_name: string;
-  email: string;
+  email: string | null;
   phone_number: string | null;
 };
 
@@ -52,11 +53,11 @@ function mapTeacher(row: TeacherRow): SingleRecipient {
   };
 }
 
-function mapParent(row: ParentRow): SingleRecipient {
+function mapParent(row: ParentProfileRow): SingleRecipient {
   return {
     id: row.id,
     full_name: row.full_name,
-    email: row.email,
+    email: row.email ?? "", // Fallback empty string if email missing in profile row
     phone_number: row.phone_number,
   };
 }
@@ -90,11 +91,13 @@ export async function fetchCommunicationRecipients(): Promise<RecipientsPayload>
       .order("full_name", { ascending: true })
       .returns<TeacherRow[]>(),
 
+    // Swapped out "parents" for "profiles" matching the custom role property enum value
     supabase
-      .from("parents")
+      .from("profiles")
       .select("id, full_name, email, phone_number")
+      .eq("role", "parent")
       .order("full_name", { ascending: true })
-      .returns<ParentRow[]>(),
+      .returns<ParentProfileRow[]>(),
 
     supabase
       .from("students")

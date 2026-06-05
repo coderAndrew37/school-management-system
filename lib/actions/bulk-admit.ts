@@ -65,7 +65,23 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
 }> {
   const session = await getSession();
 
-  if (!session || !["admin", "superadmin"].includes(session.profile.base_role)) {
+  if (!session || !session.profile) {
+    return {
+      results: rows.map((r, i) => ({
+        index: i,
+        studentName: r.studentName || `Row ${i + 1}`,
+        success: false,
+        message: "Unauthorized",
+      })),
+      successCount: 0,
+      failCount: rows.length,
+    };
+  }
+
+  const { base_role, is_super_admin, is_dev } = session.profile;
+  const isPlatformAdmin = is_super_admin || is_dev;
+
+  if (base_role !== "admin" && !isPlatformAdmin) {
     return {
       results: rows.map((r, i) => ({
         index: i,
@@ -116,18 +132,19 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
       let isNewParent = false;
 
       if (row.parentMode === "existing" && row.existingParentId) {
-        // Verify the parent exists
+        // Verify the parent profile exists and is actually a parent
         const { data: existingParent } = await supabaseAdmin
-          .from("parents")
+          .from("profiles")
           .select("id")
           .eq("id", row.existingParentId)
+          .eq("base_role", "parent")
           .maybeSingle();
 
-        if (!existingParent) throw new Error("Selected parent no longer exists");
+        if (!existingParent) throw new Error("Selected parent profile no longer exists");
         parentId = existingParent.id;
         isExistingParent = true;
       } else {
-        // New parent flow — check for duplicates first
+        // New parent flow — check for duplicates in profiles table instead
         const email = row.parentEmail!.toLowerCase().trim();
         const phone = normalizeKenyanPhone(row.parentPhone!);
 
@@ -136,8 +153,9 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
         }
 
         const { data: existingByContact } = await supabaseAdmin
-          .from("parents")
+          .from("profiles")
           .select("id, full_name")
+          .eq("base_role", "parent")
           .or(`email.eq.${email},phone_number.eq.${phone}`)
           .maybeSingle();
 
@@ -160,50 +178,53 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
           parentId = authUser.user.id;
           isNewParent = true;
 
-          const { error: parentErr } = await supabaseAdmin.from("parents").insert({
+          // Insert into profiles table directly now that parents is dropped
+          const { error: profileErr } = await supabaseAdmin.from("profiles").insert({
             id: parentId,
             full_name: row.parentName!,
             email,
             phone_number: phone,
-            invite_accepted: false,
-            last_invite_sent: new Date().toISOString(),
+            base_role: "parent",
+            is_super_admin: false,
+            is_dev: false,
           });
 
-          if (parentErr) {
+          if (profileErr) {
             await supabaseAdmin.auth.admin.deleteUser(parentId).catch(() => {});
-            throw new Error(`Parent record failed: ${parentErr.message}`);
+            throw new Error(`Parent profile record creation failed: ${profileErr.message}`);
           }
         }
       }
 
       // 3. Create Student
-      const { data: student, error: studentErr } = await supabaseAdmin
-        .from("students")
-        .insert({
-          full_name: row.studentName,
-          date_of_birth: row.dateOfBirth,
-          gender: row.gender,
-          current_grade: row.currentGrade,
-          class_id: classRecord.id,
-          status: "active",
-        })
-        .select("id")
-        .single();
+// 3. Create Student
+const { data: student, error: studentErr } = await supabaseAdmin
+  .from("students")
+  .insert({
+    full_name: row.studentName,
+    date_of_birth: row.dateOfBirth,
+    gender: row.gender,
+    current_grade: row.currentGrade,
+    class_id: classRecord.id,
+    status: "active",
+  })
+  .select("id")
+  .single();
 
       if (studentErr || !student) throw new Error(`Student creation failed: ${studentErr?.message}`);
 
-      // 4. Link Student → Parent (check for duplicate link first)
+      // 4. Link Student → Parent profile (checking student_parents bridge)
       const { data: existingLink } = await supabaseAdmin
         .from("student_parents")
         .select("student_id")
         .eq("student_id", student.id)
-        .eq("parent_id", parentId)
+        .eq("parent_profile_id", parentId)
         .maybeSingle();
 
       if (!existingLink) {
         const { error: linkErr } = await supabaseAdmin.from("student_parents").insert({
           student_id: student.id,
-          parent_id: parentId,
+          parent_profile_id: parentId,
           relationship_type: row.relationshipType,
           is_primary_contact: true,
         });

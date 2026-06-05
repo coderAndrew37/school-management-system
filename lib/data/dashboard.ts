@@ -47,7 +47,7 @@ interface RawProfileRow {
 interface RawParentLink {
   is_primary_contact: boolean;
   relationship_type: string;
-  parent: RawProfileRow | null;
+  profiles: RawProfileRow | null;
 }
 
 interface RawStudentRow {
@@ -99,6 +99,7 @@ async function resolveSchoolId(
 
 function mapStudentRow(row: RawStudentRow): Student {
   const links = row.student_parents ?? [];
+  // Swapped .parent out for the compiled .profiles reference path
   const primary = links.find((l) => l.is_primary_contact) ?? links[0] ?? null;
 
   return {
@@ -114,20 +115,20 @@ function mapStudentRow(row: RawStudentRow): Student {
     photo_url:      row.photo_url,
     created_at:     row.created_at,
     status:         (row.status as Student["status"]) ?? "active",
-    parents: primary?.parent
+    parents: primary?.profiles
       ? {
-          id:           primary.parent.id,
-          full_name:    primary.parent.full_name,
-          phone_number: primary.parent.phone_number,
-          email:        primary.parent.email ?? "",
+          id:           primary.profiles.id,
+          full_name:    primary.profiles.full_name,
+          phone_number: primary.profiles.phone_number,
+          email:        primary.profiles.email ?? "",
           invite_accepted: true,
         }
       : null,
     all_parents: links.map((l) => ({
-      parent_id:          l.parent?.id          ?? "",
-      full_name:          l.parent?.full_name    ?? "",
-      phone_number:       l.parent?.phone_number ?? null,
-      email:              l.parent?.email        ?? "",
+      parent_id:          l.profiles?.id           ?? "",
+      full_name:          l.profiles?.full_name    ?? "",
+      phone_number:       l.profiles?.phone_number ?? null,
+      email:              l.profiles?.email        ?? "",
       relationship_type:  l.relationship_type,
       is_primary_contact: l.is_primary_contact,
       invite_accepted:    true,
@@ -136,10 +137,9 @@ function mapStudentRow(row: RawStudentRow): Student {
 }
 
 /**
- * `profiles!student_parents_parent_id_profiles_fkey` — bang syntax tells
- * PostgREST to traverse the FK from student_parents.parent_id → profiles.id.
- * The alias `parent:` makes the JSON key `parent` (singular object) rather
- * than the raw table name.
+ * Correct PostgREST query path:
+ * student_parents joins down to the junction table array.
+ * profiles handles the foreign key hook cleanly using explicit table referencing.
  */
 const STUDENT_SELECT = `
   id, readable_id, upi_number, full_name,
@@ -148,7 +148,7 @@ const STUDENT_SELECT = `
   student_parents (
     is_primary_contact,
     relationship_type,
-    parent:profiles!student_parents_parent_id_profiles_fkey (
+    profiles:parent_id (
       id, full_name, phone_number, email
     )
   )
@@ -163,10 +163,11 @@ export async function fetchStudents(limit?: number): Promise<Student[]> {
   const school_id = await resolveSchoolId(supabase);
 
   let query = supabase
-    .from("students")
-    .select(STUDENT_SELECT)
-    .eq("school_id", school_id)
-    .order("created_at", { ascending: false });
+  .from("students")
+  .select(STUDENT_SELECT)
+  .eq("school_id", school_id)
+  .eq("status", "active")           // ← add this
+  .order("created_at", { ascending: false });
 
   if (limit) query = query.limit(limit);
 
@@ -222,7 +223,12 @@ export async function fetchAllStudents(
   if (gender)                     query = query.eq("gender", gender);
   if (status && status !== "all") query = query.eq("status", status);
 
-  const { data, error } = await query;
+ const { data, error, count } = await query;
+console.log("[fetchAllStudents] error:", error);
+console.log("[fetchAllStudents] row count:", data?.length);
+console.log("[fetchAllStudents] first raw row:", JSON.stringify(data?.[0], null, 2));
+
+
 
   if (error) {
     console.error("[fetchAllStudents]", error.message);

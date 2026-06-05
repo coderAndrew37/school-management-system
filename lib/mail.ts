@@ -1,4 +1,6 @@
 import { Resend } from "resend";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { AdminRole, BaseRole } from "./types/auth";
 import type {
   AudienceSelection,
   SingleRecipient,
@@ -588,11 +590,23 @@ export async function broadcastEmail({
 }
 
 // ── Audience resolver ─────────────────────────────────────────────────────────
-
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { AdminRole, BaseRole } from "./types/auth";
+//
+// ARCHITECTURE NOTE — no `parents` table exists
+// ─────────────────────────────────────────────────────────────────────────────
+// Parent profiles live in the unified `profiles` table, identified by
+// role = 'parent'. The student↔parent link is tracked in `student_parents`
+// where `parent_profile_id` (not `parent_id`) references `profiles.id`.
+// ─────────────────────────────────────────────────────────────────────────────
 
 type RecipientRow = { id: string; full_name: string; email: string };
+
+// Raw shape for the grade_parents join:
+//   student_parents
+//     → profiles (via student_parents_parent_profile_id_profiles_fkey)
+//     ← students!inner (via student_parents_student_id_fkey)
+interface RawGradeParentRow {
+  profiles: RecipientRow | null;
+}
 
 export async function resolveAudienceRecipients(
   audience: AudienceSelection,
@@ -600,109 +614,147 @@ export async function resolveAudienceRecipients(
   const supabase = await createSupabaseServerClient();
 
   switch (audience.type) {
+    // ── Single known recipient — already resolved by the caller ──────────────
     case "single_teacher":
     case "single_parent": {
       if (audience.individual === null) return [];
       return [audience.individual];
     }
 
+    // ── All teachers ──────────────────────────────────────────────────────────
     case "all_teachers": {
       const { data, error } = await supabase
         .from("teachers")
-        .select("id, full_name, email,phone_number")
-        .returns<RecipientRow[]>();
-      if (error) {
-        console.error("resolveAudienceRecipients teachers error:", error);
-        return [];
-      }
-      return data ?? [];
-    }
-
-    case "all_parents": {
-      const { data, error } = await supabase
-        .from("parents")
         .select("id, full_name, email, phone_number")
         .returns<RecipientRow[]>();
+
       if (error) {
-        console.error("resolveAudienceRecipients parents error:", error);
+        console.error("resolveAudienceRecipients [all_teachers] error:", error);
         return [];
       }
       return data ?? [];
     }
 
+    // ── All parents ───────────────────────────────────────────────────────────
+    // Parents are profiles with role = 'parent'. There is no `parents` table.
+    case "all_parents": {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, email, phone_number")
+        .eq("role", "parent")
+        .returns<RecipientRow[]>();
+
+      if (error) {
+        console.error("resolveAudienceRecipients [all_parents] error:", error);
+        return [];
+      }
+      return data ?? [];
+    }
+
+    // ── Parents of students in a specific grade ───────────────────────────────
+    // Join path:
+    //   student_parents
+    //     → profiles!student_parents_parent_profile_id_profiles_fkey
+    //     ← students!inner (student_parents_student_id_fkey)
+    //
+    // We filter on students.current_grade via a separate subquery to avoid
+    // relying on PostgREST dot-notation filtering on joined tables (unreliable).
+    // Step 1: collect student IDs for the target grade.
+    // Step 2: fetch distinct parent profile rows linked to those students.
     case "grade_parents": {
       if (audience.grade === null) return [];
 
-      const { data, error } = await supabase
-        .from("student_parents")
-        .select(
-          `
-          parents ( id, full_name, email, phone_number ),
-          students!inner ( current_grade )
-        `,
-        )
-        .eq("students.current_grade", audience.grade)
-        .returns<
-          { parents: RecipientRow; students: { current_grade: string } }[]
-        >();
+      // Step 1 — student IDs for the requested grade
+      const { data: studentRows, error: studentErr } = await supabase
+        .from("students")
+        .select("id")
+        .eq("current_grade", audience.grade);
 
-      if (error) {
-        console.error("resolveAudienceRecipients grade_parents error:", error);
+      if (studentErr) {
+        console.error(
+          "resolveAudienceRecipients [grade_parents] students error:",
+          studentErr,
+        );
         return [];
       }
 
+      const studentIds = (studentRows ?? []).map((s) => s.id);
+      if (studentIds.length === 0) return [];
+
+      // Step 2 — parent profiles linked to those students via student_parents
+      const { data, error } = await supabase
+        .from("student_parents")
+        .select(
+          `profiles!student_parents_parent_profile_id_profiles_fkey (
+            id, full_name, email, phone_number
+          )`,
+        )
+        .in("student_id", studentIds)
+        .returns<RawGradeParentRow[]>();
+
+      if (error) {
+        console.error(
+          "resolveAudienceRecipients [grade_parents] join error:",
+          error,
+        );
+        return [];
+      }
+
+      // Deduplicate — a parent with multiple children in the same grade
+      // will appear once per student_parents row.
       const seen = new Set<string>();
       return (data ?? [])
-        .map((row) => row.parents)
-        .filter((p) => {
-          if (!p || seen.has(p.id)) return false;
+        .map((row) => row.profiles)
+        .filter((p): p is RecipientRow => {
+          if (!p?.id || !p.email || seen.has(p.id)) return false;
           seen.add(p.id);
           return true;
         });
     }
 
+    // ── All staff + all parents ───────────────────────────────────────────────
     case "all_staff_and_parents": {
       const [teachersRes, parentsRes] = await Promise.all([
         supabase
           .from("teachers")
           .select("id, full_name, email, phone_number")
           .returns<RecipientRow[]>(),
+        // Parents live in profiles, not a standalone table
         supabase
-          .from("parents")
+          .from("profiles")
           .select("id, full_name, email, phone_number")
+          .eq("role", "parent")
           .returns<RecipientRow[]>(),
       ]);
 
-      if (teachersRes.error)
+      if (teachersRes.error) {
         console.error(
-          "resolveAudienceRecipients teachers error:",
+          "resolveAudienceRecipients [all_staff_and_parents] teachers error:",
           teachersRes.error,
         );
-      if (parentsRes.error)
+      }
+      if (parentsRes.error) {
         console.error(
-          "resolveAudienceRecipients parents error:",
+          "resolveAudienceRecipients [all_staff_and_parents] parents error:",
           parentsRes.error,
         );
+      }
 
       return [...(teachersRes.data ?? []), ...(parentsRes.data ?? [])];
     }
   }
 }
 
-
 // ── New Staff Account Creation Email ─────────────────────────────────────────
 
 export interface NewStaffEmailParams {
   staffEmail: string;
   staffName: string;
-  staffRole: string;           // e.g. "Headteacher", "Deputy Headteacher", "Bursar", "DOS"
+  staffRole: string;
   setupLink: string;
-  baseRole: BaseRole;          // Optional: for internal reference
+  baseRole: BaseRole;
 }
 
-/**
- * Dedicated email for new staff created by Super Admin
- */
 export async function sendNewStaffWelcomeEmail({
   staffEmail,
   staffName,
@@ -710,13 +762,11 @@ export async function sendNewStaffWelcomeEmail({
   setupLink,
   baseRole,
 }: NewStaffEmailParams): Promise<{ success: boolean; error?: unknown }> {
-  const firstName = staffName.split(" ")[0] ?? staffName;
-
   const body = `
     <p style="margin:0 0 16px;">Dear <strong>${staffName}</strong>,</p>
 
     <p style="margin:0 0 16px;color:#4a5568;">
-      Congratulations! You have been added to the <strong>Kibali Academy</strong> 
+      Congratulations! You have been added to the <strong>Kibali Academy</strong>
       staff portal as <strong>${staffRole}</strong>.
     </p>
 
@@ -725,7 +775,7 @@ export async function sendNewStaffWelcomeEmail({
         Activate Your Staff Account
       </p>
       <p style="margin:0 0 4px;font-size:13px;color:#047857;line-height:1.6;">
-        Set your password to access your ${staffRole.toLowerCase()} dashboard 
+        Set your password to access your ${staffRole.toLowerCase()} dashboard
         and begin using the school management system.
       </p>
       <p style="margin:0 0 20px;font-size:12px;color:#6ee7b7;">
@@ -780,16 +830,13 @@ export async function sendNewStaffWelcomeEmail({
 export interface RoleAssignmentNotificationParams {
   recipientEmail: string;
   recipientName: string;
-  newRole: string;                    // Human readable role (e.g. "Headteacher", "Bursar")
+  newRole: string;
   baseRole: BaseRole;
   adminRole?: AdminRole | null;
   reason?: string;
   dashboardLink?: string;
 }
 
-/**
- * Notify staff when Super Admin assigns or updates their role
- */
 export async function sendRoleAssignmentNotification({
   recipientEmail,
   recipientName,
@@ -815,16 +862,20 @@ export async function sendRoleAssignmentNotification({
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         ${infoRow("New Role", newRole)}
         ${infoRow("Access Level", baseRole)}
-        ${adminRole ? infoRow("Title", adminRole.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())) : ""}
+        ${adminRole ? infoRow("Title", adminRole.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())) : ""}
       </table>
     </div>
 
-    ${reason ? `
+    ${
+      reason
+        ? `
     <div style="background:#fefce8;border:1px solid #fef08c;border-radius:10px;padding:16px 20px;margin:20px 0;">
       <p style="margin:0;font-size:13px;color:#854d0e;">
         <strong>Reason for update:</strong> ${reason}
       </p>
-    </div>` : ""}
+    </div>`
+        : ""
+    }
 
     <p style="margin:0 0 16px;color:#4a5568;">
       You may now access additional features and dashboards based on your updated role.
@@ -836,7 +887,7 @@ export async function sendRoleAssignmentNotification({
     </div>
 
     <p style="margin:0;font-size:13px;color:#a0aec0;">
-      If you have any questions about your new responsibilities, 
+      If you have any questions about your new responsibilities,
       please reach out to the school administration office.
     </p>
   `;
