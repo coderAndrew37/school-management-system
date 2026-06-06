@@ -218,13 +218,13 @@ const { data: student, error: studentErr } = await supabaseAdmin
         .from("student_parents")
         .select("student_id")
         .eq("student_id", student.id)
-        .eq("parent_profile_id", parentId)
+        .eq("parent_id", parentId)
         .maybeSingle();
 
       if (!existingLink) {
         const { error: linkErr } = await supabaseAdmin.from("student_parents").insert({
           student_id: student.id,
-          parent_profile_id: parentId,
+          parent_id: parentId,
           relationship_type: row.relationshipType,
           is_primary_contact: true,
         });

@@ -141,7 +141,7 @@ async function fetchParentContacts(
   const { data, error } = await supabaseAdmin
     .from("student_parents")
     .select(
-      "is_primary_contact, parents ( id, full_name, email, phone_number )",
+      "is_primary_contact, profiles!student_parents_parent_id_profiles_fkey ( id, full_name, email, phone_number )",
     )
     .eq("student_id", studentId);
 
@@ -152,25 +152,26 @@ async function fetchParentContacts(
 
   type RawJoinRow = {
     is_primary_contact: boolean;
-    parents: {
+    profiles: {
       id: string;
       full_name: string;
       email: string | null;
       phone_number: string | null;
     } | null;
   };
+
   return (data as unknown as RawJoinRow[])
     .filter(
       (
         row,
-      ): row is RawJoinRow & { parents: NonNullable<RawJoinRow["parents"]> } =>
-        row.parents !== null,
+      ): row is RawJoinRow & { profiles: NonNullable<RawJoinRow["profiles"]> } =>
+        row.profiles !== null,
     )
     .map((row) => ({
-      id: row.parents.id,
-      full_name: row.parents.full_name,
-      email: row.parents.email,
-      phone_number: row.parents.phone_number,
+      id: row.profiles.id,
+      full_name: row.profiles.full_name,
+      email: row.profiles.email,
+      phone_number: row.profiles.phone_number,
       is_primary_contact: row.is_primary_contact,
     }));
 }

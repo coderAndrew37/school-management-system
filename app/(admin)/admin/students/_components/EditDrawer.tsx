@@ -14,6 +14,7 @@ import {
 import { fmt } from "@/app/_components/parents/parent-utils";
 import { calcAge } from "@/lib/helpers/parent";
 import { getStudentPhotoUrl } from "@/lib/utils/photo-utils";
+import Image from "next/image"
 
 import {
   uploadStudentPhotoAction,
@@ -301,10 +302,11 @@ export default function EditDrawer({
                     className="relative w-20 h-24 rounded-xl border-2 border-dashed border-white/15 bg-white/[0.04] flex items-center justify-center flex-shrink-0 cursor-pointer hover:border-amber-400/40 hover:bg-white/[0.07] transition-all overflow-hidden group"
                   >
                     {photoPreview ? (
-                      <img
+                      <Image
                         src={photoPreview}
                         alt="Preview"
                         className="w-full h-full object-cover"
+                        fill
                       />
                     ) : (
                       <Camera className="h-6 w-6 text-white/20 group-hover:text-white/40 transition-colors" />
@@ -470,7 +472,7 @@ export default function EditDrawer({
                   <div className="space-y-2">
                     <p className="text-xs text-rose-400/80">
                       Permanently deletes <strong>{student.full_name}</strong>{" "}
-                      and all linked data. Consider using "Mark as Transferred"
+                      and all linked data. Consider using &quot;Mark as Transferred&quot;
                       in the Status tab instead.
                     </p>
                     <div className="flex gap-2">
@@ -561,7 +563,7 @@ export default function EditDrawer({
                     No guardians linked yet
                   </p>
                   <p className="text-white/20 text-xs mt-1">
-                    Use "Add Guardian" to link a parent account
+                    Use&quot;Add Guardian&quot; to link a parent account
                   </p>
                 </div>
               ) : (
@@ -653,7 +655,7 @@ export default function EditDrawer({
                 Student Status
               </p>
               <p className="text-xs text-white/40 leading-relaxed">
-                Change the student's enrolment status. This preserves all
+                Change the student&apos;s enrolment status. This preserves all
                 historical records.
               </p>
 

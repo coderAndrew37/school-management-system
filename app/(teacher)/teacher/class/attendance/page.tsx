@@ -27,7 +27,7 @@ interface AttendanceRow {
 
 interface RawParentJoin {
   student_id: string;
-  parents: {
+  profiles: {
     id: string;
     full_name: string;
     email: string | null;
@@ -154,7 +154,7 @@ export default async function ClassAttendancePage({ searchParams }: Props) {
 
     supabaseAdmin
       .from("student_parents")
-      .select("student_id, parents (id, full_name, email, phone_number)")
+      .select("student_id, profiles!student_parents_parent_id_profiles_fkey (id, full_name, email, phone_number)")
       .in("student_id", studentIds),
   ]);
 
@@ -204,12 +204,12 @@ export default async function ClassAttendancePage({ searchParams }: Props) {
       total,
     }));
 
-  // 9. Parent Mapping with Null-to-String Transformation
+  // 9. Parent Mapping with Null-to-String Transformation (Updated for Profiles Join)
   const parentsByStudent: Record<string, ParentContact[]> = {};
   const rawParentData = (parentsRes.data ?? []) as unknown as RawParentJoin[];
   
   rawParentData.forEach((r) => {
-    if (r.parents) {
+    if (r.profiles) {
       if (!parentsByStudent[r.student_id]) parentsByStudent[r.student_id] = [];
       
       const sanitize = (p: { id: string; full_name: string; email: string | null; phone_number: string | null }): ParentContact => ({
@@ -219,10 +219,10 @@ export default async function ClassAttendancePage({ searchParams }: Props) {
         phone_number: p.phone_number ?? "",
       });
 
-      if (Array.isArray(r.parents)) {
-        parentsByStudent[r.student_id].push(...r.parents.map(sanitize));
+      if (Array.isArray(r.profiles)) {
+        parentsByStudent[r.student_id].push(...r.profiles.map(sanitize));
       } else {
-        parentsByStudent[r.student_id].push(sanitize(r.parents));
+        parentsByStudent[r.student_id].push(sanitize(r.profiles));
       }
     }
   });

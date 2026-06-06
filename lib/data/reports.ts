@@ -19,7 +19,7 @@ interface RawStudentRow {
 interface RawParentLink {
   student_id: string;
   is_primary_contact: boolean;
-  parents: {
+  profiles: {
     full_name: string;
     phone_number: string | null;
   } | null;
@@ -109,7 +109,7 @@ export async function fetchStudentsForReports(
   const [parentRes, assessRes, cardRes, attRes] = await Promise.all([
     supabaseAdmin
       .from("student_parents")
-      .select("student_id, is_primary_contact, parents ( full_name, phone_number )")
+      .select("student_id, is_primary_contact, profiles!student_parents_parent_id_profiles_fkey ( full_name, phone_number )")
       .in("student_id", studentIds)
       .returns<RawParentLink[]>(),
 
@@ -140,12 +140,12 @@ export async function fetchStudentsForReports(
 
   // ── 4. Map and Aggregate Data ────────────────────────────────────────────────
 
-  // Parents map: studentId → primary parent
+  // Parents map: studentId → primary parent profiles
   const parentMap = new Map<string, { full_name: string; phone_number: string | null }>();
   for (const link of (parentRes.data ?? [])) {
     const existing = parentMap.get(link.student_id);
     if (!existing || link.is_primary_contact) {
-      if (link.parents) parentMap.set(link.student_id, link.parents);
+      if (link.profiles) parentMap.set(link.student_id, link.profiles);
     }
   }
 

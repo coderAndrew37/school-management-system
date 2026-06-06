@@ -23,3 +23,51 @@ ADD CONSTRAINT uq_class_school_grade_stream_year UNIQUE (school_id, grade, strea
 -- 6. Rebuild your index to include school lookups
 DROP INDEX IF EXISTS idx_classes_lookup;
 CREATE INDEX idx_classes_lookup ON public.classes USING btree (school_id, grade, stream, academic_year);
+
+-- 1. Add school_id to notifications (multitenancy)
+alter table public.notifications
+  add column school_id uuid null
+    references schools (id) on delete cascade;
+
+-- Backfill from students (since notifications link to students)
+update public.notifications n
+set school_id = s.school_id
+from public.students s
+where n.student_id = s.id
+  and n.school_id is null;
+
+-- Once backfilled, make it not-null if all rows resolved cleanly
+-- (check first: select count(*) from notifications where school_id is null;)
+-- alter table public.notifications alter column school_id set not null;
+
+create index if not exists idx_notifications_school
+  on public.notifications using btree (school_id);
+
+create index if not exists idx_notifications_student
+  on public.notifications using btree (student_id);
+
+-- 2. Add parent_id to notifications so we can join to profiles
+--    This is who the notification is addressed to
+alter table public.notifications
+  add column parent_id uuid null
+    references profiles (id) on delete cascade;
+
+create index if not exists idx_notifications_parent
+  on public.notifications using btree (parent_id);
+
+-- Backfill parent_id from student_parents (primary contact)
+update public.notifications n
+set parent_id = sp.parent_id
+from public.student_parents sp
+where sp.student_id = n.student_id
+  and sp.is_primary_contact = true
+  and n.parent_id is null;
+
+  CREATE OR REPLACE FUNCTION public.current_parent_id()
+  RETURNS uuid
+  LANGUAGE sql
+  STABLE
+  SECURITY DEFINER
+AS $function$
+  SELECT id FROM public.profiles WHERE id = auth.uid() AND role = 'parent';
+$function$;

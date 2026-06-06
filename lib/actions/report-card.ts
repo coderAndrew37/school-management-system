@@ -232,7 +232,7 @@ export async function publishReportCardAction(
     .single()
     .then(({ data: student }) => {
       if (!student) return;
-      import("@/lib/notifications/parent-notify").then(
+      import("@/lib/actions/parent-notify").then(
         ({ notifyReportReady }) =>
           notifyReportReady({
             studentId,

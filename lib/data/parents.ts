@@ -139,7 +139,7 @@ export async function fetchAllParents(): Promise<Parent[]> {
   const { data, error } = await supabase
     .from("profiles")
     .select(PARENT_SELECT)
-    .eq("role", "parent")
+    .eq("base_role", "parent") // Updated to track the unified base_role system
     .order("full_name", { ascending: true });
 
   if (error) {
@@ -157,7 +157,7 @@ export async function fetchParentById(parentId: string): Promise<Parent | null> 
     .from("profiles")
     .select(PARENT_SELECT)
     .eq("id", parentId)
-    .eq("role", "parent")
+    .eq("base_role", "parent")
     .maybeSingle();
 
   if (error) {

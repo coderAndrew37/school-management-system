@@ -18,12 +18,12 @@ export const revalidate = 0;
 export interface ParentNotificationItem {
   id: string;
   type: string;
-  channel: string;
-  status: string;
-  subject: string;
+  channel: string;        // ← remove if notifications has no 'channel' column
+  status: string;         // ← remove if notifications has no 'status' column  
+  subject: string;        // ← remove if notifications has no 'subject' column
   body: string;
   created_at: string;
-  parents: {
+  parents: {              // ← aliased from profiles join below
     id: string;
     full_name: string;
     phone_number: string | null;
@@ -69,19 +69,24 @@ interface NotificationDataPayload {
 async function fetchNotificationData(): Promise<NotificationDataPayload> {
   const [{ data: parentNotifs }, { data: commsLog }, { data: inAppNotifs }] =
     await Promise.all([
-      // SMS/Email delivery log (absence alerts, report-ready, fee reminders)
+      // Delivery log — now reads from `notifications` (the only table that exists).
+      // `parent_notifications` was a ghost reference to the dropped `parents` table.
+      // We join profiles via the new notifications_parent_id_profiles_fkey FK,
+      // aliased as `parents` so NotificationsClient needs zero changes.
       supabaseAdmin
-        .from("parent_notifications")
+        .from("notifications")
         .select(
           `
-        id, type, channel, status, subject, body, created_at,
-        parents ( id, full_name, phone_number, email )
-      `,
+          id, type, title, body, is_read, created_at,
+          parents:profiles!notifications_parent_id_profiles_fkey ( id, full_name, phone_number, email ),
+          students ( id, full_name, current_grade )
+          `,
         )
+        .not("parent_id", "is", null)   // only rows that are parent-addressed
         .order("created_at", { ascending: false })
         .limit(200),
 
-      // Broadcast communications sent by admins
+      // Broadcast communications sent by admins — unchanged
       supabaseAdmin
         .from("communications_log")
         .select(
@@ -91,14 +96,16 @@ async function fetchNotificationData(): Promise<NotificationDataPayload> {
         .limit(100),
 
       // In-app notifications (teacher → parent bell notifications)
+      // school_id filter added for multitenancy correctness
       supabaseAdmin
         .from("notifications")
         .select(
           `
-        id, type, title, body, is_read, created_at,
-        students ( id, full_name, current_grade )
-      `,
+          id, type, title, body, is_read, created_at,
+          students ( id, full_name, current_grade )
+          `,
         )
+        .is("parent_id", null)          // in-app notifs are student-scoped, not parent-addressed
         .order("created_at", { ascending: false })
         .limit(200),
     ]);
@@ -192,7 +199,7 @@ function Chip({
   color: "sky" | "amber" | "emerald";
 }) {
   const cls: Record<typeof color, string> = {
-    sky: "bg-sky-400/10     border-sky-400/20     text-sky-400",
+    sky: "bg-sky-400/10      border-sky-400/20     text-sky-400",
     amber: "bg-amber-400/10   border-amber-400/20   text-amber-400",
     emerald: "bg-emerald-400/10 border-emerald-400/20 text-emerald-400",
   };

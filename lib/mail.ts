@@ -595,14 +595,14 @@ export async function broadcastEmail({
 // ─────────────────────────────────────────────────────────────────────────────
 // Parent profiles live in the unified `profiles` table, identified by
 // role = 'parent'. The student↔parent link is tracked in `student_parents`
-// where `parent_profile_id` (not `parent_id`) references `profiles.id`.
+// where `parent_id` (not `parent_id`) references `profiles.id`.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type RecipientRow = { id: string; full_name: string; email: string };
 
 // Raw shape for the grade_parents join:
 //   student_parents
-//     → profiles (via student_parents_parent_profile_id_profiles_fkey)
+//     → profiles (via student_parents_parent_id_profiles_fkey)
 //     ← students!inner (via student_parents_student_id_fkey)
 interface RawGradeParentRow {
   profiles: RecipientRow | null;
@@ -654,7 +654,7 @@ export async function resolveAudienceRecipients(
     // ── Parents of students in a specific grade ───────────────────────────────
     // Join path:
     //   student_parents
-    //     → profiles!student_parents_parent_profile_id_profiles_fkey
+    //     → profiles!student_parents_parent_id_profiles_fkey
     //     ← students!inner (student_parents_student_id_fkey)
     //
     // We filter on students.current_grade via a separate subquery to avoid
@@ -685,7 +685,7 @@ export async function resolveAudienceRecipients(
       const { data, error } = await supabase
         .from("student_parents")
         .select(
-          `profiles!student_parents_parent_profile_id_profiles_fkey (
+          `profiles!student_parents_parent_id_profiles_fkey (
             id, full_name, email, phone_number
           )`,
         )

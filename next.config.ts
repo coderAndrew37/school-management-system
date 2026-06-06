@@ -26,12 +26,12 @@ const nextConfig: NextConfig = {
   // Recommended for Supabase/Auth heavy apps to prevent middleware redirect loops
   skipTrailingSlashRedirect: true,
 
-  // Clean console logs for server-side fetches (great for debugging FYP actions)
-  logging: {
-    fetches: {
-      fullUrl: true,
-    },
-  },
+  // // Clean console logs for server-side fetches (great for debugging FYP actions)
+  // logging: {
+  //   fetches: {
+  //     fullUrl: true,
+  //   },
+  // },
 
   // ── Role-root redirects ───────────────────────────────────────────────────
   async redirects() {

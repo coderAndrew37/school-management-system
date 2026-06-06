@@ -21,7 +21,7 @@ interface ParentRecord {
 
 interface StudentParentLink {
   is_primary_contact: boolean;
-  parents: ParentRecord | null;
+  profiles: ParentRecord | null;
 }
 
 interface RawStudentJoined {
@@ -29,7 +29,7 @@ interface RawStudentJoined {
   full_name: string;
   readable_id: string | null;
   upi_number: string | null;
-  gender: "Female" | "Male" | string | null; // Allow loose strings from DB for checking
+  gender: "Female" | "Male" | string | null; 
   date_of_birth: string | null;
   current_grade: string;
   student_parents: StudentParentLink[] | StudentParentLink | null;
@@ -89,17 +89,17 @@ export default async function ClassStudentsPage({ searchParams }: Props) {
 
   // ── Students ──────────────────────────────────────────────────────────────
   const { data: rawStudents } = await supabaseAdmin
-    .from("students")
-    .select(
-      `
+  .from("students")
+  .select(
+    `
       id, full_name, readable_id, upi_number,
       gender, date_of_birth, current_grade,
       student_parents (
         is_primary_contact,
-        parents ( full_name, phone_number, email )
+        profiles!student_parents_parent_id_profiles_fkey ( full_name, phone_number, email )
       )
     `,
-    )
+  )
     .eq("current_grade", activeGrade)
     .eq("status", "active")
     .order("full_name");
@@ -159,7 +159,7 @@ export default async function ClassStudentsPage({ searchParams }: Props) {
 
     const primary =
       links.find((l) => l.is_primary_contact) ?? links[0] ?? null;
-    const parent = primary?.parents ?? null;
+    const parent = primary?.profiles ?? null;
 
     // Type guard assertion matching the exact 'StudentWithStats' literal type requirements
     const studentGender =
