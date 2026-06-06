@@ -38,10 +38,10 @@ import {
 } from "./AdmissionFormUtils";
 
 const RELATIONSHIP_TYPES = [
-  { value: "mother", label: "Mother" },
-  { value: "father", label: "Father" },
+  { value: "mother",   label: "Mother"   },
+  { value: "father",   label: "Father"   },
   { value: "guardian", label: "Guardian" },
-  { value: "other", label: "Other" },
+  { value: "other",    label: "Other"    },
 ] as const;
 
 interface AdmissionFormProps {
@@ -51,7 +51,7 @@ interface AdmissionFormProps {
 export default function AdmissionForm({ availableClasses }: AdmissionFormProps) {
   const [isPending, startTransition] = useTransition();
   const [selectedParent, setSelectedParent] = useState<ParentSearchResult | null>(null);
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoFile, setPhotoFile]       = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [photoUploading, setPhotoUploading] = useState(false);
 
@@ -64,35 +64,33 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
     reset,
     setValue,
     watch,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm<AdmissionFormValues>({
     resolver: zodResolver(admissionSchema),
     defaultValues: {
-      studentName: "",
-      dateOfBirth: "",
-      gender: "Male",
-      classId: "",
+      studentName:      "",
+      dateOfBirth:      "",
+      gender:           "Male",
+      classId:          "",
+      upiNumber:        "",
       relationshipType: "guardian",
       existingParentId: null,
-      parentName: "",
-      parentEmail: "",
-      parentPhone: "",
+      parentName:       "",
+      parentEmail:      "",
+      parentPhone:      "",
     },
     mode: "onBlur",
   });
 
-  const selectedClassId = watch("classId");
+  const selectedClassId  = watch("classId");
   const existingParentId = watch("existingParentId");
-
-  const isNewParent = useCallback(() => !existingParentId, [existingParentId])();
+  const isNewParent      = useCallback(() => !existingParentId, [existingParentId])();
 
   function handleParentSelect(parent: ParentSearchResult | null) {
     setSelectedParent(parent);
     setValue("existingParentId", parent?.id || null, { shouldValidate: true });
-
-    // Clear new parent fields when selecting existing parent
     if (parent) {
-      setValue("parentName", "");
+      setValue("parentName",  "");
       setValue("parentEmail", "");
       setValue("parentPhone", "");
     }
@@ -101,12 +99,10 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-
     if (file.size > 2 * 1024 * 1024) {
       toast.error("Photo too large", { description: "Maximum size is 2 MB." });
       return;
     }
-
     setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
   }
@@ -121,16 +117,21 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
     startTransition(async () => {
       const fd = new FormData();
 
-      fd.append("studentName", values.studentName.trim());
-      fd.append("dateOfBirth", values.dateOfBirth);
-      fd.append("gender", values.gender);
-      fd.append("classId", values.classId);
+      fd.append("studentName",      values.studentName.trim());
+      fd.append("dateOfBirth",      values.dateOfBirth);
+      fd.append("gender",           values.gender);
+      fd.append("classId",          values.classId);
       fd.append("relationshipType", values.relationshipType);
+
+      // UPI is optional — only append when the user filled it in
+      if (values.upiNumber?.trim()) {
+        fd.append("upiNumber", values.upiNumber.trim());
+      }
 
       if (values.existingParentId) {
         fd.append("existingParentId", values.existingParentId);
       } else {
-        fd.append("parentName", values.parentName?.trim() || "");
+        fd.append("parentName",  values.parentName?.trim()  || "");
         fd.append("parentEmail", values.parentEmail?.trim() || "");
         fd.append("parentPhone", values.parentPhone?.trim() || "");
       }
@@ -144,15 +145,13 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
         return;
       }
 
-      // Upload photo if provided
+      // Photo upload — non-blocking, shows warning on failure
       if (photoFile && result.studentId) {
         setPhotoUploading(true);
         const photoFd = new FormData();
         photoFd.set("photo", photoFile);
-
         const photoResult = await uploadStudentPhotoAction(result.studentId, photoFd);
         setPhotoUploading(false);
-
         if (!photoResult.success) {
           toast.warning("Student admitted but photo upload failed", {
             description: photoResult.message,
@@ -166,7 +165,6 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
           : `New parent account created. Invite sent to ${values.parentEmail}.`,
       });
 
-      // Reset form
       reset();
       setSelectedParent(null);
       setPhotoFile(null);
@@ -176,22 +174,26 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
   };
 
   const inputBase =
-    "w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/30 outline-none transition-all focus:border-amber-400/60 focus:bg-white/10 focus:ring-2 focus:ring-amber-400/20 disabled:opacity-50";
+    "w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/30 outline-none transition-all focus:border-amber-400/60 focus:bg-white/10 focus:ring-2 focus:ring-amber-400/20 disabled:opacity-50 [&>option]:bg-[#0c0f1a] [&>option]:text-white";
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] flex items-center justify-center p-4 font-[family-name:var(--font-body)]">
+      {/* Background glows */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full bg-amber-500/5 blur-[120px]" />
         <div className="absolute bottom-0 right-0 w-80 h-80 rounded-full bg-blue-500/5 blur-[100px]" />
       </div>
 
       <div className="relative w-full max-w-lg">
+        {/* Page heading */}
         <div className="mb-6 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-400/10 border border-amber-400/20">
             <GraduationCap className="h-5 w-5 text-amber-400" />
           </div>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-amber-400/70">Kibali Academy • Admin</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-amber-400/70">
+              Kibali Academy • Admin
+            </p>
             <h1 className="text-2xl font-bold tracking-tight text-white">Admit New Student</h1>
           </div>
         </div>
@@ -200,8 +202,11 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
           <div className="h-px w-full bg-gradient-to-r from-transparent via-amber-400/50 to-transparent" />
 
           <form onSubmit={handleSubmit(onSubmit)} noValidate className="p-8 space-y-8">
-            {/* Student Information */}
+
+            {/* ── Student Information ─────────────────────────────────────── */}
             <div className="space-y-6">
+
+              {/* Full name */}
               <div>
                 <Label htmlFor="studentName" icon={<UserRoundPlus className="h-4 w-4" />}>
                   Student Full Name
@@ -217,6 +222,7 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
                 <FieldError message={errors.studentName?.message} />
               </div>
 
+              {/* DOB + Gender */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="dateOfBirth" icon={<CalendarDays className="h-4 w-4" />}>
@@ -236,7 +242,12 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
                   <Label htmlFor="gender" icon={<Users className="h-4 w-4" />}>
                     Gender
                   </Label>
-                  <select id="gender" className={`${inputBase} cursor-pointer`} {...register("gender")} disabled={isPending}>
+                  <select
+                    id="gender"
+                    className={`${inputBase} cursor-pointer bg-[#0c0f1a]`}
+                    {...register("gender")}
+                    disabled={isPending}
+                  >
                     <option value="Male">Male</option>
                     <option value="Female">Female</option>
                   </select>
@@ -244,6 +255,26 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
                 </div>
               </div>
 
+              {/* UPI Number — optional */}
+              <div>
+                <Label htmlFor="upiNumber" icon={<User className="h-4 w-4" />}>
+                  UPI Number
+                  <span className="ml-1.5 text-[10px] font-normal normal-case text-white/30">
+                    optional — can be added later
+                  </span>
+                </Label>
+                <input
+                  id="upiNumber"
+                  type="text"
+                  placeholder="e.g. 1234567890"
+                  className={inputBase}
+                  {...register("upiNumber")}
+                  disabled={isPending}
+                />
+                <FieldError message={errors.upiNumber?.message} />
+              </div>
+
+              {/* Class */}
               <div>
                 <Label htmlFor="classId" icon={<GraduationCap className="h-4 w-4" />}>
                   Assigned Class
@@ -260,7 +291,7 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
 
             <Divider label="Passport Photo (Optional)" />
 
-            {/* Photo Upload */}
+            {/* ── Photo Upload ────────────────────────────────────────────── */}
             <div className="flex gap-5">
               <div
                 onClick={() => !isPending && fileInputRef.current?.click()}
@@ -274,7 +305,6 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
                     <span className="text-xs font-medium">Upload Photo</span>
                   </div>
                 )}
-
                 {photoUploading && (
                   <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
                     <Loader2 className="h-6 w-6 animate-spin text-amber-400" />
@@ -284,7 +314,7 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
 
               <div className="flex-1 text-sm">
                 <input
-                aria-label="Student passport photo"
+                  aria-label="Student passport photo"
                   ref={fileInputRef}
                   type="file"
                   accept="image/*"
@@ -292,7 +322,6 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
                   onChange={handlePhotoChange}
                   disabled={isPending}
                 />
-
                 {photoFile ? (
                   <div>
                     <p className="font-medium text-white/80">{photoFile.name}</p>
@@ -307,7 +336,7 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
                 ) : (
                   <p className="text-white/40 text-sm leading-relaxed">
                     Recommended: Clear face photo.<br />
-                    JPEG or PNG • Max 2MB
+                    JPEG or PNG • Max 2 MB
                   </p>
                 )}
               </div>
@@ -315,8 +344,10 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
 
             <Divider label="Parent / Guardian Information" />
 
-            {/* Parent Section */}
+            {/* ── Parent Section ──────────────────────────────────────────── */}
             <div className="space-y-6">
+
+              {/* Relationship */}
               <div>
                 <Label htmlFor="relationshipType" icon={<Users className="h-4 w-4" />}>
                   Relationship to Student
@@ -324,7 +355,7 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
                 <div className="relative">
                   <select
                     id="relationshipType"
-                    className={`${inputBase} appearance-none pr-10`}
+                    className={`${inputBase} appearance-none pr-10 bg-[#0c0f1a]`}
                     {...register("relationshipType")}
                     disabled={isPending}
                   >
@@ -338,19 +369,28 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
                 </div>
               </div>
 
+              {/* Existing parent search */}
               <div>
                 <Label htmlFor="parentSearch" icon={<Search className="h-4 w-4" />}>
                   Search Existing Parent
                 </Label>
-                <ParentSearchBox onSelect={handleParentSelect} selected={selectedParent} disabled={isPending} />
+                <ParentSearchBox
+                  onSelect={handleParentSelect}
+                  selected={selectedParent}
+                  disabled={isPending}
+                />
               </div>
 
+              {/* New parent fields — shown only when no existing parent selected */}
               {isNewParent && (
                 <div className="space-y-6 pt-2 border-t border-white/10">
                   <div className="bg-amber-400/10 border border-amber-400/20 rounded-xl p-4">
-                    <p className="text-amber-400 text-sm">New parent account will be created and invited.</p>
+                    <p className="text-amber-400 text-sm">
+                      New parent account will be created and an invite email sent.
+                    </p>
                   </div>
 
+                  {/* Parent name */}
                   <div>
                     <Label htmlFor="parentName" icon={<User className="h-4 w-4" />}>
                       Parent Full Name
@@ -366,6 +406,7 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
                     <FieldError message={errors.parentName?.message} />
                   </div>
 
+                  {/* Email + Phone */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="parentEmail" icon={<Mail className="h-4 w-4" />}>
@@ -404,6 +445,7 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
               )}
             </div>
 
+            {/* ── Submit ──────────────────────────────────────────────────── */}
             <button
               type="submit"
               disabled={isPending}
@@ -412,12 +454,14 @@ export default function AdmissionForm({ availableClasses }: AdmissionFormProps) 
               {isPending ? (
                 <>
                   <Loader2 className="h-5 w-5 animate-spin" />
-                  Processing Admission...
+                  Processing Admission…
                 </>
               ) : (
                 <>
                   <UserRoundPlus className="h-5 w-5" />
-                  {selectedParent ? `Add Student to ${selectedParent.full_name.split(" ")[0]}` : "Admit Student & Send Invite"}
+                  {selectedParent
+                    ? `Add Student to ${selectedParent.full_name.split(" ")[0]}`
+                    : "Admit Student & Send Invite"}
                 </>
               )}
             </button>

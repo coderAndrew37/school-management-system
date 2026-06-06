@@ -224,11 +224,11 @@ export async function fetchAllStudents(
   if (status && status !== "all") query = query.eq("status", status);
 
  const { data, error, count } = await query;
-console.log("[fetchAllStudents] error:", error);
-console.log("[fetchAllStudents] row count:", data?.length);
-console.log("[fetchAllStudents] first raw row:", JSON.stringify(data?.[0], null, 2));
-console.log("[fetchStudents] SELECT string:", STUDENT_SELECT);
-console.log("[fetchStudents] school_id:", school_id);
+// console.log("[fetchAllStudents] error:", error);
+// console.log("[fetchAllStudents] row count:", data?.length);
+// console.log("[fetchAllStudents] first raw row:", JSON.stringify(data?.[0], null, 2));
+// console.log("[fetchStudents] SELECT string:", STUDENT_SELECT);
+// console.log("[fetchStudents] school_id:", school_id);
 
 
 

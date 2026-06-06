@@ -15,9 +15,13 @@ const studentFields = {
 
   // Matches the component's 'classId' and the database FK
   classId: z.string().uuid("Invalid class selection"),
+upiNumber: z.string().trim().optional(),
+
 
   relationshipType: z
     .enum(["mother", "father", "guardian", "other"]),
+
+
 };
 
 /**

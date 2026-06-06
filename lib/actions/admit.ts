@@ -90,18 +90,20 @@ export async function searchParentsAction(
 export async function admitStudentAction(
   formData: FormData,
 ): Promise<AdmissionActionResult> {
-  const existingParentId = (formData.get("existingParentId") as string | null) || null;
+  const existingParentId =
+    (formData.get("existingParentId") as string | null) || null;
 
   const raw = {
-    studentName: formData.get("studentName"),
-    dateOfBirth: formData.get("dateOfBirth"),
-    gender: formData.get("gender"),
-    classId: formData.get("classId"),
+    studentName:      formData.get("studentName"),
+    dateOfBirth:      formData.get("dateOfBirth"),
+    gender:           formData.get("gender"),
+    classId:          formData.get("classId"),
+    upiNumber:        (formData.get("upiNumber") as string) || undefined,
     relationshipType: formData.get("relationshipType") ?? "guardian",
     existingParentId,
-    parentName: (formData.get("parentName") as string) || undefined,
-    parentEmail: (formData.get("parentEmail") as string) || undefined,
-    parentPhone: (formData.get("parentPhone") as string) || undefined,
+    parentName:       (formData.get("parentName")  as string) || undefined,
+    parentEmail:      (formData.get("parentEmail") as string) || undefined,
+    parentPhone:      (formData.get("parentPhone") as string) || undefined,
   };
 
   const parsed = admissionSchema.safeParse(raw);
@@ -114,171 +116,226 @@ export async function admitStudentAction(
 
   const d = parsed.data;
 
+  // Shared rollback helper — PostgREST builders are NOT thenables until awaited,
+  // so .catch() doesn't exist on the builder itself. We wrap in try/catch instead.
+  async function rollbackParent(pid: string): Promise<void> {
+    try {
+      await supabaseAdmin.auth.admin.deleteUser(pid);
+    } catch (e) {
+      console.error("[rollbackParent] auth.deleteUser failed:", e);
+    }
+    try {
+      await supabaseAdmin.from("profiles").delete().eq("id", pid);
+    } catch (e) {
+      console.error("[rollbackParent] profiles.delete failed:", e);
+    }
+  }
+
   try {
-// ── 1. Resolve Class & School Association ──
+    // ── 1. Resolve class & school ─────────────────────────────────────────────
+    // MUST happen before the parent branch so schoolId is available in both paths
     const { data: classRecord, error: classError } = await supabaseAdmin
       .from("classes")
-      .select("id, grade, school_id") // Now this column safely exists!
+      .select("id, grade, school_id")
       .eq("id", d.classId)
       .single();
 
     if (classError || !classRecord) {
       return {
         success: false,
-        message: "The selected class record was not found. Please ensure classes are initialized.",
+        message: "The selected class was not found. Please ensure classes are initialised.",
       };
     }
 
-    // Capture the school directly from the class!
     const schoolId = classRecord.school_id;
+
     let parentId: string;
     let isNewParent = false;
 
-    // ── 2. Resolve / Create Parent Profile ──
+    // ── 2. Resolve / create parent ────────────────────────────────────────────
     if (existingParentId) {
+      // Verify the profile exists and is actually a parent before proceeding
+      const { data: existingProfile, error: profileCheckErr } =
+        await supabaseAdmin
+          .from("profiles")
+          .select("id")
+          .eq("id", existingParentId)
+          .eq("role", "parent")
+          .maybeSingle();
+
+      if (profileCheckErr || !existingProfile) {
+        return {
+          success: false,
+          message: "The selected parent account could not be found.",
+        };
+      }
+
       parentId = existingParentId;
+
     } else {
+      // ── New parent flow ───────────────────────────────────────────────────
       const email = d.parentEmail!.toLowerCase().trim();
       const phone = normalizeKenyanPhone(d.parentPhone!);
 
-      // Check both profiles table and auth users
-      const { data: existingParent } = await supabaseAdmin
+      // 2a. Check profiles table for duplicate email or phone
+      const { data: existingProfile } = await supabaseAdmin
         .from("profiles")
         .select("id")
         .or(`email.eq.${email},phone_number.eq.${phone}`)
         .maybeSingle();
 
-      if (existingParent) {
+      if (existingProfile) {
         return {
           success: false,
-          message: "A user profile with this email or phone already exists.",
+          message:
+            "A profile with this email or phone already exists. Search for them as an existing parent.",
         };
       }
 
-      // Check if auth user already exists
-      const { data: existingAuth } = await supabaseAdmin.auth.admin.listUsers();
+      // 2b. Check auth.users for duplicate email.
+      // Note: some GoTrue admin clients/types don't expose a getUserByEmail
+      // helper. We'll rely on handling duplicate-email errors from the
+      // createUser call below instead of doing a separate lookup.
 
-      if (existingAuth?.users && existingAuth.users.some(user => user.email === email)) {
-        return {
-          success: false,
-          message: "A user with this email already exists in the system. Please use a different email.",
-        };
+      // 2c. Create auth user
+      const { data: authUser, error: authError } =
+        await supabaseAdmin.auth.admin.createUser({
+          email,
+          phone,
+          email_confirm:  true,
+          phone_confirm:  true,
+          user_metadata:  { full_name: d.parentName, base_role: "parent" },
+        });
+
+      if (authError) {
+        // If the email already exists in auth, surface a friendly message.
+        if (authError.message && authError.message.toLowerCase().includes("already")) {
+          return {
+            success: false,
+            message:
+              "An auth account with this email already exists. Search for them as an existing parent.",
+          };
+        }
+        throw new Error(`Auth creation failed: ${authError.message}`);
       }
 
-      // Create Auth User with structural base_role metadata mapping
-      const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
-        email,
-        phone,
-        email_confirm: true,
-        phone_confirm: true,
-        user_metadata: { full_name: d.parentName, base_role: "parent" },
-      });
-
-      if (authError) throw new Error(`Auth creation failed: ${authError.message}`);
-
-      parentId = authUser.user.id;
+      parentId    = authUser.user.id;
       isNewParent = true;
 
-      // Create Profile Record instead of Parent Record
-      // Replaced .insert with .upsert to handle background auth trigger collisions safely
-      const { error: profileErr } = await supabaseAdmin.from("profiles").upsert({
-        id: parentId,
-        full_name: d.parentName!,
-        email,
-        phone_number: phone,
-        role: "parent",
-        school_id: schoolId,
-      }, {
-        onConflict: 'id' // Informs Supabase to overwrite fields if the ID already exists
-      });
+      // 2d. Create profile row — upsert handles rare trigger-race collisions
+      const { error: profileErr } = await supabaseAdmin
+        .from("profiles")
+        .upsert(
+          {
+            id:           parentId,
+            full_name:    d.parentName!,
+            email,
+            phone_number: phone,
+            role:         "parent",
+            school_id:    schoolId,
+          },
+          { onConflict: "id" },
+        );
 
       if (profileErr) {
-        await supabaseAdmin.auth.admin.deleteUser(parentId).catch(console.error);
-        throw new Error(`Profile record creation failed: ${profileErr.message}`);
-      }
-
-      if (profileErr) {
-        await supabaseAdmin.auth.admin.deleteUser(parentId).catch(console.error);
-        throw new Error(`Profile record creation failed: ${profileErr}`);
+        await rollbackParent(parentId);
+        throw new Error(`Profile creation failed: ${profileErr.message}`);
       }
     }
 
-    // ── 3. Create Student ──
+    // ── 3. Create student ─────────────────────────────────────────────────────
     const { data: newStudent, error: studentError } = await supabaseAdmin
       .from("students")
       .insert({
-        full_name: d.studentName,
+        full_name:     d.studentName,
         date_of_birth: d.dateOfBirth,
-        gender: d.gender,
+        gender:        d.gender,
         current_grade: classRecord.grade,
-        class_id: classRecord.id,
-        school_id: schoolId,
-        status: "active",
+        class_id:      classRecord.id,
+        school_id:     schoolId,
+        status:        "active",
+        // Omit upi_number entirely when not provided — inserting null would
+        // conflict with the unique constraint if another null row exists in
+        // some Postgres configurations (though null != null, safer to omit)
+        ...(d.upiNumber ? { upi_number: d.upiNumber } : {}),
       })
       .select("id")
       .single();
 
     if (studentError || !newStudent) {
+      if (isNewParent) await rollbackParent(parentId);
       throw new Error(`Student registration failed: ${studentError?.message}`);
     }
 
-    // ── 4. Handle Passport Photo ──
+    // ── 4. Photo upload (optional, non-blocking) ──────────────────────────────
     const photoFile = formData.get("passportPhoto") as File | null;
     if (photoFile && photoFile.size > 0) {
-      const ext = photoFile.type.split("/")[1] || "jpg";
-      const path = `photos/${newStudent.id}.${ext}`;
-      const buffer = Buffer.from(await photoFile.arrayBuffer());
+      try {
+        const ext    = photoFile.type.split("/")[1] || "jpg";
+        const path   = `photos/${newStudent.id}.${ext}`;
+        const buffer = Buffer.from(await photoFile.arrayBuffer());
 
-      const { error: uploadError } = await supabaseAdmin.storage
-        .from("student-photos")
-        .upload(path, buffer, { contentType: photoFile.type, upsert: true });
+        const { error: uploadError } = await supabaseAdmin.storage
+          .from("student-photos")
+          .upload(path, buffer, { contentType: photoFile.type, upsert: true });
 
-      if (!uploadError) {
-        await supabaseAdmin
-          .from("students")
-          .update({ photo_url: path })
-          .eq("id", newStudent.id);
-      } else {
-        console.error("Photo upload failed:", uploadError.message);
+        if (!uploadError) {
+          await supabaseAdmin
+            .from("students")
+            .update({ photo_url: path })
+            .eq("id", newStudent.id);
+        } else {
+          console.error("[admitStudent] Photo upload failed:", uploadError.message);
+        }
+      } catch (photoErr) {
+        // Photo failure is non-fatal — student is already created
+        console.error("[admitStudent] Photo error:", photoErr);
       }
     }
 
-    // ── 5. Link Student to Parent Junction ──
+    // ── 5. Link student ↔ parent ──────────────────────────────────────────────
     const { error: linkErr } = await supabaseAdmin
       .from("student_parents")
       .insert({
-        student_id: newStudent.id,
-        parent_id: parentId,
-        relationship_type: d.relationshipType,
+        student_id:         newStudent.id,
+        parent_id:          parentId,
+        relationship_type:  d.relationshipType,
         is_primary_contact: true,
-        school_id: schoolId,
+        school_id:          schoolId,
       });
 
     if (linkErr) {
-      await supabaseAdmin.from("students").delete().eq("id", newStudent.id);
+      // Roll back student row; roll back parent only if we just created them
+      try {
+        await supabaseAdmin.from("students").delete().eq("id", newStudent.id);
+      } catch (e) {
+        console.error("[admitStudent] student rollback failed:", e);
+      }
+      if (isNewParent) await rollbackParent(parentId);
       throw new Error(`Failed to link student to parent: ${linkErr.message}`);
     }
 
-    // ── 6. Send Welcome Email (New Parents Only) ──
+    // ── 6. Welcome email (new parents only) ───────────────────────────────────
     if (isNewParent) {
-      const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
-        type: "recovery",
-        email: d.parentEmail!.toLowerCase(),
-        options: { redirectTo: getAuthConfirmUrl() },
-      });
+      try {
+        const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
+          type:    "recovery",
+          email:   d.parentEmail!.toLowerCase(),
+          options: { redirectTo: getAuthConfirmUrl() },
+        });
 
-      if (linkData?.properties?.action_link) {
-        try {
+        if (linkData?.properties?.action_link) {
           await sendWelcomeEmail({
             parentEmail: d.parentEmail!.toLowerCase(),
-            parentName: d.parentName!,
+            parentName:  d.parentName!,
             studentName: d.studentName,
-            grade: classRecord.grade,
-            setupLink: linkData.properties.action_link,
+            grade:       classRecord.grade,
+            setupLink:   linkData.properties.action_link,
           });
-        } catch (e) {
-          console.error("Welcome email failed:", e);
         }
+      } catch (emailErr) {
+        // Email failure is non-fatal — admission is complete
+        console.error("[admitStudent] Welcome email failed:", emailErr);
       }
     }
 
@@ -286,14 +343,14 @@ export async function admitStudentAction(
     revalidatePath("/admin/dashboard");
 
     return {
-      success: true,
-      message: "Student admitted successfully.",
+      success:   true,
+      message:   "Student admitted successfully.",
       studentId: newStudent.id,
     };
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
-    console.error("[AdmitStudent] Error:", msg);
+    console.error("[AdmitStudent]", msg);
     return { success: false, message: msg };
   }
 }
