@@ -11,47 +11,53 @@ import { BulkAdmitTeacherEditor } from "./_components/BulkAdmitTeacherEditor";
 import { BulkResultsPanel } from "./_components/BulkResultsPanel";
 
 import type { BulkAdmitRow, BulkAdmitResult } from "@/lib/actions/bulk-admit";
-// Alias backend Staff types to avoid matching errors locally
-import type { 
-  BulkStaffRow as BulkTeacherRow, 
-  BulkStaffResult as BulkTeacherResult 
+import type {
+  BulkStaffRow   as BulkTeacherRow,
+  BulkStaffResult as BulkTeacherResult,
 } from "@/lib/actions/bulk-teacher";
 import { parseStudentCSV, parseTeacherCSV, getCSVTemplate } from "./utils";
 
-import { bulkAdmitStudentsAction } from "@/lib/actions/bulk-admit";
-// Alias backend bulkAddStaffAction to match local handler call
+import { bulkAdmitStudentsAction }              from "@/lib/actions/bulk-admit";
 import { bulkAddStaffAction as bulkAddTeachersAction } from "@/lib/actions/bulk-teacher";
 
 type Mode = "students" | "teachers";
 
+// Mirrors ClassOption in types.ts — kept in sync with what fetchClasses returns
+interface ClassItem {
+  id:     string;
+  grade:  string;
+  stream: string;
+}
+
 interface BulkAdmitClientProps {
-  classes: { id: string; grade: string; stream: string }[];
+  classes: ClassItem[];
 }
 
 export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
-  const [mode, setMode] = useState<Mode>("students");
+  const [mode,    setMode]    = useState<Mode>("students");
   const [results, setResults] = useState<(BulkAdmitResult | BulkTeacherResult)[] | null>(null);
   const [summary, setSummary] = useState<{ success: number; failed: number } | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const firstGrade = classes[0]?.grade ?? "Grade 1";
+  const firstGrade  = classes[0]?.grade  ?? "Grade 1";
   const firstStream = classes.find((c) => c.grade === firstGrade)?.stream ?? "Main";
 
   // ── Single source of truth ──────────────────────────────────────────────
   const [studentRows, setStudentRows] = useState<BulkAdmitRow[]>([
     {
-      studentName: "",
-      dateOfBirth: "",
-      gender: "Male",
-      currentGrade: firstGrade,
-      stream: firstStream,
-      academicYear: 2026,
+      studentName:      "",
+      dateOfBirth:      "",
+      gender:           "Male",
+      currentGrade:     firstGrade,
+      stream:           firstStream,
+      academicYear:     2026,
+      upiNumber:        "",
       relationshipType: "guardian",
-      parentMode: "new",
+      parentMode:       "new",
       existingParentId: null,
-      parentName: "",
-      parentEmail: "",
-      parentPhone: "",
+      parentName:       "",
+      parentEmail:      "",
+      parentPhone:      "",
     },
   ]);
 
@@ -59,28 +65,38 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
     { fullName: "", email: "", phone: "", tscNumber: "" },
   ]);
 
-  // ── CSV ─────────────────────────────────────────────────────────────────
+  // ── CSV handlers ────────────────────────────────────────────────────────
   const handleFileUpload = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
       if (mode === "students") {
         const parsed = parseStudentCSV(text);
-        if (parsed.length > 0) { setStudentRows(parsed); toast.success(`Loaded ${parsed.length} student records`); }
+        if (parsed.length > 0) {
+          setStudentRows(parsed);
+          toast.success(`Loaded ${parsed.length} student record${parsed.length !== 1 ? "s" : ""}`);
+        } else {
+          toast.error("No valid student rows found in file");
+        }
       } else {
         const parsed = parseTeacherCSV(text);
-        if (parsed.length > 0) { setTeacherRows(parsed); toast.success(`Loaded ${parsed.length} teacher records`); }
+        if (parsed.length > 0) {
+          setTeacherRows(parsed);
+          toast.success(`Loaded ${parsed.length} teacher record${parsed.length !== 1 ? "s" : ""}`);
+        } else {
+          toast.error("No valid teacher rows found in file");
+        }
       }
     };
     reader.readAsText(file);
   };
 
   const downloadTemplate = () => {
-    const csv = getCSVTemplate(mode);
+    const csv  = getCSVTemplate(mode);
     const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
     a.download = mode === "students" ? "student_bulk_template.csv" : "teacher_bulk_template.csv";
     a.click();
     URL.revokeObjectURL(url);
@@ -93,7 +109,6 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
 
     startTransition(async () => {
       if (mode === "students") {
-        // Only submit rows that have a student name
         const validRows = studentRows.filter((r) => r.studentName.trim());
         if (validRows.length === 0) {
           toast.error("Please fill in at least one student name");
@@ -105,9 +120,13 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
         setSummary({ success: res.successCount, failed: res.failCount });
 
         if (res.failCount === 0) {
-          toast.success(`Successfully admitted ${res.successCount} student${res.successCount > 1 ? "s" : ""}!`);
+          toast.success(
+            `Successfully admitted ${res.successCount} student${res.successCount !== 1 ? "s" : ""}!`
+          );
         } else {
-          toast(`Admitted ${res.successCount}, ${res.failCount} failed`, { description: "See results below for details" });
+          toast(`Admitted ${res.successCount}, ${res.failCount} failed`, {
+            description: "See results below for details",
+          });
         }
       } else {
         const validRows = teacherRows.filter((r) => r.fullName.trim() && r.email.trim());
@@ -121,7 +140,9 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
         setSummary({ success: res.successCount, failed: res.failCount });
 
         if (res.failCount === 0) {
-          toast.success(`Successfully added ${res.successCount} teacher${res.successCount > 1 ? "s" : ""}!`);
+          toast.success(
+            `Successfully added ${res.successCount} teacher${res.successCount !== 1 ? "s" : ""}!`
+          );
         } else {
           toast(`Added ${res.successCount}, ${res.failCount} failed`);
         }
@@ -132,6 +153,7 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
   return (
     <div className="min-h-screen bg-[#0c0f1a]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
           <Link
@@ -142,11 +164,13 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
           </Link>
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-white">Bulk Admission</h1>
-            <p className="text-white/40 text-sm mt-0.5">Import multiple students and staff efficiently</p>
+            <p className="text-white/40 text-sm mt-0.5">
+              Import multiple students and staff efficiently
+            </p>
           </div>
         </div>
 
-        {/* Mode Toggle */}
+        {/* Mode toggle */}
         <div className="inline-flex bg-white/[0.04] border border-white/[0.07] rounded-2xl p-1 mb-8">
           <button
             onClick={() => setMode("students")}
@@ -168,8 +192,13 @@ export function BulkAdmitClient({ classes }: BulkAdmitClientProps) {
           </button>
         </div>
 
-        {/* CSV Upload */}
-        <UploadZone mode={mode} onFileUpload={handleFileUpload} onDownloadTemplate={downloadTemplate} />
+        {/* Upload zone — passes classes so the grade/stream reference table renders */}
+        <UploadZone
+          mode={mode}
+          classes={mode === "students" ? classes : []}
+          onFileUpload={handleFileUpload}
+          onDownloadTemplate={downloadTemplate}
+        />
 
         {/* Editor */}
         <div className="mt-8">

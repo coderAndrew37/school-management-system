@@ -11,7 +11,6 @@
 import type { BulkAdmitRow } from "@/lib/actions/bulk-admit";
 import type { ParentSearchResult } from "@/lib/actions/admit";
 import {
-  AlertCircle,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -21,7 +20,7 @@ import {
 } from "lucide-react";
 import { ParentPanel } from "./ParentPanel";
 import { StudentPhotoCell } from "./StudentPhotoCell";
-import { RowMeta, ClassOption, isRowComplete, gradeHasRealStreams } from "./types";
+import { RowMeta, ClassOption, isRowComplete, isRowReady, gradeHasRealStreams } from "./types";
 
 
 interface StudentRowProps {
@@ -53,9 +52,9 @@ export function StudentRow({
   onRemove,
   canRemove,
 }: StudentRowProps) {
+  const ready = isRowReady(row);
   const complete = isRowComplete(row, meta);
   const hasName = row.studentName.trim().length > 0;
-  const needsParent = hasName && !!row.dateOfBirth && !complete;
   const streams = streamsFor(row.currentGrade);
   const showStream = gradeHasRealStreams(row.currentGrade, classes);
   const { parentExpanded } = meta;
@@ -63,18 +62,23 @@ export function StudentRow({
   // Parent button label
   const parentLabel = meta.selectedParent
     ? meta.selectedParent.full_name.split(" ")[0]
+    : row.parentMode === "skip"
+    ? "Skip"
     : row.parentEmail?.split("@")[0] || "Parent";
+
+  // Row border/bg state: complete → green, ready → amber, empty → subtle
+  const rowClass = complete
+    ? "border-emerald-500/20 bg-gradient-to-r from-emerald-500/[0.03] to-transparent"
+    : ready
+    ? "border-amber-400/12 bg-white/[0.02]"
+    : hasName
+    ? "border-white/[0.07] bg-white/[0.015]"
+    : "border-white/[0.05] bg-white/[0.01]";
 
   return (
     <li
       aria-label={`Student row ${index + 1}${row.studentName ? `: ${row.studentName}` : ""}`}
-      className={`rounded-2xl border overflow-hidden transition-all duration-200 ${
-        complete
-          ? "border-emerald-500/20 bg-gradient-to-r from-emerald-500/[0.03] to-transparent"
-          : hasName
-          ? "border-amber-400/12 bg-white/[0.02]"
-          : "border-white/[0.05] bg-white/[0.01]"
-      }`}
+      className={`rounded-2xl border overflow-hidden transition-all duration-200 ${rowClass}`}
     >
       {/* ── Inline fields ── */}
       <div className="px-4 py-3 flex items-center gap-2 flex-wrap lg:flex-nowrap">
@@ -90,7 +94,11 @@ export function StudentRow({
         {/* Index / complete badge */}
         <div
           className={`h-7 w-7 rounded-lg flex items-center justify-center text-xs font-mono font-bold shrink-0 transition-all ${
-            complete ? "bg-emerald-500/15 text-emerald-400" : "bg-white/[0.04] text-white/20"
+            complete
+              ? "bg-emerald-500/15 text-emerald-400"
+              : ready
+              ? "bg-amber-400/10 text-amber-400/60"
+              : "bg-white/[0.04] text-white/20"
           }`}
           aria-label={complete ? `Row ${index + 1} complete` : `Row ${index + 1}`}
         >
@@ -185,17 +193,17 @@ export function StudentRow({
           type="button"
           onClick={() => onMetaChange({ parentExpanded: !parentExpanded })}
           onKeyDown={(e) => e.key === "Escape" && onMetaChange({ parentExpanded: false })}
-          aria-expanded={parentExpanded ? "true" : "false"}
-          aria-controls={`parent-panel-${index}`}
+          // aria-expanded={parentExpanded ? "true" : "false"}
+          // aria-controls={`parent-panel-${index}`}
           aria-label={`${parentExpanded ? "Collapse" : "Expand"} parent info for student ${index + 1}`}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 border ${
             parentExpanded
               ? "bg-amber-400/12 text-amber-300 border-amber-400/25"
               : complete
               ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
-              : needsParent
-              ? "bg-amber-400/8 text-amber-400/70 border-amber-400/20 animate-pulse"
-              : "bg-white/[0.03] text-white/35 border-white/[0.07] hover:text-white/60 hover:border-white/15"
+              : ready
+              ? "bg-white/[0.03] text-white/40 border-white/[0.07] hover:text-white/60 hover:border-white/15"
+              : "bg-white/[0.03] text-white/25 border-white/[0.05]"
           }`}
         >
           <Users className="h-3.5 w-3.5" aria-hidden="true" />
@@ -229,16 +237,15 @@ export function StudentRow({
         </div>
       </div>
 
-      {/* Nudge when parent info is missing */}
-      {!parentExpanded && hasName && !complete && (
-        <div className="px-4 pb-3 flex items-center gap-2 ml-[4.75rem]" role="alert" aria-live="polite">
-          <AlertCircle className="h-3 w-3 text-amber-400/40 shrink-0" aria-hidden="true" />
+      {/* Soft nudge — visible when row is ready but parent panel is closed and not complete */}
+      {!parentExpanded && ready && !complete && row.parentMode !== "skip" && (
+        <div className="px-4 pb-3 ml-[4.75rem]">
           <button
             type="button"
             onClick={() => onMetaChange({ parentExpanded: true })}
-            className="text-[11px] text-amber-400/50 hover:text-amber-400 transition-colors"
+            className="text-[11px] text-white/20 hover:text-amber-400/60 transition-colors"
           >
-            Parent / guardian info required — click to add
+            + Add parent / guardian (optional)
           </button>
         </div>
       )}

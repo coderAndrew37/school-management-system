@@ -21,7 +21,14 @@ import type { ParentSearchResult } from "@/lib/actions/admit";
 import { GraduationCap, Loader2, Plus, Save } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { StudentRow } from "./StudentRow";
-import { blankMeta, blankRow, isRowComplete, type ClassOption, type RowMeta } from "./types";
+import {
+  blankMeta,
+  blankRow,
+  isRowComplete,
+  isRowReady,
+  type ClassOption,
+  type RowMeta,
+} from "./types";
 
 interface Props {
   classes: ClassOption[];
@@ -49,8 +56,13 @@ export function BulkAdmitStudentEditor({ classes, rows, setRows, isPending, onSu
   const firstStream = streamsFor(firstGrade)[0] ?? "Main";
 
   const safeMeta = (i: number) => metas[i] ?? blankMeta();
+
+  // "Ready" = minimum student fields filled — these will be submitted
+  const readyCount = rows.filter((r) => isRowReady(r)).length;
+  // "Complete" = ready + parent info resolved — drives progress bar + green state
   const completedCount = rows.filter((r, i) => isRowComplete(r, safeMeta(i))).length;
-  const namedCount = rows.filter((r) => r.studentName.trim()).length;
+  // Rows that are ready but missing parent (informational only)
+  const missingParentCount = readyCount - completedCount;
 
   // ── Row mutations — always update rows + metas atomically ────────────────
   const addRow = () => {
@@ -66,11 +78,7 @@ export function BulkAdmitStudentEditor({ classes, rows, setRows, isPending, onSu
     });
     setMetas((p) => {
       const n = [...p];
-      // Inherit parent selection but not photo — photos are per-student
-      n.splice(i + 1, 0, {
-        ...blankMeta(),
-        selectedParent: p[i].selectedParent,
-      });
+      n.splice(i + 1, 0, { ...blankMeta(), selectedParent: p[i].selectedParent });
       return n;
     });
   };
@@ -143,15 +151,14 @@ export function BulkAdmitStudentEditor({ classes, rows, setRows, isPending, onSu
               Student Batch Admission
               <span
                 className="text-xs font-mono text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-lg border border-amber-400/15"
-                aria-label={`${completedCount} of ${rows.length} students complete`}
+                aria-label={`${readyCount} of ${rows.length} students ready`}
               >
-                {completedCount}/{rows.length}
+                {readyCount}/{rows.length}
               </span>
             </h2>
             <p className="text-xs text-white/30 mt-0.5">
-              Expand each row to add parent · press{" "}
-              <kbd className="px-1 py-0.5 rounded bg-white/10 font-mono text-[10px]">Esc</kbd> to
-              close panel
+              Parent info optional — students can be linked later ·{" "}
+              <kbd className="px-1 py-0.5 rounded bg-white/10 font-mono text-[10px]">Esc</kbd> closes panel
             </p>
           </div>
         </div>
@@ -176,7 +183,6 @@ export function BulkAdmitStudentEditor({ classes, rows, setRows, isPending, onSu
         <div className="w-36">Date of Birth</div>
         <div className="w-[88px]">Gender</div>
         <div className="w-28">Grade</div>
-        {/* Stream header only when at least one grade has real streams */}
         {classes.some((c) => c.stream !== "Main") && (
           <div className="w-24">Stream</div>
         )}
@@ -215,26 +221,39 @@ export function BulkAdmitStudentEditor({ classes, rows, setRows, isPending, onSu
         <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Add another student
       </button>
 
-      {/* Progress bar */}
+      {/* Progress bar — tracks fully-complete rows */}
       {rows.length > 0 && (
         <div className="space-y-1.5">
           <div className="flex justify-between text-[10px] text-white/25" aria-hidden="true">
-            <span>{completedCount} of {rows.length} complete</span>
-            {namedCount > completedCount && (
-              <span className="text-amber-400/40">
-                {namedCount - completedCount} missing parent info
+            <span>
+              {readyCount} ready to admit
+              {completedCount > 0 && completedCount < readyCount && (
+                <span className="text-white/20"> · {completedCount} with parent info</span>
+              )}
+            </span>
+            {missingParentCount > 0 && (
+              <span className="text-amber-400/35">
+                {missingParentCount} without parent — will admit anyway
               </span>
             )}
           </div>
           <div
             className="h-0.5 rounded-full bg-white/[0.05] overflow-hidden"
             role="progressbar"
-           aria-label={`${completedCount} of ${rows.length} students complete`}
+            aria-label={`${readyCount} of ${rows.length} students ready`}
           >
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-amber-400 to-amber-300 transition-all duration-500"
-              style={{ width: `${rows.length ? (completedCount / rows.length) * 100 : 0}%` }}
-            />
+            {/* Ready band (amber) */}
+            <div className="h-full relative">
+              <div
+                className="absolute inset-y-0 left-0 rounded-full bg-amber-400/30 transition-all duration-500"
+                style={{ width: `${rows.length ? (readyCount / rows.length) * 100 : 0}%` }}
+              />
+              {/* Complete sub-band (brighter) */}
+              <div
+                className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-emerald-400 to-amber-300 transition-all duration-500"
+                style={{ width: `${rows.length ? (completedCount / rows.length) * 100 : 0}%` }}
+              />
+            </div>
           </div>
         </div>
       )}
@@ -242,18 +261,20 @@ export function BulkAdmitStudentEditor({ classes, rows, setRows, isPending, onSu
       {/* Footer */}
       <div className="flex items-center justify-between pt-1">
         <p className="text-xs text-white/30" aria-live="polite">
-          {completedCount > 0
-            ? `${completedCount} student${completedCount > 1 ? "s" : ""} ready — parent accounts will be created and invited`
-            : "Fill in student details and expand to add parent info"}
+          {readyCount > 0
+            ? missingParentCount > 0
+              ? `${readyCount} student${readyCount !== 1 ? "s" : ""} ready · ${missingParentCount} without parent (can be linked later)`
+              : `${readyCount} student${readyCount !== 1 ? "s" : ""} ready · parent accounts will be created and invited`
+            : "Fill in name, date of birth and grade to admit a student"}
         </p>
         <button
           type="button"
           onClick={onSubmit}
-          disabled={isPending || completedCount === 0}
+          disabled={isPending || readyCount === 0}
           aria-label={
             isPending
               ? "Processing admission"
-              : `Admit ${completedCount} student${completedCount !== 1 ? "s" : ""}`
+              : `Admit ${readyCount} student${readyCount !== 1 ? "s" : ""}`
           }
           className="flex items-center gap-2.5 bg-amber-400 disabled:bg-white/[0.06] text-[#0c0f1a] font-bold px-8 py-3.5 rounded-xl hover:bg-amber-300 active:scale-[0.97] transition-all shadow-lg shadow-amber-400/15 disabled:text-white/15 disabled:shadow-none text-sm"
         >
@@ -263,8 +284,8 @@ export function BulkAdmitStudentEditor({ classes, rows, setRows, isPending, onSu
             </>
           ) : (
             <>
-              <Save className="h-4 w-4" aria-hidden="true" /> Admit {completedCount || ""}{" "}
-              Student{completedCount !== 1 ? "s" : ""}
+              <Save className="h-4 w-4" aria-hidden="true" /> Admit {readyCount || ""}{" "}
+              Student{readyCount !== 1 ? "s" : ""}
             </>
           )}
         </button>

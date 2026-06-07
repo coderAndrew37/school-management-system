@@ -56,11 +56,32 @@ export function blankMeta(): RowMeta {
   };
 }
 
-// ── Completion check ──────────────────────────────────────────────────────
+// ── Completion checks ─────────────────────────────────────────────────────
+
+/**
+ * A row is "ready to submit" when the student fields are filled.
+ * Parent info is optional — a student can be admitted and linked to a parent later.
+ */
+export function isRowReady(row: BulkAdmitRow): boolean {
+  return !!(row.studentName.trim() && row.dateOfBirth && row.gender && row.currentGrade);
+}
+
+/**
+ * A row is "fully complete" when it is ready AND parent info is resolved.
+ * Used for the progress bar and the "complete" green state.
+ */
 export function isRowComplete(row: BulkAdmitRow, meta: RowMeta): boolean {
-  if (!row.studentName.trim() || !row.dateOfBirth) return false;
+  if (!isRowReady(row)) return false;
+
   if (row.parentMode === "existing") return !!meta.selectedParent;
-  return !!(row.parentName?.trim() && row.parentEmail?.trim() && row.parentPhone?.trim());
+
+  if (row.parentMode === "new") {
+    // Complete only if all three new-parent fields are filled
+    return !!(row.parentName?.trim() && row.parentEmail?.trim() && row.parentPhone?.trim());
+  }
+
+  // parentMode === "skip" — student-only is fine, mark green
+  return true;
 }
 
 /**
@@ -73,6 +94,5 @@ export function gradeHasRealStreams(
   classes: ClassOption[]
 ): boolean {
   const streams = classes.filter((c) => c.grade === grade).map((c) => c.stream);
-  // "Real" streams: more than one, or the single stream is not "Main"
   return streams.length > 1 || (streams.length === 1 && streams[0] !== "Main");
 }

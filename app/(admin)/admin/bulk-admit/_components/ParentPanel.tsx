@@ -17,6 +17,7 @@ import {
   Phone,
   User,
   UserCheck,
+  UserMinus,
   UserPlus,
 } from "lucide-react";
 import { RELATIONSHIP_OPTIONS } from "./types";
@@ -70,6 +71,7 @@ export function ParentPanel({
                 onSelectParent(null);
               }}
               aria-label="Add new parent"
+              // aria-pressed={row.parentMode === "new"}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
                 row.parentMode === "new"
                   ? "bg-amber-400 text-[#0c0f1a]"
@@ -80,8 +82,11 @@ export function ParentPanel({
             </button>
             <button
               type="button"
-              onClick={() => onRowChange("parentMode", "existing")}
+              onClick={() => {
+                onRowChange("parentMode", "existing");
+              }}
               aria-label="Link existing parent"
+              // aria-pressed={row.parentMode === "existing"}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
                 row.parentMode === "existing"
                   ? "bg-amber-400 text-[#0c0f1a]"
@@ -90,41 +95,67 @@ export function ParentPanel({
             >
               <UserCheck className="h-3 w-3" aria-hidden="true" /> Existing
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                onRowChange("parentMode", "skip");
+                onSelectParent(null);
+              }}
+              aria-label="Skip parent for now"
+              // aria-pressed={row.parentMode === "skip"}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+                row.parentMode === "skip"
+                  ? "bg-white/10 text-white/60"
+                  : "text-white/35 hover:text-white/60"
+              }`}
+            >
+              <UserMinus className="h-3 w-3" aria-hidden="true" /> Skip
+            </button>
           </div>
 
-          {/* Relationship */}
-          <div className="flex items-center gap-2 ml-auto">
-            <label
-              htmlFor={`relationship-${rowIndex}`}
-              className="text-[10px] text-white/30 font-medium uppercase tracking-wider"
-            >
-              Relationship:
-            </label>
-            <div className="relative">
-              <select
-                id={`relationship-${rowIndex}`}
-                value={row.relationshipType}
-                onChange={(e) =>
-                  onRowChange(
-                    "relationshipType",
-                    e.target.value as BulkAdmitRow["relationshipType"]
-                  )
-                }
-                className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-white/70 appearance-none pr-6 focus:outline-none focus:border-amber-400/40 cursor-pointer"
+          {/* Relationship — hidden when skipping */}
+          {row.parentMode !== "skip" && (
+            <div className="flex items-center gap-2 ml-auto">
+              <label
+                htmlFor={`relationship-${rowIndex}`}
+                className="text-[10px] text-white/30 font-medium uppercase tracking-wider"
               >
-                {RELATIONSHIP_OPTIONS.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-white/25"
-                aria-hidden="true"
-              />
+                Relationship:
+              </label>
+              <div className="relative">
+                <select
+                  id={`relationship-${rowIndex}`}
+                  value={row.relationshipType}
+                  onChange={(e) =>
+                    onRowChange(
+                      "relationshipType",
+                      e.target.value as BulkAdmitRow["relationshipType"]
+                    )
+                  }
+                  className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-white/70 appearance-none pr-6 focus:outline-none focus:border-amber-400/40 cursor-pointer"
+                >
+                  {RELATIONSHIP_OPTIONS.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-white/25"
+                  aria-hidden="true"
+                />
+              </div>
             </div>
-          </div>
+          )}
         </div>
+
+        {/* ── Skip notice ── */}
+        {row.parentMode === "skip" && (
+          <p className="text-[11px] text-white/25 flex items-center gap-1.5" role="note">
+            <AlertCircle className="h-3 w-3 shrink-0 text-white/20" aria-hidden="true" />
+            Student will be admitted without a parent link. You can add a parent from the student&apos;s profile later.
+          </p>
+        )}
 
         {/* ── Existing parent search ── */}
         {row.parentMode === "existing" && (
@@ -133,8 +164,7 @@ export function ParentPanel({
             {!selectedParent && (
               <p className="text-[11px] text-white/25 flex items-center gap-1.5" role="note">
                 <AlertCircle className="h-3 w-3 shrink-0" aria-hidden="true" />
-                Search by name, email or phone. Selecting links this student to their existing
-                account.
+                Search by name, email or phone. Selecting links this student to their existing account.
               </p>
             )}
           </div>
@@ -150,7 +180,7 @@ export function ParentPanel({
                   htmlFor={`parent-name-${rowIndex}`}
                   className="text-[10px] text-white/30 font-bold uppercase tracking-wider flex items-center gap-1"
                 >
-                  <User className="h-3 w-3" aria-hidden="true" /> Full Name *
+                  <User className="h-3 w-3" aria-hidden="true" /> Full Name
                 </label>
                 <input
                   id={`parent-name-${rowIndex}`}
@@ -160,7 +190,6 @@ export function ParentPanel({
                   onChange={(e) => onRowChange("parentName", e.target.value)}
                   className="p-input w-full"
                   autoComplete="off"
-                  aria-required="true"
                 />
               </div>
 
@@ -170,7 +199,7 @@ export function ParentPanel({
                   htmlFor={`parent-email-${rowIndex}`}
                   className="text-[10px] text-white/30 font-bold uppercase tracking-wider flex items-center gap-1"
                 >
-                  <Mail className="h-3 w-3" aria-hidden="true" /> Email Address *
+                  <Mail className="h-3 w-3" aria-hidden="true" /> Email Address
                 </label>
                 <input
                   id={`parent-email-${rowIndex}`}
@@ -180,7 +209,6 @@ export function ParentPanel({
                   onChange={(e) => onRowChange("parentEmail", e.target.value)}
                   className="p-input w-full"
                   autoComplete="off"
-                  aria-required="true"
                 />
               </div>
 
@@ -190,7 +218,7 @@ export function ParentPanel({
                   htmlFor={`parent-phone-${rowIndex}`}
                   className="text-[10px] text-white/30 font-bold uppercase tracking-wider flex items-center gap-1"
                 >
-                  <Phone className="h-3 w-3" aria-hidden="true" /> Phone Number *
+                  <Phone className="h-3 w-3" aria-hidden="true" /> Phone Number
                 </label>
                 <input
                   id={`parent-phone-${rowIndex}`}
@@ -200,16 +228,14 @@ export function ParentPanel({
                   onChange={(e) => onRowChange("parentPhone", e.target.value)}
                   className="p-input w-full"
                   autoComplete="off"
-                  aria-required="true"
                 />
               </div>
             </div>
 
             <p className="text-[11px] text-white/20 flex items-center gap-1.5 leading-relaxed" role="note">
               <AlertCircle className="h-3 w-3 shrink-0 text-white/25" aria-hidden="true" />
-              A welcome email with account setup link will be sent to the parent. If a parent
-              with this email or phone already exists, the student is automatically linked — no
-              duplicate created.
+              All three fields are needed to create a parent account. Leave all blank to admit the student without a parent link.
+              If a parent with this email or phone already exists, the student is automatically linked — no duplicate created.
             </p>
           </div>
         )}
