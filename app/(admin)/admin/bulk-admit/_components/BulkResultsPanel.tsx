@@ -14,7 +14,7 @@ export function BulkResultsPanel({ results, summary }: Props) {
   return (
     <div className="mt-8 bg-white/[0.04] border border-white/10 rounded-3xl p-6">
       <div className="flex items-center justify-between mb-6">
-        <h3 className="text-xl font-bold">Import Results</h3>
+        <h3 className="text-xl font-bold text-white">Import Results</h3>
         <div className="flex items-center gap-6 text-sm">
           <div className="flex items-center gap-2 text-emerald-400">
             <CheckCircle2 className="h-5 w-5" />

@@ -117,7 +117,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
     const row = parsed.data;
 
     try {
-      // ── 1. Resolve Class Safely ──────────────────────────────────────────
+      // ── 1. Resolve Class Safely (Tenant Specific) ───────────────────────
       const { data: classRecord, error: classErr } = await supabaseAdmin
         .from("classes")
         .select("id")
@@ -130,7 +130,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
       if (classErr) throw new Error(`Class lookup failed: ${classErr.message}`);
       if (!classRecord) throw new Error(`Class not found: ${row.currentGrade} – ${row.stream}`);
 
-      // ── 2. Create Student ───────────────────────────────────────────────
+      // ── 2. Create Student (Tenant Specific) ─────────────────────────────
       const { data: student, error: studentErr } = await supabaseAdmin
         .from("students")
         .insert({
@@ -183,7 +183,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
             parentWarning = "Invalid Kenyan phone format; parent creation skipped";
             parentSkipped = true;
           } else {
-            // Check cross-data identifiers to catch existing parents safely
+            // Option B Fix: Cross-lookup globally to handle multi-school parents safely
             const { data: duplicateContact } = await supabaseAdmin
               .from("profiles")
               .select("id")
@@ -208,7 +208,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
               if (authErr) throw new Error(`Auth credential generation failed: ${authErr.message}`);
               parentId = authUser.user.id;
 
-              // UPSERT preserves integrity regardless of trigger sync timing loops
+              // UPSERT handles race conditions smoothly if handle_new_user() runs instantly
               const { error: profileErr } = await supabaseAdmin
                 .from("profiles")
                 .upsert(
@@ -219,7 +219,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
                     phone_number: phone,
                     base_role: "parent",
                     role: "parent", 
-                    school_id,
+                    school_id, // Identifies the primary school that registered the user profile
                     is_super_admin: false,
                     is_dev: false,
                   },
@@ -231,7 +231,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
                 throw new Error(`Profile initialization failed: ${profileErr.message}`);
               }
 
-              // Fire off asynchronous delivery flows
+              // Fire off recovery setup links for invitation delivery pipelines
               const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
                 type: "recovery",
                 email,
@@ -249,6 +249,7 @@ export async function bulkAdmitStudentsAction(rows: BulkAdmitRow[]): Promise<{
               }
             }
 
+            // Tenant boundary is established right here through the student_parents mapping
             await linkParent(student.id, parentId, row.relationshipType, school_id);
             parentLinked = true;
           }
@@ -305,6 +306,7 @@ async function linkParent(
   relationshipType: string,
   schoolId: string
 ): Promise<void> {
+  // Idempotency check prevents duplicate linkages inside the active tenant boundary
   const { data: existingLink } = await supabaseAdmin
     .from("student_parents")
     .select("student_id")
@@ -319,7 +321,7 @@ async function linkParent(
     parent_id: parentId,
     relationship_type: relationshipType,
     is_primary_contact: true,
-    school_id: schoolId,
+    school_id: schoolId, // Enforces multi-tenant data safety
   });
 
   if (linkErr) throw new Error(`Relationship resolution block broken: ${linkErr.message}`);
