@@ -6,7 +6,6 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 // ── 1. Validation Schema ──────────────────────────────────────────────────────
-
 const classSchema = z.object({
   grade: z.string().min(1, "Grade is required"),
   stream: z.string().default("Main"),
@@ -17,35 +16,38 @@ const classSchema = z.object({
 export type CreateClassInput = z.infer<typeof classSchema>;
 
 // ── 2. Create Class Action ────────────────────────────────────────────────────
-
 export async function createClassAction(data: CreateClassInput) {
   try {
-    // Check Authorization
     const session = await getSession();
     if (!session || !session.profile) {
       return { success: false, message: "Unauthorised" };
     }
 
-    const { base_role, is_super_admin, is_dev } = session.profile;
+    const { base_role, is_super_admin, is_dev, school_id } = session.profile;
     const isPlatformAdmin = is_super_admin || is_dev;
 
-    // Structural guard matching your access pattern
     if (base_role !== "admin" && !isPlatformAdmin) {
       return { success: false, message: "Unauthorised" };
+    }
+
+    // Critical Check: Enforce school isolation context
+    if (!school_id) {
+      return { success: false, message: "Action failed: Missing structural school ID linkage." };
     }
 
     const supabase = await createSupabaseServerClient();
     const parsed = classSchema.parse(data);
 
+    // Inject school_id explicitly into mutations
     const { error } = await supabase.from("classes").insert({
       grade: parsed.grade,
       stream: parsed.stream,
       level: parsed.level,
       academic_year: parsed.academicYear,
+      school_id: school_id, 
     });
 
     if (error) {
-      // Handle Unique Constraint Violation (Postgres code 23505)
       if (error.code === "23505") {
         return { 
           success: false, 
@@ -55,7 +57,6 @@ export async function createClassAction(data: CreateClassInput) {
       throw error;
     }
 
-    // Revalidate paths to update UI
     revalidatePath("/admin/classes");
     revalidatePath("/admin/class-teachers");
 
