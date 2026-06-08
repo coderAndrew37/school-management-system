@@ -1,13 +1,31 @@
-import { createServerClient } from "@/lib/supabase/client";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type {
   Subject,
   TeacherSubjectAllocation,
   TimetableGrid,
   Class,
-  SubjectLevel
 } from "@/lib/types/allocation";
 
-// ── 1. Internal Types for Supabase Joins ──────────────────────────────────────
+// ── 1. Strict Internal Types for Database Joins ───────────────────────────────
+
+interface ProfileJoin {
+  full_name: string;
+}
+
+interface TeacherJoin {
+  id: string;
+  staff_id: string | null;
+  tsc_number: string | null;
+  profiles: ProfileJoin | ProfileJoin[] | null;
+}
+
+interface SubjectJoin {
+  id: string;
+  name: string;
+  code: string;
+  level: "lower_primary" | "upper_primary" | "junior_secondary";
+  weekly_lessons: number;
+}
 
 interface RawAllocationRow {
   id: string;
@@ -15,10 +33,11 @@ interface RawAllocationRow {
   subject_id: string;
   class_id: string;
   academic_year: number;
+  is_active: boolean;
   created_at: string;
-  teachers: { id: string; full_name: string; email: string; tsc_number: string | null } | { id: string; full_name: string; email: string; tsc_number: string | null }[];
-  subjects: { id: string; name: string; code: string; level: SubjectLevel; weekly_lessons: number } | { id: string; name: string; code: string; level: SubjectLevel; weekly_lessons: number }[];
-  classes: Class | Class[];
+  teachers: TeacherJoin | TeacherJoin[] | null;
+  subjects: SubjectJoin | SubjectJoin[] | null;
+  classes: Class | Class[] | null;
 }
 
 interface RawTimetableSlot {
@@ -31,33 +50,56 @@ interface RawTimetableSlot {
   teacher_subject_allocations: {
     teacher_id: string;
     class_id: string;
-    teachers: { id: string; full_name: string } | { id: string; full_name: string }[] | null;
-    subjects: { name: string; code: string } | { name: string; code: string }[] | null;
+    teachers: TeacherJoin | TeacherJoin[] | null;
+    subjects: Omit<SubjectJoin, "id" | "level" | "weekly_lessons"> | Omit<SubjectJoin, "id" | "level" | "weekly_lessons">[] | null;
     classes: Class | Class[] | null;
   } | {
     teacher_id: string;
     class_id: string;
-    teachers: { id: string; full_name: string } | { id: string; full_name: string }[] | null;
-    subjects: { name: string; code: string } | { name: string; code: string }[] | null;
+    teachers: TeacherJoin | TeacherJoin[] | null;
+    subjects: Omit<SubjectJoin, "id" | "level" | "weekly_lessons"> | Omit<SubjectJoin, "id" | "level" | "weekly_lessons">[] | null;
     classes: Class | Class[] | null;
   }[] | null;
 }
 
-// ── 2. Helpers ────────────────────────────────────────────────────────────────
+// ── 2. Type-Safe Mappers ──────────────────────────────────────────────────────
+
+function extractSingle<T>(field: T | T[] | null | undefined): T | null {
+  if (!field) return null;
+  return Array.isArray(field) ? field[0] ?? null : field;
+}
 
 function mapAllocationRow(row: RawAllocationRow): TeacherSubjectAllocation {
+  const rawTeacher = extractSingle(row.teachers);
+  const rawSubject = extractSingle(row.subjects);
+  const rawClass = extractSingle(row.classes);
+  const rawProfile = rawTeacher ? extractSingle(rawTeacher.profiles) : null;
+
   return {
-    ...row,
-    teachers: Array.isArray(row.teachers) ? row.teachers[0] : row.teachers,
-    subjects: Array.isArray(row.subjects) ? row.subjects[0] : row.subjects,
-    classes: Array.isArray(row.classes) ? row.classes[0] : row.classes,
+    id: row.id,
+    school_id: rawClass?.school_id ?? "",
+    teacher_id: row.teacher_id,
+    subject_id: row.subject_id,
+    class_id: row.class_id,
+    academic_year: row.academic_year,
+    is_active: row.is_active,
+    created_at: row.created_at,
+    teachers: rawTeacher ? {
+      id: rawTeacher.id,
+      staff_id: rawTeacher.staff_id,
+      tsc_number: rawTeacher.tsc_number,
+      profiles: rawProfile ? { full_name: rawProfile.full_name } : null
+    } : null,
+    subjects: rawSubject ? { ...rawSubject } : null,
+    classes: rawClass ? { ...rawClass } : null,
   };
 }
 
 // ── 3. Fetch Functions ────────────────────────────────────────────────────────
 
+// Explicitly multi-tenant scoped to ensure systems do not leak globally
 export async function fetchSubjects(): Promise<Subject[]> {
-  const supabase = createServerClient();
+  const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("subjects")
     .select("*")
@@ -72,17 +114,19 @@ export async function fetchSubjects(): Promise<Subject[]> {
 }
 
 export async function fetchAllocations(
+  schoolId: string,
   academicYear = 2026,
 ): Promise<TeacherSubjectAllocation[]> {
-  const supabase = createServerClient();
+  const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("teacher_subject_allocations")
     .select(`
-      id, teacher_id, subject_id, class_id, academic_year, created_at,
-      teachers ( id, full_name, email, tsc_number ),
+      id, teacher_id, subject_id, class_id, academic_year, is_active, created_at,
+      teachers ( id, staff_id, tsc_number, profiles ( full_name ) ),
       subjects ( id, name, code, level, weekly_lessons ),
-      classes ( id, grade, stream, level, academic_year )
+      classes ( id, school_id, grade, stream, level, academic_year )
     `)
+    .eq("school_id", schoolId) // Multi-tenant compliance filter hook
     .eq("academic_year", academicYear)
     .order("created_at", { ascending: false });
 
@@ -94,18 +138,20 @@ export async function fetchAllocations(
 }
 
 export async function fetchAllocationsByTeacher(
+  schoolId: string,
   teacherId: string,
   academicYear = 2026,
 ): Promise<TeacherSubjectAllocation[]> {
-  const supabase = createServerClient();
+  const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("teacher_subject_allocations")
     .select(`
-      id, teacher_id, subject_id, class_id, academic_year, created_at,
-      teachers ( id, full_name, email, tsc_number ),
+      id, teacher_id, subject_id, class_id, academic_year, is_active, created_at,
+      teachers ( id, staff_id, tsc_number, profiles ( full_name ) ),
       subjects ( id, name, code, level, weekly_lessons ),
-      classes ( id, grade, stream, level, academic_year )
+      classes ( id, school_id, grade, stream, level, academic_year )
     `)
+    .eq("school_id", schoolId)
     .eq("teacher_id", teacherId)
     .eq("academic_year", academicYear);
 
@@ -117,10 +163,11 @@ export async function fetchAllocationsByTeacher(
 }
 
 export async function fetchTimetableForGrade(
+  schoolId: string,
   gradeLabel: string,
   academicYear = 2026,
 ): Promise<TimetableGrid> {
-  const supabase = createServerClient();
+  const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("timetable_slots")
     .select(`
@@ -128,11 +175,12 @@ export async function fetchTimetableForGrade(
       teacher_subject_allocations (
         teacher_id,
         class_id,
-        teachers ( id, full_name ),
+        teachers ( id, staff_id, tsc_number, profiles ( full_name ) ),
         subjects ( name, code ),
-        classes ( id, grade, stream, level, academic_year )
+        classes ( id, school_id, grade, stream, level, academic_year )
       )
     `)
+    .eq("school_id", schoolId)
     .eq("grade", gradeLabel)
     .eq("academic_year", academicYear);
 
@@ -145,23 +193,23 @@ export async function fetchTimetableForGrade(
   const slots = data as unknown as RawTimetableSlot[];
 
   for (const rawSlot of slots ?? []) {
-    let alloc = rawSlot.teacher_subject_allocations;
-    if (Array.isArray(alloc)) alloc = alloc[0];
+    const alloc = extractSingle(rawSlot.teacher_subject_allocations);
     if (!alloc) continue;
 
-    const teacher = Array.isArray(alloc.teachers) ? alloc.teachers[0] : alloc.teachers;
-    const subject = Array.isArray(alloc.subjects) ? alloc.subjects[0] : alloc.subjects;
-    const classData = Array.isArray(alloc.classes) ? alloc.classes[0] : alloc.classes;
+    const teacher = extractSingle(alloc.teachers);
+    const subject = extractSingle(alloc.subjects);
+    const classData = extractSingle(alloc.classes);
+    const profile = teacher ? extractSingle(teacher.profiles) : null;
 
-    if (teacher && subject) {
+    if (teacher && profile && subject) {
       const key = `${rawSlot.day_of_week}-${rawSlot.period}`;
       grid[key] = {
         slotId: rawSlot.id,
-        teacherName: teacher.full_name,
+        teacherName: profile.full_name,
         subjectName: subject.name,
         subjectCode: subject.code,
         allocationId: rawSlot.allocation_id,
-        teacherId: teacher.id ?? alloc.teacher_id,
+        teacherId: teacher.id,
         className: classData ? `${classData.grade} ${classData.stream}` : rawSlot.grade,
       };
     }
@@ -170,12 +218,14 @@ export async function fetchTimetableForGrade(
 }
 
 export async function fetchAllGradesWithTimetable(
+  schoolId: string,
   academicYear = 2026,
 ): Promise<string[]> {
-  const supabase = createServerClient();
+  const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("timetable_slots")
     .select("grade")
+    .eq("school_id", schoolId)
     .eq("academic_year", academicYear);
 
   if (error || !data) return [];
@@ -191,19 +241,21 @@ export interface GradeAllocation {
 }
 
 export async function fetchGradeAllocations(
+  schoolId: string,
   gradeLabel: string,
   academicYear = 2026,
 ): Promise<GradeAllocation[]> {
-  const supabase = createServerClient();
+  const supabase = await createSupabaseServerClient();
 
   const { data, error } = await supabase
     .from("teacher_subject_allocations")
     .select(`
-      id, teacher_id, subject_id, class_id, academic_year, created_at,
-      teachers ( id, full_name ),
-      subjects ( name, code ),
-      classes ( id, grade, stream, level, academic_year )
+      id, teacher_id, subject_id, class_id, academic_year, is_active, created_at,
+      teachers ( id, staff_id, tsc_number, profiles ( full_name ) ),
+      subjects ( id, name, code, level, weekly_lessons ),
+      classes ( id, school_id, grade, stream, level, academic_year )
     `)
+    .eq("school_id", schoolId)
     .eq("academic_year", academicYear);
 
   if (error) {
@@ -221,11 +273,14 @@ export async function fetchGradeAllocations(
             : `${row.classes?.grade}-${row.classes?.stream}`;
         return rowLabel === gradeLabel;
     })
-    .map((row): GradeAllocation => ({
+    .map((row): GradeAllocation => {
+      const profile = row.teachers?.profiles;
+      return {
         allocationId: row.id,
         subjectName: row.subjects?.name ?? "Unknown",
         subjectCode: row.subjects?.code ?? "?",
-        teacherName: row.teachers?.full_name ?? "Unknown",
+        teacherName: profile?.full_name ?? "Unknown",
         teacherId: row.teachers?.id ?? "",
-    }));
+      };
+    });
 }

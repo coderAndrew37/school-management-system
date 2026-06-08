@@ -224,12 +224,13 @@ export function AllocationPanel({
                   className={selectCls}
                   disabled={isPending}
                 >
-                  <option value="" disabled>Choose a CBC subject...</option>
+                  {/* Explicit background color applied to prevent native browser engine whiteouts */}
+                  <option value="" disabled className="bg-[#121624] text-white/40">Choose a CBC subject...</option>
                   {(Object.entries(subjectsByLevel) as [SubjectLevel, Subject[]][]).map(
                     ([level, lvlSubjects]) => lvlSubjects.length > 0 && (
-                      <optgroup key={level} label={LEVEL_LABELS[level]} className="bg-[#0c0f1a] text-white/50">
+                      <optgroup key={level} label={LEVEL_LABELS[level]} className="bg-[#121624] text-amber-400 font-bold">
                         {lvlSubjects.map((s) => (
-                          <option key={s.id} value={s.id} className="text-white">
+                          <option key={s.id} value={s.id} className="bg-[#121624] text-white">
                             {s.name} ({s.weekly_lessons}×/wk)
                           </option>
                         ))}
@@ -260,9 +261,10 @@ export function AllocationPanel({
                       className={selectCls}
                       disabled={isPending}
                     >
-                      <option value="" disabled>Select a specific Stream...</option>
+                      {/* Explicit background color applied directly to option tags to fix stream drop down container contrast */}
+                      <option value="" disabled className="bg-[#121624] text-white/40">Select a specific Stream...</option>
                       {filteredClasses.map((cls) => (
-                        <option key={cls.id} value={cls.id} className="text-white">
+                        <option key={cls.id} value={cls.id} className="bg-[#121624] text-white">
                           {formatClassName(cls)}
                         </option>
                       ))}

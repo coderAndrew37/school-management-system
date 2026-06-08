@@ -1,115 +1,170 @@
 "use server";
 
-import { createServerClient } from "@/lib/supabase/client";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/actions/auth";
 import { DAYS, PERIODS } from "@/lib/types/allocation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { sendAllocationEmail } from "../mail";
 
-// ── Zod schemas ───────────────────────────────────────────────────────────────
+// ── 1. Zod schemas ───────────────────────────────────────────────────────────
 
 const allocationSchema = z.object({
   teacherId: z.string().uuid("Invalid teacher"),
   subjectId: z.string().uuid("Invalid subject"),
-  classId: z.string().uuid("Invalid class selection"), // Scalable: Uses Class UUID
+  classId: z.string().uuid("Invalid class selection"),
   academicYear: z.coerce.number().int().min(2024).max(2040).default(2026),
 });
 
-// ── Action result type ────────────────────────────────────────────────────────
+// ── 2. Action result type ────────────────────────────────────────────────────
 
 export interface ActionResult {
   success: boolean;
   message: string;
 }
 
-// ── 1. Create allocation ──────────────────────────────────────────────────────
+// Helper to assert granular management permissions
+function hasAllocationPermission(profile: any): boolean {
+  if (profile.is_super_admin || profile.is_dev) return true;
+  const overrides = profile.allowed_permissions_override ?? [];
+  return overrides.includes("manage_allocations");
+}
+
+// ── 3. Create allocation ──────────────────────────────────────────────────────
 
 export async function createAllocationAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  const raw = {
-    teacherId: formData.get("teacherId"),
-    subjectId: formData.get("subjectId"),
-    classId: formData.get("classId"),
-    academicYear: formData.get("academicYear") ?? 2026,
-  };
+  try {
+    const session = await getSession();
+    if (!session?.profile) {
+      return { success: false, message: "Unauthorised" };
+    }
 
-  const parsed = allocationSchema.safeParse(raw);
-  if (!parsed.success) {
-    return {
-      success: false,
-      message: parsed.error.issues[0]?.message ?? "Invalid input",
+    // Enforce dynamic authorization constraints over rigid string mapping checks
+    if (!hasAllocationPermission(session.profile)) {
+      return { success: false, message: "Unauthorised: Insufficient structural management permissions." };
+    }
+
+    const { school_id } = session.profile;
+    if (!school_id) {
+      return { success: false, message: "Action failed: Missing structural school context linkages." };
+    }
+
+    const raw = {
+      teacherId: formData.get("teacherId"),
+      subjectId: formData.get("subjectId"),
+      classId: formData.get("classId"),
+      academicYear: formData.get("academicYear") ?? 2026,
     };
-  }
 
-  const { teacherId, subjectId, classId, academicYear } = parsed.data;
-  const supabase = createServerClient();
-
-  // --- Fetch info for email (Joining classes to get the grade label) ---
-  const [teacherRes, subjectRes, classRes] = await Promise.all([
-    supabase
-      .from("teachers")
-      .select("full_name, email")
-      .eq("id", teacherId)
-      .single(),
-    supabase.from("subjects").select("name").eq("id", subjectId).single(),
-    supabase.from("classes").select("grade, stream").eq("id", classId).single(),
-  ]);
-
-  const { error } = await supabase.from("teacher_subject_allocations").insert({
-    teacher_id: teacherId,
-    subject_id: subjectId,
-    class_id: classId,
-    academic_year: academicYear,
-  });
-
-  if (error) {
-    if (error.code === "23505") {
+    const parsed = allocationSchema.safeParse(raw);
+    if (!parsed.success) {
       return {
         success: false,
-        message:
-          "This subject is already allocated for this specific class and year.",
+        message: parsed.error.issues[0]?.message ?? "Invalid input",
       };
     }
-    console.error("createAllocation error:", error);
-    return {
-      success: false,
-      message: "Failed to save allocation. Please try again.",
-    };
-  }
 
-  // Send Notification
-  if (teacherRes.data && subjectRes.data && classRes.data) {
-    try {
-      await sendAllocationEmail({
-        teacherEmail: teacherRes.data.email,
-        teacherName: teacherRes.data.full_name,
-        subjectName: subjectRes.data.name,
-        grade: `${classRes.data.grade} (${classRes.data.stream})`,
-      });
-    } catch (mailError) {
-      console.error("Email failed, but allocation saved:", mailError);
+    const { teacherId, subjectId, classId, academicYear } = parsed.data;
+    const supabase = await createSupabaseServerClient();
+
+    interface TeacherProfileJoin {
+      id: string;
+      profiles: {
+        full_name: string;
+        email?: string;
+      } | {
+        full_name: string;
+        email?: string;
+      }[] | null;
     }
-  }
 
-  revalidatePath("/admin/allocation");
-  revalidatePath("/admin/timetable");
-  return { success: true, message: "Subject allocated and teacher notified." };
+    const [teacherRes, subjectRes, classRes] = await Promise.all([
+      supabase
+        .from("teachers")
+        .select(`
+          id,
+          profiles (full_name, email)
+        `)
+        .eq("id", teacherId)
+        .single(),
+      supabase.from("subjects").select("name").eq("id", subjectId).single(),
+      supabase.from("classes").select("grade, stream").eq("id", classId).eq("school_id", school_id).single(),
+    ]);
+
+    const { error } = await supabase.from("teacher_subject_allocations").insert({
+      teacher_id: teacherId,
+      subject_id: subjectId,
+      class_id: classId,
+      academic_year: academicYear,
+      school_id: school_id, 
+    });
+
+    if (error) {
+      if (error.code === "23505") {
+        return {
+          success: false,
+          message: "This subject is already allocated for this specific class and year.",
+        };
+      }
+      console.error("createAllocation error:", error);
+      return {
+        success: false,
+        message: "Failed to save allocation. Please try again.",
+      };
+    }
+
+    if (teacherRes.data && subjectRes.data && classRes.data) {
+      try {
+        const rawTeacher = teacherRes.data as unknown as TeacherProfileJoin;
+        const teacherProfile = Array.isArray(rawTeacher.profiles)
+          ? rawTeacher.profiles[0]
+          : rawTeacher.profiles;
+
+        await sendAllocationEmail({
+          teacherEmail: teacherProfile?.email || "assigned-teacher@kibaliacademy.co.ke",
+          teacherName: teacherProfile?.full_name || "Teacher",
+          subjectName: subjectRes.data.name,
+          grade: `${classRes.data.grade} (${classRes.data.stream})`,
+        });
+      } catch (mailError) {
+        console.error("Email failed, but allocation saved:", mailError);
+      }
+    }
+
+    revalidatePath("/admin/allocation");
+    revalidatePath("/admin/timetable");
+    return { success: true, message: "Subject allocated and teacher notified." };
+  } catch (err) {
+    console.error("[createAllocationAction] Fallback crash:", err);
+    return { success: false, message: "An unexpected error occurred during creation routing." };
+  }
 }
 
-// ── 2. Delete allocation ──────────────────────────────────────────────────────
+// ── 4. Delete allocation ──────────────────────────────────────────────────────
 
 export async function deleteAllocationAction(
   allocationId: string,
 ): Promise<ActionResult> {
-  if (!allocationId)
-    return { success: false, message: "No allocation ID provided." };
+  if (!allocationId) return { success: false, message: "No allocation ID provided." };
 
-  const supabase = createServerClient();
+  const session = await getSession();
+  if (!session?.profile) return { success: false, message: "Unauthorised" };
+
+  if (!hasAllocationPermission(session.profile)) {
+    return { success: false, message: "Unauthorised: Insufficient management privileges." };
+  }
+
+  const { school_id } = session.profile;
+  if (!school_id) return { success: false, message: "Missing tenant workspace tracking context." };
+
+  const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("teacher_subject_allocations")
     .delete()
-    .eq("id", allocationId);
+    .eq("id", allocationId)
+    .eq("school_id", school_id); 
 
   if (error) {
     console.error("deleteAllocation error:", error);
@@ -121,27 +176,35 @@ export async function deleteAllocationAction(
   return { success: true, message: "Allocation removed." };
 }
 
-// ── 3. Generate timetable ─────────────────────────────────────────────────────
+// ── 5. Generate timetable ─────────────────────────────────────────────────────
 
 export async function generateTimetableAction(
   academicYear = 2026,
 ): Promise<ActionResult> {
-  const supabase = createServerClient();
+  const session = await getSession();
+  if (!session?.profile) return { success: false, message: "Unauthorised" };
+  
+  if (!hasAllocationPermission(session.profile)) {
+    return { success: false, message: "Unauthorised: Insufficient management privileges." };
+  }
 
-  // Fetch allocations joined with class labels and subject rules
+  const { school_id } = session.profile;
+  if (!school_id) return { success: false, message: "Unauthorised" };
+
+  const supabase = await createSupabaseServerClient();
+
   const { data: allocationsRaw, error: fetchError } = await supabase
     .from("teacher_subject_allocations")
-    .select(
-      `
+    .select(`
       id, 
       teacher_id, 
       class_id, 
       academic_year,
       classes ( grade, stream ),
       subjects ( weekly_lessons )
-    `,
-    )
-    .eq("academic_year", academicYear);
+    `)
+    .eq("academic_year", academicYear)
+    .eq("school_id", school_id);
 
   if (fetchError || !allocationsRaw) {
     console.error("generateTimetable fetch error:", fetchError);
@@ -151,7 +214,7 @@ export async function generateTimetableAction(
   type RawAllocation = {
     id: string;
     teacher_id: string;
-    gradeLabel: string; // Used for identifying unique class groups
+    gradeLabel: string;
     subjects: { weekly_lessons: number } | null;
   };
 
@@ -165,7 +228,6 @@ export async function generateTimetableAction(
   const allocations: RawAllocation[] = (allocationsRaw as unknown as AllocationRow[]).map((row) => ({
     id: row.id,
     teacher_id: row.teacher_id,
-    // Use Grade + Stream as the unique identifier for the logic
     gradeLabel: `${row.classes.grade}-${row.classes.stream}`,
     subjects: Array.isArray(row.subjects) ? row.subjects[0] : row.subjects,
   }));
@@ -189,6 +251,7 @@ export async function generateTimetableAction(
     day_of_week: number;
     period: number;
     academic_year: number;
+    school_id: string;
   };
 
   const slotsToInsert: SlotInsert[] = [];
@@ -207,7 +270,6 @@ export async function generateTimetableAction(
       for (let i = 0; i < count; i++) lessonQueue.push(alloc);
     }
 
-    // Seed based on grade name for consistency
     let seed = grade.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
     const rng = () => {
       seed = (seed * 1664525 + 1013904223) & 0xffffffff;
@@ -224,7 +286,6 @@ export async function generateTimetableAction(
         const gradeKey = `${grade}-${day}-${period}`;
         const teacherKey = `${alloc.teacher_id}-${day}-${period}`;
 
-        // Conflict check: ensure neither the grade nor teacher is already busy
         if (gradeSlots.has(gradeKey) || teacherSlots.has(teacherKey)) {
           continue;
         }
@@ -233,10 +294,11 @@ export async function generateTimetableAction(
         teacherSlots.add(teacherKey);
         slotsToInsert.push({
           allocation_id: alloc.id,
-          grade: grade, // Still stored as label in timetable_slots
+          grade: grade,
           day_of_week: day,
           period,
           academic_year: academicYear,
+          school_id: school_id,
         });
         lessonIdx++;
       }
@@ -246,7 +308,8 @@ export async function generateTimetableAction(
   const { error: deleteError } = await supabase
     .from("timetable_slots")
     .delete()
-    .eq("academic_year", academicYear);
+    .eq("academic_year", academicYear)
+    .eq("school_id", school_id);
 
   if (deleteError) {
     return { success: false, message: "Failed to clear existing timetable." };

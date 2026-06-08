@@ -9,9 +9,9 @@ import {
   UserRoundPlus,
 } from "lucide-react";
 import { getSession } from "@/lib/actions/auth";
-import { createServerClient } from "@/lib/supabase/client";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fetchSubjects, fetchAllocations } from "@/lib/data/allocation";
-import type { Teacher } from "@/lib/types/dashboard";
+import type { Teacher, TeacherStatus } from "@/lib/types/dashboard";
 import { GenerateTimetableButton } from "../../../_components/allocation/GenerateTimetableButton";
 import { AllocationPanel } from "../../../_components/allocation/AllocationPanel";
 import { SubjectManagerModal } from "../../../_components/allocation/SubjectManagerModal";
@@ -21,21 +21,74 @@ import { Class } from "@/lib/types/allocation";
 export const metadata = { title: "Subject Allocation | Kibali Academy" };
 export const revalidate = 60;
 
-async function fetchTeachers(): Promise<Teacher[]> {
-  const supabase = createServerClient();
-  const { data, error } = await supabase
-    .from("teachers")
-    .select("id, full_name, email, tsc_number, phone_number, created_at")
-    .order("full_name");
-  if (error) return [];
-  return (data ?? []) as Teacher[];
+// ── 1. Strict Internal Data Interface Contracts ──────────────────────────────
+
+interface RawTeacherRow {
+  id: string;
+  staff_id: string | null;
+  tsc_number: string | null;
+  status: string;
+  invite_accepted: boolean;
+  last_invite_sent: string | null;
+  created_at: string;
+  profiles: {
+    full_name: string;
+    email: string;
+    phone_number: string | null;
+    avatar_url?: string | null;
+  } | {
+    full_name: string;
+    email: string;
+    phone_number: string | null;
+    avatar_url?: string | null;
+  }[] | null;
 }
 
-async function fetchClasses(): Promise<Class[]> {
-  const supabase = createServerClient();
+// ── 2. Server Data Fetching Block ────────────────────────────────────────────
+
+async function fetchTeachers(schoolId: string): Promise<Teacher[]> {
+  const supabase = await createSupabaseServerClient();
+  
+  const { data, error } = await supabase
+    .from("teachers")
+    .select(`
+      id, staff_id, tsc_number, status, invite_accepted, last_invite_sent, created_at,
+      profiles ( full_name, email, phone_number, avatar_url )
+    `)
+    .eq("school_id", schoolId)
+    .eq("status", "active");
+
+  if (error || !data) {
+    console.error("Error fetching multi-tenant teachers:", error);
+    return [];
+  }
+
+  const rawRows = data as unknown as RawTeacherRow[];
+
+  return rawRows.map((row): Teacher => {
+    const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+    return {
+      id: row.id,
+      staff_id: row.staff_id ?? "PENDING",
+      full_name: profile?.full_name ?? "Unknown Staff",
+      email: profile?.email ?? "",
+      tsc_number: row.tsc_number,
+      phone_number: profile?.phone_number ?? null, // Fixed: Maps undefined fallback seamlessly back to string | null
+      status: row.status as TeacherStatus, // Fixed: Force casts verified schema string checks safely to type matching targets
+      last_invite_sent: row.last_invite_sent,
+      created_at: row.created_at,
+      invite_accepted: row.invite_accepted,
+      avatar_url: profile?.avatar_url ?? null,
+    };
+  }).sort((a, b) => a.full_name.localeCompare(b.full_name));
+}
+
+async function fetchClasses(schoolId: string): Promise<Class[]> {
+  const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("classes")
-    .select("id, grade, stream, level, academic_year, created_at")
+    .select("id, school_id, grade, stream, level, academic_year, created_at")
+    .eq("school_id", schoolId)
     .order("grade", { ascending: true });
 
   if (error) {
@@ -45,30 +98,40 @@ async function fetchClasses(): Promise<Class[]> {
   return (data ?? []) as Class[];
 }
 
+// ── 3. Main Page Module Component ───────────────────────────────────────────
+
 export default async function AllocationPage() {
-  // ── Access Control Guard ───────────────────────────────────────────────────
+  // ── Access Control & Multi-Tenant Hook Verification Guard ─────────────────
   const session = await getSession();
   
   if (!session || !session.profile) {
     redirect("/login?redirectTo=/admin/allocation");
   }
 
-  const { base_role, is_super_admin, is_dev } = session.profile;
+  const { base_role, is_super_admin, is_dev, school_id } = session.profile;
   const isPlatformAdmin = is_super_admin || is_dev;
 
   if (base_role !== "admin" && !isPlatformAdmin) {
     redirect("/dashboard");
   }
 
-  // ── Data Loading ───────────────────────────────────────────────────────────
+  if (!school_id) {
+    return (
+      <div className="min-h-screen bg-[#0c0f1a] flex items-center justify-center text-white text-xs font-mono">
+        CRITICAL ERROR: Active administrative session missing mandatory isolation school_id context tracking bounds.
+      </div>
+    );
+  }
+
+  // ── Data Loading Pipeline Context ──────────────────────────────────────────
   const { academicYear } = await getActiveTermYear();
 
   const [teachers, subjects, allocations, classes] = await Promise.all([
-    fetchTeachers(),
-    fetchSubjects(),
-    fetchAllocations(academicYear),
-    fetchClasses(),
-  ]);
+  fetchTeachers(school_id),
+  fetchSubjects(), 
+  fetchAllocations(school_id, academicYear), // Passed school_id here explicitly
+  fetchClasses(school_id),
+]);
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] font-[family-name:var(--font-body)]">
@@ -91,7 +154,7 @@ export default async function AllocationPage() {
               <h1 className="text-2xl font-bold tracking-tight text-white">
                 Subject Allocation
               </h1>
-              <p className="text-[11px] text-white/25 mt-0.5">
+              <p className="text-[11px] text-white/25 mt-0.5 font-mono">
                 Academic Year {academicYear}
               </p>
             </div>
@@ -168,7 +231,7 @@ export default async function AllocationPage() {
   );
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── 4. Sub-components ────────────────────────────────────────────────────────
 
 function NavLink({
   href,
@@ -186,7 +249,7 @@ function NavLink({
       href={href}
       className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition-all ${
         primary
-          ? "bg-amber-400 text-[#0c0f1a] hover:bg-amber-300"
+          ? "bg-amber-400 text-[#0c0f1a] hover:bg-amber-300 shadow-md shadow-amber-400/10"
           : "border border-white/10 text-white/60 hover:text-white hover:border-white/20 hover:bg-white/5"
       }`}
     >
@@ -213,10 +276,10 @@ function SummaryChip({
 }) {
   return (
     <div
-      className={`rounded-xl border px-4 py-3 text-center ${chipColors[color]}`}
+      className={`rounded-xl border px-4 py-3 text-center transition-all duration-300 hover:scale-[1.01] ${chipColors[color]}`}
     >
-      <p className="text-2xl font-bold tabular-nums">{value}</p>
-      <p className="text-[10px] uppercase tracking-widest text-white/30 mt-0.5">
+      <p className="text-2xl font-bold tabular-nums tracking-tight">{value}</p>
+      <p className="text-[10px] font-black uppercase tracking-widest text-white/30 mt-0.5">
         {label}
       </p>
     </div>
@@ -225,9 +288,9 @@ function SummaryChip({
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-20 rounded-2xl border border-dashed border-white/10">
-      <p className="text-4xl mb-3">📋</p>
-      <p className="text-white/40 text-sm px-6 text-center">{message}</p>
+    <div className="flex flex-col items-center justify-center py-20 rounded-2xl border border-dashed border-white/10 bg-white/[0.01]">
+      <p className="text-3xl mb-3 opacity-60">📋</p>
+      <p className="text-white/40 text-xs px-6 text-center tracking-tight max-w-xs">{message}</p>
     </div>
   );
 }

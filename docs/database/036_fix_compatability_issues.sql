@@ -1068,3 +1068,55 @@ ORDER BY policyname;
 ALTER TABLE public.class_teacher_assignments
 ADD CONSTRAINT class_teacher_assignments_teacher_id_fkey 
 FOREIGN KEY (teacher_id) REFERENCES public.teachers(id) ON DELETE CASCADE;
+
+ALTER TABLE public.teacher_subject_allocations
+ADD CONSTRAINT teacher_subject_allocations_teacher_id_fkey 
+FOREIGN KEY (teacher_id) REFERENCES public.teachers(id) ON DELETE CASCADE;
+
+-- Index for quick lookups by teacher
+CREATE INDEX IF NOT EXISTS idx_tsa_teacher_id 
+ON public.teacher_subject_allocations USING btree (teacher_id);
+
+-- Index for class-level breakdowns and checking active statuses
+CREATE INDEX IF NOT EXISTS idx_tsa_class_active 
+ON public.teacher_subject_allocations USING btree (class_id, is_active);
+
+-- Clean slate: remove previous rough-draft structural attempts
+DROP POLICY IF EXISTS "Allow school admins to manage allocations" ON public.teacher_subject_allocations;
+DROP POLICY IF EXISTS "Allow authorized school management to handle allocations" ON public.teacher_subject_allocations;
+
+-- Create the refined dynamic permission isolation bounds rule
+CREATE POLICY "Enforce dynamic permission boundaries on allocation changes" 
+ON public.teacher_subject_allocations
+FOR ALL 
+TO authenticated
+USING (
+  -- 1. Global Bypass Escape-Hatch: Let Devs/Super Admins manage across structural boundaries
+  (SELECT is_super_admin OR is_dev FROM public.profiles WHERE id = auth.uid()) = true
+  OR
+  (
+    -- 2. Multi-Tenant School Context Isolation Enforcement
+    school_id = (SELECT school_id FROM public.profiles WHERE id = auth.uid())
+    AND 
+    -- 3. Granular Action Level Permission Flag Assertions
+    'manage_allocations' = ANY (
+      SELECT unnest(allowed_permissions_override) 
+      FROM public.profiles 
+      WHERE id = auth.uid()
+    )
+  )
+)
+WITH CHECK (
+  -- Mirror checks strictly to safe-guard creation operations against arbitrary data injection
+  (SELECT is_super_admin OR is_dev FROM public.profiles WHERE id = auth.uid()) = true
+  OR
+  (
+    school_id = (SELECT school_id FROM public.profiles WHERE id = auth.uid())
+    AND 
+    'manage_allocations' = ANY (
+      SELECT unnest(allowed_permissions_override) 
+      FROM public.profiles 
+      WHERE id = auth.uid()
+    )
+  )
+);
