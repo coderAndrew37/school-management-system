@@ -16,8 +16,6 @@ import {
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-// ── Strict Structural Types ──────────────────────────────────────────────────
-
 export interface SubjectLeaderboardItem {
   subject_id: string;
   subject_name: string;
@@ -42,28 +40,27 @@ function currentTerm() {
 
 export default async function AnalyticsPage({ searchParams }: Props) {
   const session = await getSession();
-  
-  if (!session || !session.profile) {
+
+  if (!session?.profile) {
     redirect("/login?redirectTo=/admin/analytics");
   }
 
-  const { base_role, is_super_admin, is_dev } = session.profile;
+  const { base_role, is_super_admin, is_dev, school_id } = session.profile;
   const isPlatformAdmin = is_super_admin || is_dev;
 
-  // Protect the route using the updated BaseRole structural check
   if (base_role !== "admin" && !isPlatformAdmin) {
     redirect("/dashboard");
   }
 
-  const sp = await searchParams;
-  const term = Math.min(
-    3,
-    Math.max(1, parseInt(sp.term ?? String(currentTerm()), 10)),
-  );
+  if (!school_id) {
+    redirect("/login?redirectTo=/admin/analytics");
+  }
+
+  const sp   = await searchParams;
+  const term = Math.min(3, Math.max(1, parseInt(sp.term ?? String(currentTerm()), 10)));
   const year = parseInt(sp.year ?? "2026", 10);
 
-  // Fetch metrics data directly using the native return type contract
-  const data: AnalyticsOverview = await fetchAnalyticsOverview(term, year);
+  const data: AnalyticsOverview = await fetchAnalyticsOverview(school_id, term, year);
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] font-[family-name:var(--font-body)]">
@@ -74,7 +71,8 @@ export default async function AnalyticsPage({ searchParams }: Props) {
       </div>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
-        {/* Header */}
+
+        {/* ── Header ── */}
         <header className="flex flex-wrap items-start justify-between gap-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-amber-400/70">
@@ -87,27 +85,17 @@ export default async function AnalyticsPage({ searchParams }: Props) {
               CBC Analytics
             </h1>
             <p className="mt-1 text-xs text-white/35 ml-12">
-              Assessment performance · Grade breakdowns · Subject analysis ·
-              Term {term} · {year}
+              Assessment performance · Grade breakdowns · Subject analysis · Term {term} · {year}
             </p>
           </div>
           <nav className="flex flex-wrap items-center gap-2">
-            <NavLink
-              href="/admin"
-              icon={<LayoutDashboard className="h-4 w-4" />}
-            >
+            <NavLink href="/admin" icon={<LayoutDashboard className="h-4 w-4" />}>
               Dashboard
             </NavLink>
-            <NavLink
-              href="/admin/students"
-              icon={<Users className="h-4 w-4" />}
-            >
+            <NavLink href="/admin/students" icon={<Users className="h-4 w-4" />}>
               Students
             </NavLink>
-            <NavLink
-              href="/admin/heatmap"
-              icon={<BarChart3 className="h-4 w-4" />}
-            >
+            <NavLink href="/admin/heatmap" icon={<BarChart3 className="h-4 w-4" />}>
               Heatmap
             </NavLink>
             <NavLink
@@ -120,7 +108,7 @@ export default async function AnalyticsPage({ searchParams }: Props) {
           </nav>
         </header>
 
-        {/* Term / year selector */}
+        {/* ── Term / year selector ── */}
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1">
             {([1, 2, 3] as const).map((t) => (
@@ -156,7 +144,7 @@ export default async function AnalyticsPage({ searchParams }: Props) {
           </div>
         </div>
 
-        {/* KPI strip */}
+        {/* ── KPI strip ── */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <StatCard
             icon={<GraduationCap className="h-4 w-4" />}
@@ -185,7 +173,9 @@ export default async function AnalyticsPage({ searchParams }: Props) {
           <StatCard
             icon={<BookOpen className="h-4 w-4" />}
             label="Subjects"
-            value={data.subjectLeaderboard.length}
+            // totalSubjects comes from the subjects table directly —
+            // always accurate even when no assessments exist yet.
+            value={data.totalSubjects}
             color="orange"
           />
           <StatCard
@@ -196,15 +186,15 @@ export default async function AnalyticsPage({ searchParams }: Props) {
           />
         </div>
 
-        {/* Hub Client Component */}
+        {/* ── Hub Client Component ── */}
         <AnalyticsHub data={data} />
 
         <footer className="pt-4 border-t border-white/[0.05]">
           <p className="text-center text-xs text-white/20">
-            Kibali Academy · CBC School Management System · Academic Year {year}{" "}
-            · Term {term}
+            Kibali Academy · CBC School Management System · Academic Year {year} · Term {term}
           </p>
         </footer>
+
       </main>
     </div>
   );
@@ -240,40 +230,14 @@ function NavLink({
 }
 
 type StatColor = "amber" | "sky" | "emerald" | "rose" | "orange" | "violet";
-const STAT_COLORS: Record<
-  StatColor,
-  { border: string; bg: string; text: string }
-> = {
-  amber: {
-    border: "border-amber-400/20",
-    bg: "bg-amber-400/5",
-    text: "text-amber-400",
-  },
-  sky: {
-    border: "border-sky-400/20",
-    bg: "bg-sky-400/5",
-    text: "text-sky-400",
-  },
-  emerald: {
-    border: "border-emerald-400/20",
-    bg: "bg-emerald-400/5",
-    text: "text-emerald-400",
-  },
-  rose: {
-    border: "border-rose-400/20",
-    bg: "bg-rose-400/5",
-    text: "text-rose-400",
-  },
-  orange: {
-    border: "border-orange-400/20",
-    bg: "bg-orange-400/5",
-    text: "text-orange-400",
-  },
-  violet: {
-    border: "border-violet-400/20",
-    bg: "bg-violet-400/5",
-    text: "text-violet-400",
-  },
+
+const STAT_COLORS: Record<StatColor, { border: string; bg: string; text: string }> = {
+  amber:   { border: "border-amber-400/20",   bg: "bg-amber-400/5",   text: "text-amber-400"   },
+  sky:     { border: "border-sky-400/20",     bg: "bg-sky-400/5",     text: "text-sky-400"     },
+  emerald: { border: "border-emerald-400/20", bg: "bg-emerald-400/5", text: "text-emerald-400" },
+  rose:    { border: "border-rose-400/20",    bg: "bg-rose-400/5",    text: "text-rose-400"    },
+  orange:  { border: "border-orange-400/20",  bg: "bg-orange-400/5",  text: "text-orange-400"  },
+  violet:  { border: "border-violet-400/20",  bg: "bg-violet-400/5",  text: "text-violet-400"  },
 };
 
 function StatCard({
@@ -289,9 +253,7 @@ function StatCard({
 }) {
   const s = STAT_COLORS[color];
   return (
-    <div
-      className={`rounded-xl border ${s.border} ${s.bg} px-3 py-3 text-center`}
-    >
+    <div className={`rounded-xl border ${s.border} ${s.bg} px-3 py-3 text-center`}>
       <div className={`flex justify-center mb-1 ${s.text}`}>{icon}</div>
       <p className={`text-xl font-bold tabular-nums ${s.text}`}>{value}</p>
       <p className="text-[9px] uppercase tracking-widest text-white/30 mt-0.5 leading-tight">

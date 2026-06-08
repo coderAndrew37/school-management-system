@@ -14,15 +14,21 @@ export default async function BulkInvitePage() {
     redirect("/login?redirectTo=/admin/invites");
   }
 
-  const { base_role, is_super_admin, is_dev } = session.profile;
+  const { is_super_admin, is_dev, school_id, allowed_permissions_override } = session.profile;
   const isPlatformAdmin = is_super_admin || is_dev;
+  const hasAccess = isPlatformAdmin || allowed_permissions_override?.includes("manage_communications") || allowed_permissions_override?.includes("manage_allocations");
 
-  // Protect the route using the updated BaseRole structural check
-  if (base_role !== "admin" && !isPlatformAdmin) {
+  // Granular architecture permission check replacement
+  if (!hasAccess) {
     redirect("/dashboard");
   }
 
-  const { parents, error } = await fetchParentsInviteStatus();
+  if (!school_id) {
+    redirect("/dashboard");
+  }
+
+  // Inject structural school isolation boundaries
+  const { parents, error } = await fetchParentsInviteStatus(school_id);
   if (error) console.error("[BulkInvitePage]", error);
 
   return <BulkInviteClient parents={parents ?? []} />;

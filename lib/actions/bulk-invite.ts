@@ -1,8 +1,6 @@
 "use server";
 
 // lib/actions/bulk-invite.ts
-// Bulk parent invite management — resend, filter, batch operations
-
 import { getSession } from "@/lib/actions/auth";
 import { sendWelcomeEmail } from "@/lib/mail";
 import { revalidatePath } from "next/cache";
@@ -38,30 +36,37 @@ interface RawInviteStatusRow {
 interface RawResendInviteRow {
   email: string;
   full_name: string;
+  school_id: string; // Captured for security alignment assertions
   student_parents: {
     students: { full_name: string; current_grade: string } | null;
   }[] | null;
 }
 
+// Internal permission verification helper
+function hasCommunicationPermission(profile: any): boolean {
+  if (profile.is_super_admin || profile.is_dev) return true;
+  const overrides = profile.allowed_permissions_override ?? [];
+  return overrides.includes("manage_communications") || overrides.includes("manage_allocations");
+}
+
 // ── 2. Fetch all parents with invite status ──────────────────────────────────────
 
-export async function fetchParentsInviteStatus(): Promise<{
+export async function fetchParentsInviteStatus(
+  schoolId: string
+): Promise<{
   parents: ParentInviteRow[];
   error?: string;
 }> {
   const session = await getSession();
-  if (!session || !session.profile) {
+  if (!session?.profile) {
     return { parents: [], error: "Unauthorized" };
   }
 
-  const { base_role, is_super_admin, is_dev } = session.profile;
-  const isPlatformAdmin = is_super_admin || is_dev;
-
-  if (base_role !== "admin" && !isPlatformAdmin) {
+  if (!hasCommunicationPermission(session.profile)) {
     return { parents: [], error: "Unauthorized" };
   }
 
-  // Fetch parents from profiles with their children mapped through parent_profile_id
+  // Isolated database execution pipeline bounds
   const { data: parents, error } = await supabaseAdmin
     .from("profiles")
     .select(`
@@ -70,13 +75,13 @@ export async function fetchParentsInviteStatus(): Promise<{
         students ( id, full_name, current_grade )
       )
     `)
+    .eq("school_id", schoolId) // Multi-tenant safety injection point
     .eq("base_role", "parent")
     .order("full_name")
     .returns<RawInviteStatusRow[]>();
 
   if (error) return { parents: [], error: error.message };
 
-  // Fetch auth users to determine confirmation status
   const { data: authList } = await supabaseAdmin.auth.admin.listUsers({
     perPage: 1000,
   });
@@ -109,29 +114,30 @@ export async function resendParentInviteAction(parentId: string): Promise<{
   error?: string;
 }> {
   const session = await getSession();
-  if (!session || !session.profile) {
+  if (!session?.profile) {
     return { success: false, error: "Unauthorized" };
   }
 
-  const { base_role, is_super_admin, is_dev } = session.profile;
-  const isPlatformAdmin = is_super_admin || is_dev;
-
-  if (base_role !== "admin" && !isPlatformAdmin) {
+  if (!hasCommunicationPermission(session.profile)) {
     return { success: false, error: "Unauthorized" };
   }
+
+  const { school_id } = session.profile;
+  if (!school_id) return { success: false, error: "Missing tenant workspace environment context context linkages" };
 
   try {
     const { data: parent, error: pErr } = await supabaseAdmin
       .from("profiles")
       .select(`
-        email, full_name,
+        email, full_name, school_id,
         student_parents ( students ( full_name, current_grade ) )
       `)
       .eq("id", parentId)
+      .eq("school_id", school_id) // Ensures an admin can't execute loops target cross-tenant ids
       .eq("base_role", "parent")
       .maybeSingle();
 
-    if (pErr || !parent) throw new Error("Parent profile not found");
+    if (pErr || !parent) throw new Error("Parent profile not found within your authorized school workspace context.");
     
     const typedParent = parent as unknown as RawResendInviteRow;
 
@@ -156,11 +162,11 @@ export async function resendParentInviteAction(parentId: string): Promise<{
       setupLink: linkData.properties.action_link,
     });
 
-    // Update last_invite_sent timestamp directly on profiles table
     await supabaseAdmin
       .from("profiles")
       .update({ last_invite_sent: new Date().toISOString() })
       .eq("id", parentId)
+      .eq("school_id", school_id) // Match tracking boundary bounds explicitly on updates
       .eq("base_role", "parent");
 
     revalidatePath("/admin/invites");
@@ -180,25 +186,12 @@ export async function bulkResendInvitesAction(parentIds: string[]): Promise<{
   errors: string[];
 }> {
   const session = await getSession();
-  if (!session || !session.profile) {
-    return {
-      success: false,
-      sent: 0,
-      failed: parentIds.length,
-      errors: ["Unauthorized"],
-    };
+  if (!session?.profile) {
+    return { success: false, sent: 0, failed: parentIds.length, errors: ["Unauthorized"] };
   }
 
-  const { base_role, is_super_admin, is_dev } = session.profile;
-  const isPlatformAdmin = is_super_admin || is_dev;
-
-  if (base_role !== "admin" && !isPlatformAdmin) {
-    return {
-      success: false,
-      sent: 0,
-      failed: parentIds.length,
-      errors: ["Unauthorized"],
-    };
+  if (!hasCommunicationPermission(session.profile)) {
+    return { success: false, sent: 0, failed: parentIds.length, errors: ["Unauthorized"] };
   }
 
   let sent = 0;
@@ -213,7 +206,7 @@ export async function bulkResendInvitesAction(parentIds: string[]): Promise<{
       failed++;
       if (result.error) errors.push(`${parentId}: ${result.error}`);
     }
-    // Rate-limit to prevent hitting SMTP or Auth API limits
+    // Maintain safe non-blocking event loops timeouts to circumvent SMTP thresholds
     await new Promise((r) => setTimeout(r, 200));
   }
 

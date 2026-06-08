@@ -1120,3 +1120,6 @@ WITH CHECK (
     )
   )
 );
+
+ALTER TABLE public.profiles 
+ADD COLUMN last_invite_sent timestamp with time zone null;
