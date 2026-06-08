@@ -121,7 +121,7 @@ export async function assignClassTeacherAction(
 
     if (insertError) throw insertError;
 
-    REVALIDATE_PATHS.forEach(revalidatePath);
+    REVALIDATE_PATHS.forEach((path) => revalidatePath(path));
 
     return { success: true, message: "Class teacher assigned successfully" };
   } catch (err) {
@@ -145,17 +145,22 @@ export async function relieveClassTeacherAction(
 
     if (!assignmentId) throw new Error("Assignment ID is required");
 
-    const { error, count } = await supabaseAdmin
+    // FIXED: Drop the invalid second argument configuration object
+    const { data, error } = await supabaseAdmin
       .from("class_teacher_assignments")
       .update({ is_active: false, relieved_at: new Date().toISOString() })
       .eq("id",        assignmentId)
       .eq("school_id", schoolId)
-      .select("id", { count: "exact", head: true });
+      .select("id"); // Simply select the ID of the updated row
 
     if (error) throw error;
-    if (count === 0) throw new Error("Assignment not found or already relieved");
+    
+    // If the array is empty, it means no active row matched the given assignmentId + schoolId combo
+    if (!data || data.length === 0) {
+      throw new Error("Assignment not found or already relieved");
+    }
 
-    REVALIDATE_PATHS.forEach(revalidatePath);
+    REVALIDATE_PATHS.forEach((path) => revalidatePath(path));
 
     return { success: true, message: "Teacher relieved successfully" };
   } catch (err) {
@@ -164,7 +169,6 @@ export async function relieveClassTeacherAction(
     return { success: false, message: msg };
   }
 }
-
 // ── Fetch Current Teacher's Own Assignments ───────────────────────────────────
 
 /**
