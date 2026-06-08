@@ -598,7 +598,7 @@ export async function broadcastEmail({
 // where `parent_id` (not `parent_id`) references `profiles.id`.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type RecipientRow = { id: string; full_name: string; email: string };
+type RecipientRow = { id: string; full_name: string; email: string, phone_number: string | null };
 
 // Raw shape for the grade_parents join:
 //   student_parents
@@ -610,11 +610,12 @@ interface RawGradeParentRow {
 
 export async function resolveAudienceRecipients(
   audience: AudienceSelection,
+  schoolId: string, // UPDATED: Added schoolId argument to fix compilation error
 ): Promise<SingleRecipient[]> {
   const supabase = await createSupabaseServerClient();
 
   switch (audience.type) {
-    // ── Single known recipient — already resolved by the caller ──────────────
+    // ── Single known recipient ───────────────────────────────────────────────
     case "single_teacher":
     case "single_parent": {
       if (audience.individual === null) return [];
@@ -623,65 +624,57 @@ export async function resolveAudienceRecipients(
 
     // ── All teachers ──────────────────────────────────────────────────────────
     case "all_teachers": {
+      // Teachers details live in the profiles table under base_role
       const { data, error } = await supabase
-        .from("teachers")
+        .from("profiles")
         .select("id, full_name, email, phone_number")
+        .eq("base_role", "teacher")
+        .eq("school_id", schoolId)
         .returns<RecipientRow[]>();
 
       if (error) {
-        console.error("resolveAudienceRecipients [all_teachers] error:", error);
+        console.error("resolveAudienceRecipients [all_teachers] error:", error.message);
         return [];
       }
-      return data ?? [];
+      return (data ?? []).map((r) => ({ ...r, email: r.email ?? "" }));
     }
 
     // ── All parents ───────────────────────────────────────────────────────────
-    // Parents are profiles with role = 'parent'. There is no `parents` table.
     case "all_parents": {
       const { data, error } = await supabase
         .from("profiles")
         .select("id, full_name, email, phone_number")
-        .eq("role", "parent")
+        .eq("base_role", "parent")
+        .eq("school_id", schoolId)
         .returns<RecipientRow[]>();
 
       if (error) {
-        console.error("resolveAudienceRecipients [all_parents] error:", error);
+        console.error("resolveAudienceRecipients [all_parents] error:", error.message);
         return [];
       }
-      return data ?? [];
+      return (data ?? []).map((r) => ({ ...r, email: r.email ?? "" }));
     }
 
     // ── Parents of students in a specific grade ───────────────────────────────
-    // Join path:
-    //   student_parents
-    //     → profiles!student_parents_parent_id_profiles_fkey
-    //     ← students!inner (student_parents_student_id_fkey)
-    //
-    // We filter on students.current_grade via a separate subquery to avoid
-    // relying on PostgREST dot-notation filtering on joined tables (unreliable).
-    // Step 1: collect student IDs for the target grade.
-    // Step 2: fetch distinct parent profile rows linked to those students.
     case "grade_parents": {
       if (audience.grade === null) return [];
 
-      // Step 1 — student IDs for the requested grade
+      // Step 1 — Get student IDs for the requested grade within this school
       const { data: studentRows, error: studentErr } = await supabase
         .from("students")
         .select("id")
-        .eq("current_grade", audience.grade);
+        .eq("current_grade", audience.grade)
+        .eq("school_id", schoolId);
 
       if (studentErr) {
-        console.error(
-          "resolveAudienceRecipients [grade_parents] students error:",
-          studentErr,
-        );
+        console.error("resolveAudienceRecipients [grade_parents] students error:", studentErr.message);
         return [];
       }
 
       const studentIds = (studentRows ?? []).map((s) => s.id);
       if (studentIds.length === 0) return [];
 
-      // Step 2 — parent profiles linked to those students via student_parents
+      // Step 2 — Fetch distinct parent profiles linked to those students
       const { data, error } = await supabase
         .from("student_parents")
         .select(
@@ -693,55 +686,53 @@ export async function resolveAudienceRecipients(
         .returns<RawGradeParentRow[]>();
 
       if (error) {
-        console.error(
-          "resolveAudienceRecipients [grade_parents] join error:",
-          error,
-        );
+        console.error("resolveAudienceRecipients [grade_parents] join error:", error.message);
         return [];
       }
 
-      // Deduplicate — a parent with multiple children in the same grade
-      // will appear once per student_parents row.
       const seen = new Set<string>();
-      return (data ?? [])
-        .map((row) => row.profiles)
-        .filter((p): p is RecipientRow => {
-          if (!p?.id || !p.email || seen.has(p.id)) return false;
-          seen.add(p.id);
-          return true;
+      const resolvedRecipients: SingleRecipient[] = [];
+
+      for (const row of data ?? []) {
+        const p = row.profiles;
+        if (!p || !p.id || seen.has(p.id)) continue;
+        
+        seen.add(p.id);
+        resolvedRecipients.push({
+          id: p.id,
+          full_name: p.full_name,
+          email: p.email ?? "",
+          phone_number: p.phone_number,
         });
+      }
+
+      return resolvedRecipients;
     }
 
-    // ── All staff + all parents ───────────────────────────────────────────────
+    // ── All staff + all parents ──────────────────────────────────────────────
     case "all_staff_and_parents": {
-      const [teachersRes, parentsRes] = await Promise.all([
-        supabase
-          .from("teachers")
-          .select("id, full_name, email, phone_number")
-          .returns<RecipientRow[]>(),
-        // Parents live in profiles, not a standalone table
-        supabase
-          .from("profiles")
-          .select("id, full_name, email, phone_number")
-          .eq("role", "parent")
-          .returns<RecipientRow[]>(),
-      ]);
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, email, phone_number")
+        .in("base_role", ["teacher", "parent", "admin"])
+        .eq("school_id", schoolId)
+        .returns<RecipientRow[]>();
 
-      if (teachersRes.error) {
-        console.error(
-          "resolveAudienceRecipients [all_staff_and_parents] teachers error:",
-          teachersRes.error,
-        );
-      }
-      if (parentsRes.error) {
-        console.error(
-          "resolveAudienceRecipients [all_staff_and_parents] parents error:",
-          parentsRes.error,
-        );
+      if (error) {
+        console.error("resolveAudienceRecipients [all_staff_and_parents] error:", error.message);
+        return [];
       }
 
-      return [...(teachersRes.data ?? []), ...(parentsRes.data ?? [])];
+      return (data ?? []).map((r) => ({
+        id: r.id,
+        full_name: r.full_name,
+        email: r.email ?? "",
+        phone_number: r.phone_number,
+      }));
     }
+
+    default:
+      return [];
   }
 }
 

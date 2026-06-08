@@ -6,17 +6,10 @@ import type {
   SingleRecipient,
 } from "@/lib/types/communications";
 
-// ── Raw DB row shapes ─────────────────────────────────────────────────────────
+// ── 1. Raw DB Row Shapes ─────────────────────────────────────────────────────────
 
-type TeacherRow = {
-  id: string;
-  full_name: string;
-  email: string;
-  phone_number: string | null;
-};
-
-// Updated from ParentRow to match the profiles table schema fields
-type ParentProfileRow = {
+// Refactored to represent unified data fields coming from the profiles table
+type ProfileRecipientRow = {
   id: string;
   full_name: string;
   email: string | null;
@@ -42,22 +35,13 @@ type LogRow = {
   profiles: { full_name: string } | null;
 };
 
-// ── Mappers ───────────────────────────────────────────────────────────────────
+// ── 2. Type-Safe Mappers ──────────────────────────────────────────────────────────
 
-function mapTeacher(row: TeacherRow): SingleRecipient {
+function mapProfileRecipient(row: ProfileRecipientRow): SingleRecipient {
   return {
     id: row.id,
     full_name: row.full_name,
-    email: row.email,
-    phone_number: row.phone_number,
-  };
-}
-
-function mapParent(row: ParentProfileRow): SingleRecipient {
-  return {
-    id: row.id,
-    full_name: row.full_name,
-    email: row.email ?? "", // Fallback empty string if email missing in profile row
+    email: row.email ?? "", // Fallback empty string if email missing in profile record
     phone_number: row.phone_number,
   };
 }
@@ -79,54 +63,63 @@ function mapLogEntry(row: LogRow): CommunicationLogEntry {
   };
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── 3. Public Multi-Tenant API ──────────────────────────────────────────────────
 
-export async function fetchCommunicationRecipients(): Promise<RecipientsPayload> {
+/**
+ * Fetches all possible communication targets inside a single school tenant instance.
+ * Resolves both teachers and parents out of the unified profiles table.
+ */
+export async function fetchCommunicationRecipients(schoolId: string): Promise<RecipientsPayload> {
   const supabase = await createSupabaseServerClient();
 
   const [teachersResult, parentsResult, gradesResult] = await Promise.all([
-    supabase
-      .from("teachers")
-      .select("id, full_name, email, phone_number")
-      .order("full_name", { ascending: true })
-      .returns<TeacherRow[]>(),
-
-    // Swapped out "parents" for "profiles" matching the custom role property enum value
+    // FIXED: Query teachers from profiles table directly using base_role to get full_name
     supabase
       .from("profiles")
       .select("id, full_name, email, phone_number")
-      .eq("role", "parent")
+      .eq("base_role", "teacher")
+      .eq("school_id", schoolId)
       .order("full_name", { ascending: true })
-      .returns<ParentProfileRow[]>(),
+      .returns<ProfileRecipientRow[]>(),
 
+    // Query parents using base_role field configuration
+    supabase
+      .from("profiles")
+      .select("id, full_name, email, phone_number")
+      .eq("base_role", "parent")
+      .eq("school_id", schoolId)
+      .order("full_name", { ascending: true })
+      .returns<ProfileRecipientRow[]>(),
+
+    // Gather existing grades configured inside this specific campus environment
     supabase
       .from("students")
       .select("current_grade")
+      .eq("school_id", schoolId)
       .order("current_grade", { ascending: true })
       .returns<StudentGradeRow[]>(),
   ]);
 
-  if (teachersResult.error)
-    console.error("fetchTeachers error:", teachersResult.error);
-  if (parentsResult.error)
-    console.error("fetchParents error:", parentsResult.error);
-  if (gradesResult.error)
-    console.error("fetchGrades error:", gradesResult.error);
+  if (teachersResult.error) console.error("[fetchCommunicationRecipients] Teachers Error:", teachersResult.error.message);
+  if (parentsResult.error) console.error("[fetchCommunicationRecipients] Parents Error:", parentsResult.error.message);
+  if (gradesResult.error) console.error("[fetchCommunicationRecipients] Grades Error:", gradesResult.error.message);
 
+  // Eliminate duplicate values and sort chronologically/alphabetically
   const grades = [
     ...new Set((gradesResult.data ?? []).map((r) => r.current_grade)),
   ].sort();
 
   return {
-    teachers: (teachersResult.data ?? []).map(mapTeacher),
-    parents: (parentsResult.data ?? []).map(mapParent),
+    teachers: (teachersResult.data ?? []).map(mapProfileRecipient),
+    parents: (parentsResult.data ?? []).map(mapProfileRecipient),
     grades,
   };
 }
 
-export async function fetchCommunicationsLog(): Promise<
-  CommunicationLogEntry[]
-> {
+/**
+ * Fetches historical outbound communications log entries for a single institution context.
+ */
+export async function fetchCommunicationsLog(schoolId: string): Promise<CommunicationLogEntry[]> {
   const supabase = await createSupabaseServerClient();
 
   const { data, error } = await supabase
@@ -137,12 +130,13 @@ export async function fetchCommunicationsLog(): Promise<
        channel, scheduled_at, sent_at, created_at,
        profiles ( full_name )`,
     )
+    .eq("school_id", schoolId)
     .order("created_at", { ascending: false })
     .limit(100)
     .returns<LogRow[]>();
 
   if (error) {
-    console.error("fetchCommunicationsLog error:", error);
+    console.error("[fetchCommunicationsLog] Error:", error.message);
     return [];
   }
 

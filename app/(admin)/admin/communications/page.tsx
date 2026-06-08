@@ -1,8 +1,7 @@
-
-import Link from "next/link";
+import { Metadata } from "next";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { ArrowLeft, Mail } from "lucide-react";
-import type { Metadata } from "next";
 import { getSession } from "@/lib/actions/auth";
 import {
   fetchCommunicationRecipients,
@@ -11,48 +10,59 @@ import {
 import { CommunicationsClient } from "@/app/_components/communications/CommunicationsClient";
 
 export const metadata: Metadata = {
-  title: "Communications | Kibali Academy",
-  description: "Send announcements and messages to parents and staff",
+  title: "Communications Management | Kibali Academy",
+  description: "Send multi-channel announcements and messages to parents and staff instances.",
 };
 
-// No ISR — we want fresh recipient lists and log on every visit
+// Ensure fresh data sets on every render — broadcast states and counter tallies must accurately match reality
 export const dynamic = "force-dynamic";
 
 export default async function CommunicationsPage() {
-  // ── Access Control Guard ───────────────────────────────────────────────────
+  // ── 1. Secure Access & Granular Permissions Control Guard ───────────────────
   const session = await getSession();
   
   if (!session || !session.profile) {
-    redirect("/login?redirectTo=/admin/communications");
+    redirect("/auth/login?redirectTo=/dashboard/communications");
   }
 
-  const { base_role, is_super_admin, is_dev } = session.profile;
-  const isPlatformAdmin = is_super_admin || is_dev;
+  const { 
+    school_id, 
+    is_super_admin, 
+    is_dev, 
+    allowed_permissions_override 
+  } = session.profile;
 
-  if (base_role !== "admin" && !isPlatformAdmin) {
+  const canManageCommunications = 
+    is_super_admin || 
+    is_dev || 
+    allowed_permissions_override?.includes("view_communications") || 
+    allowed_permissions_override?.includes("manage_communications");
+
+  if (!canManageCommunications || !school_id) {
     redirect("/dashboard");
   }
 
-  // ── Data Loading ───────────────────────────────────────────────────────────
+  // ── 2. Multi-Tenant Isolated Data Fetching ───────────────────────────────────
   const [recipients, sentLog] = await Promise.all([
-    fetchCommunicationRecipients(),
-    fetchCommunicationsLog(),
+    fetchCommunicationRecipients(school_id),
+    fetchCommunicationsLog(school_id),
   ]);
 
   return (
     <div className="min-h-screen bg-[#0c0f1a] font-[family-name:var(--font-body)]">
-      {/* Ambient glows */}
+      {/* Background ambient accents */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden -z-10">
         <div className="absolute -top-60 left-1/4 w-[700px] h-[700px] rounded-full bg-amber-500/[0.03] blur-[140px]" />
         <div className="absolute top-1/2 right-0 w-96 h-96 rounded-full bg-sky-500/[0.03] blur-[120px]" />
       </div>
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
-        {/* Header */}
+        
+        {/* Workspace Toolbar Header */}
         <header className="flex flex-wrap items-center gap-4 justify-between">
           <div className="flex items-center gap-4">
             <Link
-              href="/admin"
+              href="/dashboard"
               className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.05] border border-white/[0.08] hover:bg-white/[0.08] transition-colors duration-200"
             >
               <ArrowLeft className="h-4 w-4 text-white/50" />
@@ -73,7 +83,7 @@ export default async function CommunicationsPage() {
             </div>
           </div>
 
-          {/* Stats */}
+          {/* Quick-Glance Cohort Aggregations Metrics */}
           <div className="flex items-center gap-4 sm:ml-auto bg-white/[0.02] border border-white/[0.05] p-3 rounded-xl">
             <div className="text-right px-2">
               <p className="text-[10px] uppercase tracking-wider text-white/25">Teachers</p>
@@ -98,17 +108,17 @@ export default async function CommunicationsPage() {
           </div>
         </header>
 
-        {/* Main UI */}
+        {/* Core Interactive Messaging Engine Client View wrapper */}
         <CommunicationsClient
           recipients={recipients}
           sentLog={sentLog}
           grades={recipients.grades}
         />
 
-        {/* Footer */}
+        {/* Global Informational Identity Footer Block */}
         <footer className="pt-4 border-t border-white/[0.05]">
           <p className="text-center text-xs text-white/20">
-            Kibali Academy Portal · Emails sent via Resend
+            Kibali Academy Portal · Delivery integration engines via Resend & Africa&apos;s Talking
           </p>
         </footer>
       </div>

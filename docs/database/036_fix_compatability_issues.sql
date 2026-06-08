@@ -1123,3 +1123,46 @@ WITH CHECK (
 
 ALTER TABLE public.profiles 
 ADD COLUMN last_invite_sent timestamp with time zone null;
+
+-- 1. Enable RLS on the table if not already enabled
+alter table public.communications_log enable row level security;
+
+-- 2. Create the INSERT policy for authorized school staff
+create policy "Allow staff to insert logs for their own school"
+on public.communications_log
+for insert
+to authenticated
+with check (
+  -- Ensure the user can only insert logs belonging to their assigned school
+  school_id = (
+    select school_id 
+    from public.profiles 
+    where id = auth.uid()
+  )
+  and (
+    -- Operational role clearance gate mirror
+    exists (
+      select 1 
+      from public.profiles
+      where id = auth.uid()
+      and (
+        is_super_admin = true 
+        or is_dev = true 
+        or 'manage_communications' = any(allowed_permissions_override)
+      )
+    )
+  )
+);
+
+-- 3. Create a SELECT policy so they can see their sent logs on the page
+create policy "Allow staff to view logs for their own school"
+on public.communications_log
+for select
+to authenticated
+using (
+  school_id = (
+    select school_id 
+    from public.profiles 
+    where id = auth.uid()
+  )
+);

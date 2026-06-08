@@ -50,53 +50,51 @@ export async function POST(
 
   const supabase = await createSupabaseServerClient();
 
-  // 1. Auth Guard Debugging
+  // 1. Auth Guard Validation
   const {
     data: { user },
     error: authError,
   } = await supabase.auth.getUser();
 
   if (authError || !user) {
-    console.error(
-      `${logPrefix} ❌ Auth Error:`,
-      authError?.message || "No user found",
-    );
+    console.error(`${logPrefix} ❌ Auth Error:`, authError?.message || "No user found");
     return NextResponse.json(
-      {
-        success: false,
-        recipientCount: 0,
-        messageIds: [],
-        error: "Unauthorised",
-      },
+      { success: false, recipientCount: 0, messageIds: [], error: "Unauthorised" },
       { status: 401 },
     );
   }
-  console.log(
-    `${logPrefix} ✅ Authenticated as: ${user.email} (ID: ${user.id})`,
-  );
+  console.log(`${logPrefix} ✅ Authenticated as: ${user.email} (ID: ${user.id})`);
 
-  // 2. Role Check Debugging
-  const { data: profileData, error: profileError } = await supabase
+  // 2. Granular Permissions & Base Role Check 
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("role")
+    .select("school_id, base_role, is_super_admin, is_dev, allowed_permissions_override")
     .eq("id", user.id)
-    .single<{ role: string }>();
+    .single();
 
-  if (
-    profileError ||
-    !["admin", "superadmin"].includes(profileData?.role ?? "")
-  ) {
-    console.warn(
-      `${logPrefix} ⚠️ Forbidden: User role is "${profileData?.role || "unknown"}"`,
-    );
+  if (profileError || !profile) {
+    console.warn(`${logPrefix} ⚠️ Profile Verification Failure:`, profileError?.message);
     return NextResponse.json(
       { success: false, recipientCount: 0, messageIds: [], error: "Forbidden" },
       { status: 403 },
     );
   }
-  console.log(`${logPrefix} ✅ Role Verified: ${profileData.role}`);
 
-  // 3. Payload Parsing Debugging
+  const hasCommunicationAuthority =
+    profile.is_super_admin ||
+    profile.is_dev ||
+    profile.allowed_permissions_override?.includes("manage_communications");
+
+  if (!hasCommunicationAuthority || !profile.school_id) {
+    console.warn(`${logPrefix} ⚠️ Forbidden: Insufficient clearance tokens for resource modification.`);
+    return NextResponse.json(
+      { success: false, recipientCount: 0, messageIds: [], error: "Forbidden" },
+      { status: 403 },
+    );
+  }
+  console.log(`${logPrefix} ✅ Permission Cleared for School Context ID: ${profile.school_id}`);
+
+  // 3. Payload Parsing Validation
   let payload: SendEmailRequest;
   try {
     payload = (await req.json()) as SendEmailRequest;
@@ -109,12 +107,7 @@ export async function POST(
   } catch (err) {
     console.error(`${logPrefix} ❌ Payload Parse Failure`);
     return NextResponse.json(
-      {
-        success: false,
-        recipientCount: 0,
-        messageIds: [],
-        error: "Invalid request body",
-      },
+      { success: false, recipientCount: 0, messageIds: [], error: "Invalid request body" },
       { status: 400 },
     );
   }
@@ -128,16 +121,11 @@ export async function POST(
     scheduledAt,
   } = payload;
 
-  // 4. Validation Checks
+  // 4. Content Content Integrity Checks
   if (!body.trim()) {
     console.warn(`${logPrefix} ⚠️ Validation Failed: Empty message body`);
     return NextResponse.json(
-      {
-        success: false,
-        recipientCount: 0,
-        messageIds: [],
-        error: "Message body is required",
-      },
+      { success: false, recipientCount: 0, messageIds: [], error: "Message body is required" },
       { status: 400 },
     );
   }
@@ -145,36 +133,22 @@ export async function POST(
   if (channel === "email" && !subject.trim()) {
     console.warn(`${logPrefix} ⚠️ Validation Failed: Missing email subject`);
     return NextResponse.json(
-      {
-        success: false,
-        recipientCount: 0,
-        messageIds: [],
-        error: "Subject is required for email",
-      },
+      { success: false, recipientCount: 0, messageIds: [], error: "Subject is required for email" },
       { status: 400 },
     );
   }
 
-  // 5. Recipient Resolution Debugging
-  console.log(
-    `${logPrefix} 🔍 Resolving recipients for audience type: ${audience.type}`,
-  );
-  const recipients = await resolveAudienceRecipients(audience);
-  console.log(
-    `${logPrefix} 👥 Database Query Result: Found ${recipients.length} potential recipients`,
-  );
+  // 5. Multi-Tenant Recipient Isolation Injection
+  console.log(`${logPrefix} 🔍 Resolving recipients for audience type: ${audience.type}`);
+  
+  // NOTE: Ensure your resolveAudienceRecipients framework utility receives the tenant identifier argument
+  const recipients = await resolveAudienceRecipients(audience, profile.school_id);
+  console.log(`${logPrefix} 👥 Database Query Result: Found ${recipients.length} potential recipients`);
 
   if (recipients.length === 0) {
-    console.error(
-      `${logPrefix} ❌ Stop: No recipients returned from resolveAudienceRecipients`,
-    );
+    console.error(`${logPrefix} ❌ Stop: No recipients returned from resolveAudienceRecipients`);
     return NextResponse.json(
-      {
-        success: false,
-        recipientCount: 0,
-        messageIds: [],
-        error: "No recipients found for this audience",
-      },
+      { success: false, recipientCount: 0, messageIds: [], error: "No recipients found for this audience" },
       { status: 400 },
     );
   }
@@ -182,14 +156,13 @@ export async function POST(
   const audienceLabel = buildAudienceLabel(payload);
   const senderLabel = buildSenderLabel(audience.type);
 
-  // 6. Scheduling Logic Debugging
+  // 6. Scheduling Transaction Processing
   if (scheduledAt) {
-    console.log(
-      `${logPrefix} ⏰ Action: Scheduling message for ${scheduledAt}`,
-    );
+    console.log(`${logPrefix} ⏰ Action: Scheduling message for ${scheduledAt}`);
     const { error: logError } = await supabase
       .from("communications_log")
       .insert({
+        school_id: profile.school_id, // Mandatory multi-tenant key tracking constraint
         sent_by: user.id,
         audience_type: audience.type,
         audience_label: audienceLabel,
@@ -202,8 +175,7 @@ export async function POST(
         sent_at: null,
       });
 
-    if (logError)
-      console.error(`${logPrefix} ❌ DB Log Error (Scheduling):`, logError);
+    if (logError) console.error(`${logPrefix} ❌ DB Log Error (Scheduling):`, logError.message);
 
     return NextResponse.json({
       success: true,
@@ -212,7 +184,7 @@ export async function POST(
     });
   }
 
-  // 7. Execution Logic Debugging
+  // 7. Core Delivery Dispatches
   let recipientCount = 0;
   let messageIds: string[] = [];
   let sendSuccess = false;
@@ -220,26 +192,20 @@ export async function POST(
   if (channel === "sms") {
     console.log(`${logPrefix} 📱 Processing SMS channel...`);
 
-    // Check if the recipient objects actually have the 'phone_number' property
     const smsRecipients = recipients
       .filter((r) => {
         const hasPhone = Boolean(r.phone_number);
-        if (!hasPhone)
-          console.warn(
-            `${logPrefix} ⏭️ Skipping ${r.full_name || "unknown"}: Missing phone_number`,
-          );
+        if (!hasPhone) {
+          console.warn(`${logPrefix} ⏭️ Skipping ${r.full_name || "unknown"}: Missing phone_number`);
+        }
         return hasPhone;
       })
       .map((r) => ({ phone: r.phone_number!, name: r.full_name }));
 
-    console.log(
-      `${logPrefix} 📱 Filtered SMS list: ${smsRecipients.length} valid numbers out of ${recipients.length}`,
-    );
+    console.log(`${logPrefix} 📱 Filtered SMS list: ${smsRecipients.length} valid numbers out of ${recipients.length}`);
 
     if (smsRecipients.length === 0) {
-      console.error(
-        `${logPrefix} ❌ Stop: 0 recipients left after phone_number filtering`,
-      );
+      console.error(`${logPrefix} ❌ Stop: 0 recipients left after phone_number filtering`);
       return NextResponse.json(
         {
           success: false,
@@ -251,13 +217,11 @@ export async function POST(
       );
     }
 
-    console.log(`${logPrefix} 📡 Dispatching to Africa's Talking...`);
+    console.log(`${logPrefix} 📡 Dispatching to Africa's Talking gateway...`);
     const result = await sendBulkSms(smsRecipients, body);
 
     recipientCount = result.sent;
-    messageIds = result.results
-      .filter((r) => r.messageId)
-      .map((r) => r.messageId!);
+    messageIds = result.results.filter((r) => r.messageId).map((r) => r.messageId!);
     sendSuccess = result.sent > 0 && result.failed === 0;
 
     console.log(`${logPrefix} 📊 SMS Provider Response:`, {
@@ -277,16 +241,15 @@ export async function POST(
     recipientCount = result.recipientCount;
     messageIds = result.messageIds;
     sendSuccess = result.success;
-    console.log(
-      `${logPrefix} 📊 Email Provider Response: success=${sendSuccess}, count=${recipientCount}`,
-    );
+    console.log(`${logPrefix} 📊 Email Provider Response: success=${sendSuccess}, count=${recipientCount}`);
   }
 
-  // 8. Final DB Logging Debugging
+  // 8. Final Transaction Logging Execution
   console.log(`${logPrefix} 📝 Logging final transaction status to DB...`);
   const { error: finalLogError } = await supabase
     .from("communications_log")
     .insert({
+      school_id: profile.school_id, // Mandatory multi-tenant key tracking constraint
       sent_by: user.id,
       audience_type: audience.type,
       audience_label: audienceLabel,
@@ -299,11 +262,10 @@ export async function POST(
       sent_at: new Date().toISOString(),
     });
 
-  if (finalLogError)
-    console.error(`${logPrefix} ❌ DB Log Error (Final):`, finalLogError);
+  if (finalLogError) console.error(`${logPrefix} ❌ DB Log Error (Final):`, finalLogError.message);
 
   if (!sendSuccess && recipientCount === 0) {
-    console.error(`${logPrefix} ❌ Failure: Total failure in delivery.`);
+    console.error(`${logPrefix} ❌ Failure: Total failure in delivery channels.`);
     return NextResponse.json(
       {
         success: false,
@@ -315,9 +277,7 @@ export async function POST(
     );
   }
 
-  console.log(
-    `${logPrefix} ✨ Execution complete. Success: ${sendSuccess}, Total Sent: ${recipientCount}`,
-  );
+  console.log(`${logPrefix} ✨ Execution complete. Success: ${sendSuccess}, Total Sent: ${recipientCount}`);
   return NextResponse.json({
     success: sendSuccess,
     recipientCount,
