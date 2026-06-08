@@ -44,6 +44,7 @@ export function blankRow(grade: string, stream: string): BulkAdmitRow {
     parentName: "",
     parentEmail: "",
     parentPhone: "",
+    upiNumber: "",
   };
 }
 

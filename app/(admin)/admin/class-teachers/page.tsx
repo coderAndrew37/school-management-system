@@ -12,21 +12,10 @@ export const metadata = { title: "Class Teacher Assignments | Admin" };
 export const revalidate = 0;
 
 // ── Raw Supabase join shapes ───────────────────────────────────────────────────
-// These are what Supabase returns from the joined select — we shape them
-// into the clean client types before passing them as props.
-
-interface RawTeacherRow {
-  id: string;
-  tsc_number: string | null;
-  profiles: {
-    full_name: string;
-    email:     string | null;
-  } | null;
-}
 
 interface RawAssignmentRow {
-  id:           string;
-  class_id:     string;
+  id:            string;
+  class_id:      string;
   academic_year: number;
   classes: {
     grade:  string;
@@ -41,18 +30,24 @@ interface RawAssignmentRow {
   } | null;
 }
 
+// Supabase returns the profile join as object | object[] | null depending on
+// how the foreign key is configured. This helper normalises both shapes.
+function pickProfile(
+  raw: { full_name: string; email: string | null } | { full_name: string; email: string | null }[] | null,
+) {
+  if (!raw) return null;
+  return Array.isArray(raw) ? raw[0] ?? null : raw;
+}
+
 export default async function ClassTeachersPage() {
   const session = await getSession();
-
   if (!session?.profile) redirect("/login");
 
-  // profiles.base_role is the correct column (not role)
   const { base_role, is_super_admin, is_dev, school_id } = session.profile;
   const isPlatformAdmin = is_super_admin || is_dev;
 
   if (base_role !== "admin" && !isPlatformAdmin) redirect("/dashboard");
-
-  if (!school_id) redirect("/login"); // admin must have a school
+  if (!school_id) redirect("/login");
 
   const supabase = await createSupabaseServerClient();
 
@@ -65,69 +60,67 @@ export default async function ClassTeachersPage() {
 
   const activeYear = settings?.current_academic_year ?? 2026;
 
-  // ── 2. Classes — scoped to this school + year ──────────────────────────────
-  const { data: rawClasses } = await supabase
-    .from("classes")
-    .select("id, grade, stream")
-    .eq("school_id",    school_id)
-    .eq("academic_year", activeYear)
-    .order("grade");
+  // ── 2. Parallel data fetches ───────────────────────────────────────────────
+  const [
+    { data: rawClasses },
+    { data: rawTeachers },
+    { data: rawAssignments },
+    { data: studentRows },
+  ] = await Promise.all([
+    // Classes scoped to this school + year
+    supabase
+      .from("classes")
+      .select("id, grade, stream")
+      .eq("school_id",    school_id)
+      .eq("academic_year", activeYear)
+      .order("grade"),
 
- // 1. Define the precise shape Supabase returns for the join
-interface SupabaseTeacherJoin {
-  id: string;
-  tsc_number: string | null;
-  profiles: {
-    full_name: string;
-    email: string | null;
-  } | {
-    full_name: string;
-    email: string | null;
-  }[] | null; 
-  // Captures both object and array variations safely without using 'any'
-}
+    // Teachers — profiles join normalised by pickProfile
+    supabase
+      .from("teachers")
+      .select("id, tsc_number, profiles ( full_name, email )")
+      .eq("school_id", school_id)
+      .eq("status",    "active"),
 
-// ── 3. Teachers — strictly typed ───────────────────────────────────────────
-const { data: rawTeachers } = await supabase
-  .from("teachers")
-  .select("id, tsc_number, profiles ( full_name, email )")
-  .eq("school_id", school_id)
-  .eq("status",    "active");
+    // Active assignments scoped to school + year
+    supabase
+      .from("class_teacher_assignments")
+      .select(`
+        id,
+        class_id,
+        academic_year,
+        classes  ( grade, stream ),
+        teachers ( id, profiles ( full_name, email ) )
+      `)
+      .eq("school_id",    school_id)
+      .eq("academic_year", activeYear)
+      .eq("is_active",     true)
+      .returns<RawAssignmentRow[]>(),
 
-const teachers: TeacherOption[] = ((rawTeachers as unknown as SupabaseTeacherJoin[]) ?? [])
-  .map((t) => {
-    // Narrow down the union type safely using a type guard
-    const profile = Array.isArray(t.profiles) ? t.profiles[0] : t.profiles;
-    
-    if (!profile || !profile.full_name) return null;
+    // Student counts — only need current_grade
+    supabase
+      .from("students")
+      .select("current_grade")
+      .eq("school_id", school_id),
+  ]);
 
-    return {
-      id:         t.id,
-      full_name:  profile.full_name,
-      email:      profile.email ?? "",
-      tsc_number: t.tsc_number,
-    };
-  })
-  .filter((t): t is TeacherOption => t !== null)
-  .sort((a, b) => a.full_name.localeCompare(b.full_name));
-  
-  // ── 4. Active assignments — scoped to school + year ───────────────────────
-  // teachers join also goes via profiles since full_name isn't on teachers
-  const { data: rawAssignments } = await supabase
-    .from("class_teacher_assignments")
-    .select(`
-      id,
-      class_id,
-      academic_year,
-      classes  ( grade, stream ),
-      teachers ( id, profiles ( full_name, email ) )
-    `)
-    .eq("school_id",    school_id)
-    .eq("academic_year", activeYear)
-    .eq("is_active",     true)
-    .returns<RawAssignmentRow[]>();
+  // ── 3. Shape teachers ──────────────────────────────────────────────────────
+  const teachers: TeacherOption[] = (rawTeachers ?? [])
+    .map((t) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const profile = pickProfile((t as any).profiles);
+      if (!profile?.full_name) return null;
+      return {
+        id:         t.id,
+        full_name:  profile.full_name,
+        email:      profile.email ?? "",
+        tsc_number: t.tsc_number ?? null,
+      };
+    })
+    .filter((t): t is TeacherOption => t !== null)
+    .sort((a, b) => a.full_name.localeCompare(b.full_name));
 
-  // Shape into the clean AssignmentRow the client expects
+  // ── 4. Shape assignments ───────────────────────────────────────────────────
   const assignments: AssignmentRow[] = (rawAssignments ?? [])
     .filter((a) => a.classes && a.teachers)
     .map((a) => ({
@@ -145,16 +138,10 @@ const teachers: TeacherOption[] = ((rawTeachers as unknown as SupabaseTeacherJoi
       },
     }));
 
-  // ── 5. Student counts — scoped to this school ─────────────────────────────
-  const { data: studentRows } = await supabase
-    .from("students")
-    .select("current_grade")
-    .eq("school_id", school_id);
-
+  // ── 5. Student counts ──────────────────────────────────────────────────────
   const studentCounts: Record<string, number> = {};
-  studentRows?.forEach((row) => {
-    studentCounts[row.current_grade] =
-      (studentCounts[row.current_grade] ?? 0) + 1;
+  studentRows?.forEach(({ current_grade }) => {
+    studentCounts[current_grade] = (studentCounts[current_grade] ?? 0) + 1;
   });
 
   // ── 6. Shape classes ───────────────────────────────────────────────────────

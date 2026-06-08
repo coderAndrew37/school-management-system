@@ -1064,3 +1064,7 @@ FROM pg_policies
 WHERE schemaname = 'public'
   AND tablename = 'student_diary'
 ORDER BY policyname;
+
+ALTER TABLE public.class_teacher_assignments
+ADD CONSTRAINT class_teacher_assignments_teacher_id_fkey 
+FOREIGN KEY (teacher_id) REFERENCES public.teachers(id) ON DELETE CASCADE;

@@ -82,7 +82,7 @@ export function parseStudentCSV(text: string): BulkAdmitRow[] {
       : lines;
 
   return dataLines
-    .map((line) => {
+    .map((line): BulkAdmitRow => { // <-- Add explicit return type alignment here
       const cols = line.split(",").map((s) => s.trim().replace(/^"|"$/g, ""));
 
       const [
@@ -100,7 +100,7 @@ export function parseStudentCSV(text: string): BulkAdmitRow[] {
       return {
         studentName,
         dateOfBirth,
-        gender:           rawGender.toLowerCase().startsWith("f") ? "Female" : "Male",
+        gender:           (rawGender.toLowerCase().startsWith("f") ? "Female" : "Male") as "Female" | "Male",
         currentGrade,
         stream:           stream || "Main",
         academicYear:     2026,
@@ -108,7 +108,7 @@ export function parseStudentCSV(text: string): BulkAdmitRow[] {
         parentName,
         parentEmail,
         parentPhone,
-        relationshipType: "guardian",
+        relationshipType: "guardian", // TypeScript will automatically accept this with the explicit map signature
         parentMode:       "new",
         existingParentId: null,
       };

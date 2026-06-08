@@ -18,19 +18,24 @@ interface MyAssignmentRow {
   classes: { grade: string; stream: string } | null;
 }
 
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const CURRENT_YEAR = 2026;
+
+const REVALIDATE_PATHS = ["/admin/class-teachers", "/admin/teachers"] as const;
+
 // ── Validation ────────────────────────────────────────────────────────────────
 
 const assignSchema = z.object({
   classId:      z.string().uuid(),
   teacherId:    z.string().uuid(),
-  academicYear: z.number().int().default(2026),
+  academicYear: z.number().int().default(CURRENT_YEAR),
 });
 
 // ── Guard ─────────────────────────────────────────────────────────────────────
 
 /**
- * Verifies the caller is an admin using base_role and returns both their user ID and school ID.
- * school_id is required so every mutation can be correctly scoped to the tenant.
+ * Verifies the caller is an admin and returns their user ID + school ID.
  */
 async function ensureAdmin(): Promise<AdminContext> {
   const supabase = await createSupabaseServerClient();
@@ -38,7 +43,6 @@ async function ensureAdmin(): Promise<AdminContext> {
 
   if (!user) throw new Error("Unauthorized");
 
-  // 1. Fetch base_role along with your explicit super_admin and dev flags
   const { data: profile } = await supabase
     .from("profiles")
     .select("base_role, is_super_admin, is_dev, school_id")
@@ -47,7 +51,6 @@ async function ensureAdmin(): Promise<AdminContext> {
 
   if (!profile) throw new Error("Forbidden: Profile not found");
 
-  // 2. Check if the user is a global platform admin
   const isPlatformAdmin = profile.is_super_admin || profile.is_dev;
   const isLocalAdmin = ["admin", "superadmin"].includes(profile.base_role);
 
@@ -55,18 +58,16 @@ async function ensureAdmin(): Promise<AdminContext> {
     throw new Error("Forbidden: Admin access required");
   }
 
-  // 3. Super admins/devs might not be bound to a single school. 
-  // Only throw if a local admin lacks a school context, or adapt if your actions require it.
   if (!isPlatformAdmin && !profile.school_id) {
     throw new Error("Admin profile has no school assigned");
   }
 
-  // Fallback school_id for super admins if your table mutations require a UUID
-  return { 
-    adminId: user.id, 
-    schoolId: profile.school_id ?? "" 
+  return {
+    adminId:  user.id,
+    schoolId: profile.school_id ?? "",
   };
 }
+
 // ── Assign / Swap a Class Teacher ─────────────────────────────────────────────
 
 /**
@@ -81,13 +82,13 @@ export async function assignClassTeacherAction(
     const { adminId, schoolId } = await ensureAdmin();
     const parsed = assignSchema.parse(data);
 
-    // 1. Find the current active assignment for this class — scoped to this school
+    // 1. Find the current active assignment — scoped to this school
     const { data: currentActive } = await supabaseAdmin
       .from("class_teacher_assignments")
       .select("id, teacher_id")
-      .eq("class_id",   parsed.classId)
-      .eq("school_id",  schoolId)
-      .eq("is_active",  true)
+      .eq("class_id",  parsed.classId)
+      .eq("school_id", schoolId)
+      .eq("is_active", true)
       .maybeSingle();
 
     // 2. No-op: same teacher already assigned
@@ -101,12 +102,12 @@ export async function assignClassTeacherAction(
         .from("class_teacher_assignments")
         .update({ is_active: false, relieved_at: new Date().toISOString() })
         .eq("id",        currentActive.id)
-        .eq("school_id", schoolId); // extra tenant scope on mutation
+        .eq("school_id", schoolId);
 
       if (relieveError) throw relieveError;
     }
 
-    // 4. Insert the new assignment — school_id is required (NOT NULL constraint)
+    // 4. Insert the new assignment
     const { error: insertError } = await supabaseAdmin
       .from("class_teacher_assignments")
       .insert({
@@ -120,8 +121,7 @@ export async function assignClassTeacherAction(
 
     if (insertError) throw insertError;
 
-    revalidatePath("/admin/class-teachers");
-    revalidatePath("/admin/teachers");
+    REVALIDATE_PATHS.forEach(revalidatePath);
 
     return { success: true, message: "Class teacher assigned successfully" };
   } catch (err) {
@@ -143,18 +143,21 @@ export async function relieveClassTeacherAction(
   try {
     const { schoolId } = await ensureAdmin();
 
-    const { error } = await supabaseAdmin
+    if (!assignmentId) throw new Error("Assignment ID is required");
+
+    const { error, count } = await supabaseAdmin
       .from("class_teacher_assignments")
       .update({ is_active: false, relieved_at: new Date().toISOString() })
       .eq("id",        assignmentId)
-      .eq("school_id", schoolId); // prevents cross-tenant mutation
+      .eq("school_id", schoolId)
+      .select("id", { count: "exact", head: true });
 
     if (error) throw error;
+    if (count === 0) throw new Error("Assignment not found or already relieved");
 
-    revalidatePath("/admin/class-teachers");
-    revalidatePath("/admin/teachers");
+    REVALIDATE_PATHS.forEach(revalidatePath);
 
-    return { success: true, message: "Teacher relieved of duties" };
+    return { success: true, message: "Teacher relieved successfully" };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to relieve teacher";
     console.error("[relieveClassTeacherAction]", msg);
@@ -166,7 +169,6 @@ export async function relieveClassTeacherAction(
 
 /**
  * Returns active class assignments for the currently logged-in teacher.
- * Used in the teacher portal — queries are row-level-security scoped.
  */
 export async function fetchMyClassTeacherAssignments() {
   const supabase = await createSupabaseServerClient();
@@ -175,13 +177,10 @@ export async function fetchMyClassTeacherAssignments() {
 
   const { data, error } = await supabase
     .from("class_teacher_assignments")
-    .select(`
-      academic_year,
-      classes ( grade, stream )
-    `)
+    .select(`academic_year, classes ( grade, stream )`)
     .eq("teacher_id",    user.id)
     .eq("is_active",     true)
-    .eq("academic_year", 2026)
+    .eq("academic_year", CURRENT_YEAR)
     .returns<MyAssignmentRow[]>();
 
   if (error) {
@@ -197,7 +196,7 @@ export async function fetchMyClassTeacherAssignments() {
   return {
     isClassTeacher: classes.length > 0,
     classes,
-    academicYear: data?.[0]?.academic_year ?? 2026,
+    academicYear: data?.[0]?.academic_year ?? CURRENT_YEAR,
   };
 }
 
