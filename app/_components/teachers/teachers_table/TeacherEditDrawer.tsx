@@ -36,7 +36,6 @@ interface Props {
 const inp =
   "w-full rounded-xl border border-white/10 bg-white/[0.05] px-3.5 py-2.5 text-sm text-white placeholder-white/20 outline-none focus:border-amber-400/50 transition-colors";
 
-// These reasons match the CHECK constraint in your Postgres table exactly
 const ARCHIVE_REASONS = [
   { id: "transferred", label: "Transfer to Another School" },
   { id: "resigned", label: "Voluntary Resignation" },
@@ -50,22 +49,23 @@ type ArchiveStatus = typeof ARCHIVE_REASONS[number]["id"];
 export function TeacherEditDrawer({ teacher, academicYear, onClose }: Props) {
   const router = useRouter();
   const [isPending, start] = useTransition();
-  const [isUploading, setIsUploading] = useState(false);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
   
   // Archive UI States
-  const [archiveConfirm, setArchiveConfirm] = useState(false);
+  const [archiveConfirm, setArchiveConfirm] = useState<boolean>(false);
   const [selectedReason, setSelectedReason] = useState<ArchiveStatus | null>(null);
   
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Form States
-  const [fullName, setFullName] = useState(teacher.full_name);
-  const [phone, setPhone] = useState(teacher.phone_number ?? "");
-  const [tscNumber, setTscNumber] = useState(teacher.tsc_number ?? "");
-  const [avatarUrl, setAvatarUrl] = useState(teacher.avatar_url ?? "");
-  const [status, setStatus] = useState(teacher.status);
+  const [fullName, setFullName] = useState<string>(teacher.full_name);
+  const [phone, setPhone] = useState<string>(teacher.phone_number ?? "");
+  const [tscNumber, setTscNumber] = useState<string>(teacher.tsc_number ?? "");
+  const [avatarUrl, setAvatarUrl] = useState<string>(teacher.avatar_url ?? "");
+  const [status, setStatus] = useState<Teacher["status"]>(teacher.status);
 
-  const staffId = (teacher as any).staff_id ?? teacher.id;
+  // FIXED: Extracted staff_id cleanly without casting to any. Fallback to raw profile UUID.
+  const routeIdentifier = teacher.staff_id ?? teacher.id;
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -81,11 +81,13 @@ export function TeacherEditDrawer({ teacher, academicYear, onClose }: Props) {
       const { error: upErr } = await supabase.storage
         .from("avatars")
         .upload(path, file, { upsert: true });
+        
       if (upErr) throw upErr;
+      
       const { data } = supabase.storage.from("avatars").getPublicUrl(path);
       setAvatarUrl(data.publicUrl);
       toast.success("Photo uploaded — save to apply.");
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setIsUploading(false);
@@ -108,9 +110,8 @@ export function TeacherEditDrawer({ teacher, academicYear, onClose }: Props) {
       
       const res = await updateTeacherAction(fd);
       if (res.success) {
-        // Only trigger status change if it's one of the non-archive statuses
-        if (status !== teacher.status && (status === 'active' || status === 'on_leave')) {
-          await changeTeacherStatusAction(teacher.id, status as any);
+        if (status !== teacher.status && (status === "active" || status === "on_leave")) {
+          await changeTeacherStatusAction(teacher.id, status);
         }
         toast.success(res.message);
         router.refresh();
@@ -128,7 +129,6 @@ export function TeacherEditDrawer({ teacher, academicYear, onClose }: Props) {
     }
 
     start(async () => {
-      // Passes the specific reason to the server action
       const res = await archiveTeacherAction(teacher.id, selectedReason);
       if (res.success) {
         toast.success(res.message);
@@ -181,7 +181,7 @@ export function TeacherEditDrawer({ teacher, academicYear, onClose }: Props) {
                 )}
               </div>
               <input
-              aria-label="upload teacher avatar"
+                aria-label="upload teacher avatar"
                 type="file"
                 ref={fileRef}
                 className="hidden"
@@ -210,9 +210,9 @@ export function TeacherEditDrawer({ teacher, academicYear, onClose }: Props) {
           </button>
         </div>
 
-        {/* Navigation Link */}
+        {/* Navigation Link using type-safe identifier */}
         <Link
-          href={`/admin/teachers/${staffId}`}
+          href={`/admin/teachers/${routeIdentifier}`}
           onClick={onClose}
           className="flex items-center justify-between px-5 py-2.5 bg-amber-400/[0.06] border-b border-amber-400/10 hover:bg-amber-400/10 transition-colors group"
         >
@@ -258,7 +258,7 @@ export function TeacherEditDrawer({ teacher, academicYear, onClose }: Props) {
                   Phone Number
                 </label>
                 <input
-                  type="tel"
+                  type="text"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="07..."
@@ -268,7 +268,7 @@ export function TeacherEditDrawer({ teacher, academicYear, onClose }: Props) {
             </div>
           </div>
 
-          {/* Active Status Toggles (Limited to Active states) */}
+          {/* Active Status Toggles */}
           <div>
             <label className="block text-[10px] font-bold uppercase tracking-widest text-white/30 mb-1.5">
               Current Duty Status
@@ -302,7 +302,7 @@ export function TeacherEditDrawer({ teacher, academicYear, onClose }: Props) {
             <div className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3.5 py-2.5">
               <Mail className="h-3.5 w-3.5 text-white/20 shrink-0" />
               <span className="text-sm text-white/40 font-mono truncate">
-                {teacher.email}
+                {teacher.email ?? "No email provided"}
               </span>
             </div>
           </div>
@@ -323,7 +323,7 @@ export function TeacherEditDrawer({ teacher, academicYear, onClose }: Props) {
             </button>
           </div>
 
-          {/* ARCHIVE MANAGEMENT SECTION */}
+          {/* Archive Management Section */}
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.03] overflow-hidden">
             {!archiveConfirm ? (
               <button
@@ -380,7 +380,7 @@ export function TeacherEditDrawer({ teacher, academicYear, onClose }: Props) {
                   {isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin mx-auto" />
                   ) : (
-                    `Archive as ${selectedReason ? selectedReason.replace('_', ' ') : '...'}`
+                    `Archive as ${selectedReason ? selectedReason.replace("_", " ") : "..."}`
                   )}
                 </button>
               </div>

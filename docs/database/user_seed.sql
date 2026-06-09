@@ -110,3 +110,110 @@ JOIN auth.users u ON u.id = p.id
 WHERE p.role = 'admin'
 ORDER BY p.created_at DESC
 LIMIT 5;
+
+DO $$
+DECLARE
+  -- ── CONFIGURE YOUR TEST VARIABLES HERE ──────────────────────────────────────
+  target_school_id UUID := 'YOUR_ACTUAL_SCHOOL_ID_HERE'; -- <-- Double check this matches an actual school row
+  test_user_id     UUID := gen_random_uuid();
+  test_teacher_id  UUID := gen_random_uuid();
+  test_email       TEXT := 'mwalimu.test@kibali.academy';
+  test_phone       TEXT := '+254700000000';
+  test_name        TEXT := 'Erick Mwalimu Omondi';
+  tsc_ref          TEXT := 'TSC-998877';
+BEGIN
+
+  -- ── Step 1: Insert into Supabase Auth Identity Manager ─────────────────────
+  INSERT INTO auth.users (
+    id,
+    instance_id,
+    email,
+    encrypted_password,
+    email_confirmed_at,
+    raw_app_meta_data,
+    raw_user_meta_data,
+    is_super_admin,
+    role,
+    aud,
+    created_at,
+    updated_at
+  ) VALUES (
+    test_user_id,
+    '00000000-0000-0000-0000-000000000000',
+    test_email,
+    -- Password: "password123"
+    '$2a$10$abcdefghijklmnopqrstuvwxyza1234567890abcdefghijklm',
+    now(),
+    '{"provider": "email", "providers": ["email"]}',
+    jsonb_build_object('full_name', test_name),
+    false,
+    'authenticated',
+    'authenticated',
+    now(),
+    now()
+  );
+
+  -- ── Step 2: Insert into Public Employment Directory ────────────────────────
+  INSERT INTO public.teachers (
+    id,
+    school_id,
+    tsc_number,
+    status,
+    invite_accepted,
+    created_at
+  ) VALUES (
+    test_teacher_id,
+    target_school_id,
+    tsc_ref,
+    'active',
+    true,
+    now()
+  );
+
+  -- ── Step 3: UPSERT into Public Profiles Matrix ─────────────────────────────
+  -- Safely updates the profile row if Step 1 triggered an automatic background creation.
+  INSERT INTO public.profiles (
+    id,
+    teacher_id,
+    school_id,
+    full_name,
+    email,
+    phone_number,
+    role,
+    base_role,
+    roles,
+    is_super_admin,
+    is_dev,
+    created_at,
+    updated_at
+  ) VALUES (
+    test_user_id,
+    test_teacher_id,
+    target_school_id,
+    test_name,
+    test_email,
+    test_phone,
+    'teacher'::user_role,
+    'teacher'::user_role,
+    ARRAY['teacher'::user_role],
+    false,
+    false,
+    now(),
+    now()
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    teacher_id = EXCLUDED.teacher_id,
+    school_id = EXCLUDED.school_id,
+    full_name = EXCLUDED.full_name,
+    email = EXCLUDED.email,
+    phone_number = EXCLUDED.phone_number,
+    role = EXCLUDED.role,
+    base_role = EXCLUDED.base_role,
+    roles = EXCLUDED.roles,
+    updated_at = now();
+
+  RAISE NOTICE '✨ Seed Success with Upsert handling!';
+  RAISE NOTICE 'User Auth ID: %', test_user_id;
+  RAISE NOTICE 'Login Email: %', test_email;
+
+END $$;

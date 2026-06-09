@@ -18,7 +18,6 @@ const teacherUpdateSchema = z.object({
   avatarUrl: z.string().optional().nullable(),
 });
 
-// Define allowed archive reasons based on your school logic
 const archiveReasonSchema = z.enum([
   "transferred",
   "terminated",
@@ -71,27 +70,43 @@ export async function updateTeacherAction(fd: FormData): Promise<ActionResult> {
 
     const { teacherId, fullName, phoneNumber, tscNumber, avatarUrl } = parsed.data;
 
-    // 1. Update the Teachers table
-    const { error: teacherErr } = await supabaseAdmin
-      .from("teachers")
-      .update({
-        full_name: fullName,
-        phone_number: phoneNumber,
-        tsc_number: tscNumber,
-        ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
-      })
-      .eq("id", teacherId);
+    // 1. Fetch the profile row context to obtain the underlying relationship reference pointer
+    const { data: profile, error: profileFetchErr } = await supabaseAdmin
+      .from("profiles")
+      .select("teacher_id")
+      .eq("id", teacherId)
+      .single();
 
-    if (teacherErr) throw teacherErr;
+    if (profileFetchErr || !profile) throw new Error("Associated profile context not found.");
 
-    // 2. Sync Profile and Auth Metadata (Parallel)
+    // 2. Safely patch structural employment table fields (Only tsc_number belongs here)
+    if (profile.teacher_id) {
+      const { error: teacherErr } = await supabaseAdmin
+        .from("teachers")
+        .update({
+          tsc_number: tscNumber,
+        })
+        .eq("id", profile.teacher_id);
+
+      if (teacherErr) throw teacherErr;
+    }
+
+    // 3. Sync public access profile matrix and Auth identities concurrently
     await Promise.all([
       supabaseAdmin
         .from("profiles")
-        .update({ full_name: fullName })
+        .update({ 
+          full_name: fullName,
+          phone_number: phoneNumber,
+          avatar_url: avatarUrl
+        })
         .eq("id", teacherId),
+        
       supabaseAdmin.auth.admin.updateUserById(teacherId, {
-        user_metadata: { full_name: fullName },
+        user_metadata: { 
+          full_name: fullName,
+          avatar_url: avatarUrl
+        },
       }),
     ]);
 
@@ -108,10 +123,6 @@ export async function updateTeacherAction(fd: FormData): Promise<ActionResult> {
 
 // ── 4. Change Status (Active/On Leave) ──────────────────────────────────────────
 
-/**
- * Handles toggling between active and temporary leave.
- * Note: Use archiveTeacherAction for permanent exits.
- */
 export async function changeTeacherStatusAction(
   teacherId: string,
   status: TeacherStatus,
@@ -119,15 +130,26 @@ export async function changeTeacherStatusAction(
   try {
     await ensureAdmin();
 
-    // 1. Update the teacher's status
+    // 1. Fetch the profile context to resolve the correct employment key string
+    const { data: profile, error: profileFetchErr } = await supabaseAdmin
+      .from("profiles")
+      .select("teacher_id")
+      .eq("id", teacherId)
+      .single();
+
+    if (profileFetchErr || !profile || !profile.teacher_id) {
+      throw new Error("Teacher record reference missing.");
+    }
+
+    // 2. Update the teacher's duty cycle status row
     const { error } = await supabaseAdmin
       .from("teachers")
       .update({ status })
-      .eq("id", teacherId);
+      .eq("id", profile.teacher_id);
 
     if (error) throw error;
 
-    // 2. If status is NOT 'active', relieve from primary class teacher duties
+    // 3. If duty cycle transitions off-duty, relieve from running primary class manager roles
     if (status !== "active") {
       await supabaseAdmin
         .from("class_teacher_assignments")
@@ -135,7 +157,7 @@ export async function changeTeacherStatusAction(
           is_active: false,
           relieved_at: new Date().toISOString(),
         })
-        .eq("teacher_id", teacherId)
+        .eq("teacher_id", profile.teacher_id)
         .eq("is_active", true);
     }
 
@@ -161,53 +183,71 @@ export async function resendTeacherInviteAction(
   try {
     await ensureAdmin();
 
-    const { data: teacher, error: fetchErr } = await supabaseAdmin
-      .from("teachers")
-      .select("email, full_name")
-      .eq("id", teacherId)
-      .returns<{ email: string; full_name: string }[]>()
+    // Sourced cleanly from profiles where user identity info explicitly lives
+    const { data: profile, error: fetchErr } = await supabaseAdmin
+      .from("profiles")
+      .select("id, email, full_name, teacher_id")
+      .or(`id.eq.${teacherId},teacher_id.eq.${teacherId}`)
       .single();
 
-    if (fetchErr || !teacher) return { success: false, message: "Teacher not found." };
+    if (fetchErr || !profile || !profile.email) {
+      console.error("[resendTeacherInviteAction] Fetch Error:", fetchErr);
+      return { success: false, message: "Teacher account profile not found." };
+    }
 
     const { data: link, error: linkErr } =
       await supabaseAdmin.auth.admin.generateLink({
         type: "magiclink",
-        email: teacher.email,
+        email: profile.email,
         options: { redirectTo: getAuthConfirmUrl() },
       });
 
     if (linkErr) throw linkErr;
 
     await sendTeacherWelcomeEmail({
-      teacherEmail: teacher.email,
-      teacherName: teacher.full_name,
+      teacherEmail: profile.email,
+      teacherName: profile.full_name,
       setupLink: link.properties.action_link,
     });
 
-    await supabaseAdmin
-      .from("teachers")
-      .update({ last_invite_sent: new Date().toISOString() })
-      .eq("id", teacherId);
+  // Write timeline audit records to both structural records safely and cleanly
+    const updatePromises: Promise<unknown>[] = [
+      (async () => {
+        const { error } = await supabaseAdmin
+          .from("profiles")
+          .update({ last_invite_sent: new Date().toISOString() })
+          .eq("id", profile.id);
+        if (error) throw error;
+      })()
+    ];
+
+    if (profile.teacher_id) {
+      updatePromises.push(
+        (async () => {
+          const { error } = await supabaseAdmin
+            .from("teachers")
+            .update({ last_invite_sent: new Date().toISOString() })
+            .eq("id", profile.teacher_id);
+          if (error) throw error;
+        })()
+      );
+    }
+
+    await Promise.all(updatePromises);
 
     revalidatePath("/admin/teachers");
     revalidatePath(`/admin/teachers/${teacherId}`);
 
-    return { success: true, message: "Invite email resent." };
+    return { success: true, message: "Invite email resent successfully." };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Invite failed";
     console.error("[resendTeacherInviteAction] Error:", msg);
-    return { success: false, message: "Failed to resend invite." };
+    return { success: false, message: "Failed to process and resend invite." };
   }
 }
 
-
 // ── 6. Archive Staff (Permanent Exits) ──────────────────────────────────────────
 
-/**
- * Handles transfers, resignations, sackings, etc.
- * Preserves history while removing them from active duty.
- */
 export async function archiveTeacherAction(
   teacherId: string,
   reason: ArchiveReason
@@ -215,44 +255,55 @@ export async function archiveTeacherAction(
   try {
     await ensureAdmin();
 
-    // 1. Check for active subject allocations 
+    // 1. Fetch the profile context to handle mapping lookups safely
+    const { data: profile, error: profileFetchErr } = await supabaseAdmin
+      .from("profiles")
+      .select("teacher_id")
+      .eq("id", teacherId)
+      .single();
+
+    if (profileFetchErr || !profile || !profile.teacher_id) {
+      throw new Error("Teacher employment record reference missing.");
+    }
+
+    const targetTeacherUuid = profile.teacher_id;
+
+    // 2. Scan for active instructional course configurations 
     const { data: activeAllocations } = await supabaseAdmin
       .from("teacher_subject_allocations")
       .select("id")
-      .eq("teacher_id", teacherId)
+      .eq("teacher_id", targetTeacherUuid)
       .limit(1);
 
     if (activeAllocations?.length) {
       return {
         success: false,
-        message: `Teacher has active subject allocations. Please reassign their subjects before ${reason === 'transferred' ? 'transferring' : 'archiving'}.`,
+        message: `Teacher has active subject allocations. Please reassign their subjects before ${reason === "transferred" ? "transferring" : "archiving"}.`,
       };
     }
 
-    // 2. Perform the Archive (Soft Delete)
+    // 3. Mark the archive termination workflow
     const { error } = await supabaseAdmin
       .from("teachers")
       .update({
-        status: reason, // e.g., 'transferred', 'terminated'
+        status: reason,
         archived_at: new Date().toISOString(),
       })
-      .eq("id", teacherId);
+      .eq("id", targetTeacherUuid);
 
-    if (error) {
-       throw error;
-    }
+    if (error) throw error;
 
-    // 3. Deactivate current primary class assignments (keep history)
+    // 4. Safely clear down out current class manager references
     await supabaseAdmin
       .from("class_teacher_assignments")
       .update({ 
         is_active: false, 
         relieved_at: new Date().toISOString() 
       })
-      .eq("teacher_id", teacherId)
+      .eq("teacher_id", targetTeacherUuid)
       .eq("is_active", true);
 
-    // 4. Disable Auth Access
+    // 5. Explicitly freeze auth tokens and append flags to session attributes
     await supabaseAdmin.auth.admin.updateUserById(teacherId, {
       user_metadata: { status: reason, is_archived: true },
     });
@@ -263,7 +314,7 @@ export async function archiveTeacherAction(
 
     return { 
       success: true, 
-      message: `Teacher has been marked as ${reason} successfully.` 
+      message: `Teacher has been marked as ${reason.replace("_", " ")} successfully.` 
     };
 
   } catch (err) {
