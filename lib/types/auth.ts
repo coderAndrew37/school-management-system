@@ -63,6 +63,8 @@ export interface AdminRoleDefinition {
   sort_order:           number;
   created_at:           string;
   updated_at:           string;
+  school_id:            string;
+
 }
 
 // ── Baseline Role Capability Map ─────────────────────────────────────────────

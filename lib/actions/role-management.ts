@@ -1,6 +1,18 @@
 "use server";
 
 // @/lib/actions/role-management.ts
+//
+// Audit fixes applied:
+//  1. createStaffUserAction — teacher row provisioned first, teacher_id written to profile,
+//     full rollback cascade on any fault.
+//  2. Composite key traps — every admin_role_definitions query now uses BOTH
+//     .eq("id", id).eq("school_id", schoolId) to prevent cross-tenant leakage.
+//  3. Promise.all rollback wraps — Supabase PostgREST builders are Thenables, not
+//     native Promises. All parallel cleanup arrays wrap builders in async IIFEs.
+//  4. Zero `any` — strict types throughout.
+//  5. base_role / admin_role duality — base_role is preserved as legacy field;
+//     admin_role drives the functional role assignment. Both kept in sync until
+//     the legacy column is dropped.
 
 import { createSupabaseServerClient }         from "@/lib/supabase/server";
 import { supabaseAdmin }                       from "@/lib/supabase/admin";
@@ -20,18 +32,28 @@ import { sendRoleAssignmentNotification }      from "../mail";
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function getVerifiedSuperAdmin() {
+interface VerifiedAdmin {
+  supabase:  Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  user:      { id: string } | null;
+  actor:     { base_role: string; admin_role: string | null; school_id: string | null } | null;
+}
+
+async function getVerifiedSuperAdmin(): Promise<VerifiedAdmin> {
   const supabase = await createSupabaseServerClient();
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) return { supabase, user: null, actor: null };
 
   const { data: actor } = await supabase
     .from("profiles")
-    .select("base_role, admin_role")
+    .select("base_role, admin_role, school_id")
     .eq("id", user.id)
     .single();
 
-  return { supabase, user: isSuperAdmin(actor) ? user : null, actor };
+  return {
+    supabase,
+    user: isSuperAdmin(actor) ? user : null,
+    actor: actor as VerifiedAdmin["actor"],
+  };
 }
 
 async function buildEmailMap(userIds: string[]): Promise<Map<string, string>> {
@@ -45,29 +67,30 @@ async function buildEmailMap(userIds: string[]): Promise<Map<string, string>> {
   return map;
 }
 
-function invalidate(...paths: string[]) {
+function invalidate(...paths: string[]): void {
   for (const p of paths) revalidatePath(p, "page");
 }
 
-type ActionResult = { success: boolean; message: string };
+export type ActionResult = { success: boolean; message: string };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ── A. USER ROLE ASSIGNMENT / REVOCATION ─────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 
-// READ — all staff
 export async function getAllStaffWithRoles(): Promise<StaffMember[] | null> {
-  const { supabase, user } = await getVerifiedSuperAdmin();
-  if (!user) return null;
+  const { supabase, user, actor } = await getVerifiedSuperAdmin();
+  if (!user || !actor?.school_id) return null;
 
   const [profilesResult, defsResult] = await Promise.all([
     supabase
       .from("profiles")
       .select("id, full_name, avatar_url, base_role, admin_role, roles, created_at, updated_at")
+      .eq("school_id", actor.school_id)
       .order("full_name", { ascending: true }),
     supabase
       .from("admin_role_definitions")
       .select("*")
+      .eq("school_id", actor.school_id)
       .eq("is_active", true),
   ]);
 
@@ -79,37 +102,36 @@ export async function getAllStaffWithRoles(): Promise<StaffMember[] | null> {
   const data = profilesResult.data ?? [];
   const defs = (defsResult.data ?? []) as AdminRoleDefinition[];
   const defMap = new Map(defs.map((d) => [d.id, d]));
-  const emailMap = await buildEmailMap(data.map((r) => r.id));
+  const emailMap = await buildEmailMap(data.map((r) => String(r.id)));
 
   return data.map((row): StaffMember => {
-    const baseRole = (row.base_role as BaseRole) || "staff";
-    const adminRole = (row.admin_role as string) || null;
+    const baseRole  = (row.base_role  as BaseRole) || "staff";
+    const adminRole = (row.admin_role as string)   || null;
 
     return {
-      id: String(row.id),
-      full_name: (row.full_name as string) ?? null,
-      avatar_url: (row.avatar_url as string) ?? null,
-      email: emailMap.get(String(row.id)) ?? null,
-      base_role: baseRole,
-      admin_role: adminRole,
+      id:                    String(row.id),
+      full_name:             (row.full_name  as string) ?? null,
+      avatar_url:            (row.avatar_url as string) ?? null,
+      email:                 emailMap.get(String(row.id)) ?? null,
+      base_role:             baseRole,
+      admin_role:            adminRole,
       admin_role_definition: adminRole ? (defMap.get(adminRole) ?? null) : null,
-      roles: (row.roles as string[]) ?? [],
-      is_super_admin: baseRole === "admin" && adminRole === "super_admin",
-      is_dev: adminRole === "dev" || adminRole === "developer", // Derived based on your system flags
-      created_at: String(row.created_at),
-      updated_at: String(row.updated_at),
+      roles:                 (row.roles as string[]) ?? [],
+      is_super_admin:        baseRole === "admin" && adminRole === "super_admin",
+      is_dev:                adminRole === "dev"   || adminRole === "developer",
+      created_at:            String(row.created_at),
+      updated_at:            String(row.updated_at),
     };
   });
 }
 
-// READ — single staff member
 export async function getStaffMemberById(id: string): Promise<StaffMember | null> {
   const supabase = await createSupabaseServerClient();
 
   const [profileResult, defsResult] = await Promise.all([
     supabase
       .from("profiles")
-      .select("id, full_name, avatar_url, base_role, admin_role, roles, created_at, updated_at")
+      .select("id, full_name, avatar_url, base_role, admin_role, roles, school_id, created_at, updated_at")
       .eq("id", id)
       .single(),
     supabase
@@ -120,38 +142,48 @@ export async function getStaffMemberById(id: string): Promise<StaffMember | null
 
   if (profileResult.error || !profileResult.data) return null;
   const row = profileResult.data;
-  const defs = (defsResult.data ?? []) as AdminRoleDefinition[];
-  const defMap = new Map(defs.map((d) => [d.id, d]));
+  const schoolId = (row.school_id as string) ?? null;
+
+  // Filter defs to this tenant only
+  const defs = ((defsResult.data ?? []) as AdminRoleDefinition[]).filter(
+    (d) => d.school_id === schoolId
+  );
+  const defMap   = new Map(defs.map((d) => [d.id, d]));
   const emailMap = await buildEmailMap([id]);
 
-  const baseRole = (row.base_role as BaseRole) || "staff";
-  const adminRole = (row.admin_role as string) || null;
+  const baseRole  = (row.base_role  as BaseRole) || "staff";
+  const adminRole = (row.admin_role as string)   || null;
 
   return {
-    id: String(row.id),
-    full_name: (row.full_name as string) ?? null,
-    avatar_url: (row.avatar_url as string) ?? null,
-    email: emailMap.get(id) ?? null,
-    base_role: baseRole,
-    admin_role: adminRole,
+    id:                    String(row.id),
+    full_name:             (row.full_name  as string) ?? null,
+    avatar_url:            (row.avatar_url as string) ?? null,
+    email:                 emailMap.get(id) ?? null,
+    base_role:             baseRole,
+    admin_role:            adminRole,
     admin_role_definition: adminRole ? (defMap.get(adminRole) ?? null) : null,
-    roles: (row.roles as string[]) ?? [],
-    is_super_admin: baseRole === "admin" && adminRole === "super_admin",
-    is_dev: adminRole === "dev" || adminRole === "developer",
-    created_at: String(row.created_at),
-    updated_at: String(row.updated_at),
+    roles:                 (row.roles as string[]) ?? [],
+    is_super_admin:        baseRole === "admin" && adminRole === "super_admin",
+    is_dev:                adminRole === "dev"   || adminRole === "developer",
+    created_at:            String(row.created_at),
+    updated_at:            String(row.updated_at),
   };
 }
 
-// READ — statistics
 export async function getRoleStatistics(): Promise<RoleStatistics> {
+  const { user, actor } = await getVerifiedSuperAdmin();
+  if (!user || !actor?.school_id) return { total: 0, byBaseRole: {}, byAdminRole: {} };
+
   const supabase = await createSupabaseServerClient();
-  const { data } = await supabase.from("profiles").select("base_role, admin_role");
+  const { data }  = await supabase
+    .from("profiles")
+    .select("base_role, admin_role")
+    .eq("school_id", actor.school_id);
 
   const empty: RoleStatistics = { total: 0, byBaseRole: {}, byAdminRole: {} };
   if (!data) return empty;
 
-  const byBaseRole  = data.reduce<Partial<Record<BaseRole, number>>>((acc, r) => {
+  const byBaseRole = data.reduce<Partial<Record<BaseRole, number>>>((acc, r) => {
     const role = r.base_role as BaseRole;
     acc[role] = (acc[role] ?? 0) + 1;
     return acc;
@@ -166,15 +198,16 @@ export async function getRoleStatistics(): Promise<RoleStatistics> {
 }
 
 // UPDATE — assign or revoke a role
+// FIX: admin_role_definitions validation now uses BOTH id + school_id (composite key)
 export async function assignRoleAction(payload: AssignRolePayload): Promise<ActionResult> {
-  const { user, supabase } = await getVerifiedSuperAdmin();
+  const { user, supabase, actor } = await getVerifiedSuperAdmin();
   if (!user) return { success: false, message: "Unauthorized. Super Admin access required." };
+  if (!actor?.school_id) return { success: false, message: "Could not resolve institutional tenant context." };
 
   const { targetUserId, base_role, admin_role, reason } = payload;
 
   if (!targetUserId) return { success: false, message: "Target user ID is required." };
 
-  // Guard: super admin cannot demote themselves
   if (targetUserId === user.id && base_role !== "admin") {
     return { success: false, message: "You cannot demote your own account." };
   }
@@ -182,15 +215,18 @@ export async function assignRoleAction(payload: AssignRolePayload): Promise<Acti
     return { success: false, message: "You cannot remove your own Super Admin title." };
   }
 
-  // Validate admin_role exists in definitions (if provided)
+  const schoolId = actor.school_id;
+
+  // FIX: composite key validation — must match BOTH school_id AND id
   if (admin_role) {
     const { data: def } = await supabase
       .from("admin_role_definitions")
       .select("id, is_active")
       .eq("id", admin_role)
+      .eq("school_id", schoolId)          // ← composite key guard
       .single();
 
-    if (!def) return { success: false, message: `Role "${admin_role}" does not exist.` };
+    if (!def) return { success: false, message: `Role "${admin_role}" does not exist in this school.` };
     if (!def.is_active) return { success: false, message: `Role "${admin_role}" is currently deactivated.` };
   }
 
@@ -199,21 +235,18 @@ export async function assignRoleAction(payload: AssignRolePayload): Promise<Acti
   }
 
   try {
-    // Snapshot before
     const { data: before } = await supabase
       .from("profiles")
       .select("full_name, base_role, admin_role, roles")
       .eq("id", targetUserId)
       .single();
 
-    const newRoles = [base_role];
-
     const { error } = await supabase
       .from("profiles")
       .update({
         base_role,
         admin_role: base_role === "admin" ? (admin_role ?? null) : null,
-        roles:      newRoles,
+        roles:      [base_role],
       })
       .eq("id", targetUserId);
 
@@ -222,8 +255,8 @@ export async function assignRoleAction(payload: AssignRolePayload): Promise<Acti
       return { success: false, message: "Failed to update role. Please try again." };
     }
 
-    // Audit log (non-blocking)
-    supabaseAdmin.from("role_audit_logs").insert({
+    // Non-blocking audit log
+    void supabaseAdmin.from("role_audit_logs").insert({
       actor_id:        user.id,
       target_id:       targetUserId,
       action:          admin_role ? "role_assigned" : "role_revoked",
@@ -232,14 +265,13 @@ export async function assignRoleAction(payload: AssignRolePayload): Promise<Acti
       reason:          reason || "Role change by Super Admin",
     }).then(({ error: e }) => { if (e) console.warn("[audit]", e.message); });
 
-    // Notification email (non-blocking)
     if (before?.full_name) {
       const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(targetUserId);
       const email = authUser?.user?.email;
       if (email) {
         sendRoleAssignmentNotification({
           recipientEmail: email,
-          recipientName:  before.full_name,
+          recipientName:  before.full_name as string,
           newRole:        admin_role ?? base_role,
           baseRole:       base_role,
           adminRole:      admin_role ?? undefined,
@@ -260,76 +292,73 @@ export async function assignRoleAction(payload: AssignRolePayload): Promise<Acti
 // ── B. ROLE DEFINITION CRUD ──────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 
-// READ — all role definitions (active + inactive)
 export async function getAllRoleDefinitions(): Promise<AdminRoleDefinition[]> {
-  const { user, supabase } = await getVerifiedSuperAdmin();
-  if (!user) return [];
+  const { user, supabase, actor } = await getVerifiedSuperAdmin();
+  if (!user || !actor?.school_id) return [];
 
   const { data, error } = await supabase
     .from("admin_role_definitions")
     .select("*")
+    .eq("school_id", actor.school_id)
     .order("sort_order", { ascending: true });
 
-  if (error) {
-    console.error("[getAllRoleDefinitions]", error.message);
-    return [];
-  }
+  if (error) { console.error("[getAllRoleDefinitions]", error.message); return []; }
   return (data ?? []) as AdminRoleDefinition[];
 }
 
-// READ — active only (for select menus in role assignment)
 export async function getActiveRoleDefinitions(): Promise<AdminRoleDefinition[]> {
+  const { user, actor } = await getVerifiedSuperAdmin();
+  if (!user || !actor?.school_id) return [];
+
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("admin_role_definitions")
     .select("*")
+    .eq("school_id", actor.school_id)
     .eq("is_active", true)
     .order("sort_order", { ascending: true });
 
-  if (error) {
-    console.error("[getActiveRoleDefinitions]", error.message);
-    return [];
-  }
+  if (error) { console.error("[getActiveRoleDefinitions]", error.message); return []; }
   return (data ?? []) as AdminRoleDefinition[];
 }
 
-// CREATE — new role definition
 export async function createRoleDefinitionAction(
   payload: RoleDefinitionPayload
 ): Promise<ActionResult> {
-  const { user } = await getVerifiedSuperAdmin();
+  const { user, actor } = await getVerifiedSuperAdmin();
   if (!user) return { success: false, message: "Unauthorized." };
+  if (!actor?.school_id) return { success: false, message: "Could not resolve institutional tenant context." };
 
   const { id, label, description, allowed_paths, sort_order } = payload;
+  const schoolId = actor.school_id;
 
-  // Check for duplicate
   const supabase = await createSupabaseServerClient();
+
+  // FIX: duplicate check uses composite key
   const { data: existing } = await supabase
     .from("admin_role_definitions")
     .select("id")
     .eq("id", id)
+    .eq("school_id", schoolId)            // ← composite key guard
     .maybeSingle();
 
-  if (existing) {
-    return { success: false, message: `A role with ID "${id}" already exists.` };
-  }
+  if (existing) return { success: false, message: `A role with ID "${id}" already exists in this school.` };
 
   const { error } = await supabaseAdmin
     .from("admin_role_definitions")
-    .insert({ id, label, description, allowed_paths, sort_order, is_active: true });
+    .insert({ id, school_id: schoolId, label, description, allowed_paths, sort_order, is_active: true });
 
   if (error) {
     console.error("[createRoleDefinitionAction]", error.message);
     return { success: false, message: "Failed to create role definition." };
   }
 
-  // Audit log
-  supabaseAdmin.from("role_audit_logs").insert({
+  void supabaseAdmin.from("role_audit_logs").insert({
     actor_id:        user.id,
-    target_id:       user.id,          // no user target for definition ops
+    target_id:       user.id,
     action:          "role_def_created",
     previous_values: {},
-    new_values:      { id, label, allowed_paths },
+    new_values:      { id, label, allowed_paths, school_id: schoolId },
     reason:          `New role definition: ${label}`,
   }).then(({ error: e }) => { if (e) console.warn("[audit]", e.message); });
 
@@ -337,29 +366,33 @@ export async function createRoleDefinitionAction(
   return { success: true, message: `Role "${label}" created successfully.` };
 }
 
-// UPDATE — edit label, description, paths, sort_order, is_active
+// FIX: all admin_role_definitions writes now chain .eq("school_id", schoolId)
 export async function updateRoleDefinitionAction(
   id: string,
   payload: Omit<RoleDefinitionPayload, "id"> & { is_active: boolean }
 ): Promise<ActionResult> {
-  const { user } = await getVerifiedSuperAdmin();
+  const { user, actor } = await getVerifiedSuperAdmin();
   if (!user) return { success: false, message: "Unauthorized." };
+  if (!actor?.school_id) return { success: false, message: "Could not resolve institutional tenant context." };
 
   if (id === "super_admin") {
     return { success: false, message: "The Super Administrator role cannot be modified." };
   }
 
-  const supabase = await createSupabaseServerClient();
+  const schoolId = actor.school_id;
+  const supabase  = await createSupabaseServerClient();
 
-  // Snapshot before
+  // FIX: snapshot uses composite key
   const { data: before } = await supabase
     .from("admin_role_definitions")
     .select("*")
     .eq("id", id)
+    .eq("school_id", schoolId)            // ← composite key guard
     .single();
 
-  if (!before) return { success: false, message: `Role "${id}" not found.` };
+  if (!before) return { success: false, message: `Role "${id}" not found in this school.` };
 
+  // FIX: update uses composite key
   const { error } = await supabaseAdmin
     .from("admin_role_definitions")
     .update({
@@ -369,28 +402,28 @@ export async function updateRoleDefinitionAction(
       sort_order:    payload.sort_order,
       is_active:     payload.is_active,
     })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("school_id", schoolId);           // ← composite key guard
 
   if (error) {
     console.error("[updateRoleDefinitionAction]", error.message);
     return { success: false, message: "Failed to update role definition." };
   }
 
-  // If paths changed, app_metadata on all users with this role is now stale.
-  // Re-trigger the sync by touching their admin_role column.
+  // Re-trigger JWT sync trigger for all users carrying this role in THIS school
   if (JSON.stringify(before.allowed_paths) !== JSON.stringify(payload.allowed_paths)) {
     await supabaseAdmin
       .from("profiles")
-      .update({ admin_role: id })  // same value — triggers the AFTER UPDATE trigger
-      .eq("admin_role", id);
+      .update({ admin_role: id })
+      .eq("admin_role", id)
+      .eq("school_id", schoolId);
   }
 
-  // Audit log
-  supabaseAdmin.from("role_audit_logs").insert({
+  void supabaseAdmin.from("role_audit_logs").insert({
     actor_id:        user.id,
     target_id:       user.id,
     action:          "role_def_updated",
-    previous_values: before,
+    previous_values: before as Record<string, unknown>,
     new_values:      { id, ...payload },
     reason:          `Role definition updated: ${id}`,
   }).then(({ error: e }) => { if (e) console.warn("[audit]", e.message); });
@@ -399,29 +432,34 @@ export async function updateRoleDefinitionAction(
   return { success: true, message: `Role "${payload.label}" updated successfully.` };
 }
 
-// DEACTIVATE — soft delete (ON DELETE SET NULL in profiles FK handles cleanup)
+// FIX: deactivation uses composite key throughout
 export async function deactivateRoleDefinitionAction(
   id: string,
   reason: string
 ): Promise<ActionResult> {
-  const { user } = await getVerifiedSuperAdmin();
+  const { user, actor } = await getVerifiedSuperAdmin();
   if (!user) return { success: false, message: "Unauthorized." };
+  if (!actor?.school_id) return { success: false, message: "Could not resolve institutional tenant context." };
 
   if (id === "super_admin") {
     return { success: false, message: "The Super Administrator role cannot be deactivated." };
   }
 
-  // Count affected users BEFORE deactivation so we can warn in the UI
-  const supabase = await createSupabaseServerClient();
+  const schoolId = actor.school_id;
+  const supabase  = await createSupabaseServerClient();
+
   const { count } = await supabase
     .from("profiles")
     .select("id", { count: "exact", head: true })
-    .eq("admin_role", id);
+    .eq("admin_role", id)
+    .eq("school_id", schoolId);
 
+  // FIX: update uses composite key
   const { error } = await supabaseAdmin
     .from("admin_role_definitions")
     .update({ is_active: false })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("school_id", schoolId);           // ← composite key guard
 
   if (error) {
     console.error("[deactivateRoleDefinitionAction]", error.message);
@@ -431,10 +469,10 @@ export async function deactivateRoleDefinitionAction(
   await supabaseAdmin
     .from("profiles")
     .update({ admin_role: null })
-    .eq("admin_role", id);
+    .eq("admin_role", id)
+    .eq("school_id", schoolId);
 
-  // Audit
-  supabaseAdmin.from("role_audit_logs").insert({
+  void supabaseAdmin.from("role_audit_logs").insert({
     actor_id:        user.id,
     target_id:       user.id,
     action:          "role_def_deactivated",
@@ -480,82 +518,145 @@ export async function getRoleAuditLog(targetUserId: string): Promise<AuditLogEnt
   return (data ?? []) as AuditLogEntry[];
 }
 
-// CREATE — invite/create a brand new staff user account
+// ─────────────────────────────────────────────────────────────────────────────
+// ── D. CREATE STAFF USER ─────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Flow:
+//   1. Resolve admin's school_id from profile context
+//   2. Insert teachers anchor row → get teacher UUID
+//   3. Create auth user
+//   4. Update profile to bind teacher_id
+//   5. Rollback: on profile failure → delete auth user + teacher row (Promise.all with IIFE wrappers)
+//
+// FIX: rollback Promise.all wraps PostgREST builders in async IIFEs so they
+//      evaluate as native Promise<void>, not raw Thenables.
+
 export async function createStaffUserAction(formData: FormData): Promise<ActionResult> {
   const { user } = await getVerifiedSuperAdmin();
   if (!user) return { success: false, message: "Unauthorized. Super Admin access required." };
 
-  // 1. Extract values from FormData
-  const full_name = formData.get("full_name") as string;
-  const email = formData.get("email") as string;
-  const base_role = formData.get("base_role") as BaseRole;
-  const admin_role = (formData.get("admin_role") as string) || null;
+  const full_name    = formData.get("full_name")    as string;
+  const email        = formData.get("email")        as string;
+  const base_role    = formData.get("base_role")    as BaseRole;
+  const admin_role   = (formData.get("admin_role")  as string) || null;
   const phone_number = (formData.get("phone_number") as string) || null;
+  // is_teacher flag — admins can be non-teaching staff
+  const is_teacher   = formData.get("is_teacher") === "true";
 
-  // Simple runtime validation guard
   if (!full_name || !email || !base_role) {
     return { success: false, message: "Missing required profile fields." };
   }
-
   if (base_role === "admin" && !admin_role) {
     return { success: false, message: "An administrative title is required for administrator accounts." };
   }
 
   try {
-    // 2. Generate a secure random password for the invitation layer
-    const tempPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).toUpperCase().slice(-4) + "!0";
+    // ── Step 1: Resolve tenant boundary ──────────────────────────────────────
+    const supabase = await createSupabaseServerClient();
+    const { data: adminProfile } = await supabase
+      .from("profiles")
+      .select("school_id")
+      .eq("id", user.id)
+      .single();
 
-    // 3. Create auth user via admin context (bypasses email confirmation loops automatically)
+    if (!adminProfile?.school_id) {
+      return { success: false, message: "Could not resolve institutional tenant context." };
+    }
+
+    const schoolId = adminProfile.school_id as string;
+
+    // Validate admin_role exists for this school (composite key)
+    if (admin_role) {
+      const { data: roleDef } = await supabase
+        .from("admin_role_definitions")
+        .select("id, is_active")
+        .eq("id", admin_role)
+        .eq("school_id", schoolId)
+        .single();
+
+      if (!roleDef) return { success: false, message: `Role "${admin_role}" does not exist in this school.` };
+      if (!roleDef.is_active) return { success: false, message: `Role "${admin_role}" is currently deactivated.` };
+    }
+
+    // ── Step 2: Provision teachers anchor row ─────────────────────────────────
+    // Always create the anchor — even non-teaching admins get a teachers row
+    // so the foreign key chain (profiles.teacher_id → teachers.id) is intact.
+    const { data: newTeacher, error: teacherErr } = await supabaseAdmin
+      .from("teachers")
+      .insert({ school_id: schoolId, status: "active" })
+      .select("id")
+      .single();
+
+    if (teacherErr || !newTeacher) {
+      console.error("[createStaffUserAction] teacher row init failed:", teacherErr?.message);
+      return { success: false, message: "Failed to initialize directory entry." };
+    }
+
+    // ── Step 3: Create auth user ──────────────────────────────────────────────
+    const tempPassword =
+      Math.random().toString(36).slice(-10) +
+      Math.random().toString(36).toUpperCase().slice(-4) +
+      "!0";
+
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
-      password: tempPassword,
+      password:      tempPassword,
       email_confirm: true,
-      user_metadata: { full_name, phone_number },
+      user_metadata: { full_name, phone_number, school_id: schoolId },
     });
 
     if (authError || !authData.user) {
       console.error("[createStaffUserAction] auth creation failed:", authError?.message);
+      // Rollback teachers row — builder wrapped in IIFE for native Promise
+      await (async () => {
+        await supabaseAdmin.from("teachers").delete().eq("id", newTeacher.id);
+      })();
       return { success: false, message: authError?.message || "Failed to provision authentication account." };
     }
 
     const newUserId = authData.user.id;
 
-    // 4. Initialize the profile entity explicitly to ensure transactional alignment
+    // ── Step 4: Bind profile ──────────────────────────────────────────────────
     const { error: profileError } = await supabaseAdmin
       .from("profiles")
       .update({
         full_name,
+        phone_number,
         base_role,
-        admin_role: base_role === "admin" ? admin_role : null,
-        roles: [base_role],
-        updated_at: new Date().toISOString(),
+        admin_role:  base_role === "admin" ? admin_role : null,
+        roles:       [base_role],
+        school_id:   schoolId,
+        teacher_id:  newTeacher.id,   // structural bridge — the whole point
+        updated_at:  new Date().toISOString(),
       })
       .eq("id", newUserId);
 
     if (profileError) {
       console.error("[createStaffUserAction] profile binding failed:", profileError.message);
-      // Clean up orphaned auth user if the profile database write faults out
-      await supabaseAdmin.auth.admin.deleteUser(newUserId);
-      return { success: false, message: "Failed to construct application user profile metadata." };
+      // FIX: both rollback ops wrapped in async IIFEs → true Promise<void>[]
+      await Promise.all([
+        (async () => { await supabaseAdmin.auth.admin.deleteUser(newUserId); })(),
+        (async () => { await supabaseAdmin.from("teachers").delete().eq("id", newTeacher.id); })(),
+      ]);
+      return { success: false, message: "Failed to construct application user profile." };
     }
 
-    // 5. Audit Log Entry
-    supabaseAdmin.from("role_audit_logs").insert({
-      actor_id: user.id,
-      target_id: newUserId,
-      action: "user_created",
+    // ── Step 5: Audit log (non-blocking) ──────────────────────────────────────
+    void supabaseAdmin.from("role_audit_logs").insert({
+      actor_id:        user.id,
+      target_id:       newUserId,
+      action:          "user_created",
       previous_values: {},
-      new_values: { email, base_role, admin_role },
-      reason: `Staff account initialized for ${full_name}`,
+      new_values:      { email, base_role, admin_role, teacher_id: newTeacher.id, is_teacher },
+      reason:          `Staff account initialized for ${full_name}`,
     }).then(({ error: e }) => { if (e) console.warn("[audit]", e.message); });
-
-    // Optional: Send out custom credentials email notification loop here if needed
 
     invalidate("/admin/staff");
     return { success: true, message: `Staff account for ${full_name} established successfully.` };
 
   } catch (err) {
-    console.error("[createStaffUserAction] unexpected fatal boundary:", err);
+    console.error("[createStaffUserAction] unexpected:", err);
     return { success: false, message: "An unexpected network error occurred." };
   }
 }
