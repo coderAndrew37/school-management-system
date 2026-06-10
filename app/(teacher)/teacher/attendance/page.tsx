@@ -77,7 +77,7 @@ export default async function AttendancePage() {
         </div>
 
         <Link
-          href="/teacher"
+          href="/teacher/dashboard"
           className="flex items-center justify-center gap-2 w-full rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold py-3 transition-colors"
         >
           Back to Dashboard <ArrowRight className="h-4 w-4" />
