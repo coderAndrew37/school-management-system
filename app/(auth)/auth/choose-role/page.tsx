@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import type { UserRole } from "@/lib/types/auth";
+import { type BaseRole, BASE_ROLES } from "@/lib/types/auth";
 import { ChooseRoleForm } from "@/app/_components/auth/ChooseRoleForm";
 
 export const metadata: Metadata = { title: "Choose Portal | Kibali Academy" };
@@ -10,6 +10,12 @@ interface Props {
 
 export default async function ChooseRolePage({ searchParams }: Props) {
   const params = await searchParams;
-  const roles = (params.roles?.split(",").filter(Boolean) ?? []) as UserRole[];
-  return <ChooseRoleForm roles={roles} redirectTo={params.redirectTo} />;
+  
+  // Parse, sanitize, and validate incoming tokens against our strict BaseRole array
+  const rawRoles = params.roles?.split(",") ?? [];
+  const validatedRoles = rawRoles.filter((role): role is BaseRole => 
+    BASE_ROLES.includes(role as BaseRole)
+  );
+
+  return <ChooseRoleForm roles={validatedRoles} redirectTo={params.redirectTo} />;
 }

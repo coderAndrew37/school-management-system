@@ -2,22 +2,17 @@
 //
 // THREE-LAYER RBAC (zero extra DB calls — reads JWT app_metadata only):
 //
-//  Layer 0 — Subdomain → tenant rewrite
-//    kibali.yourdomain.com → internal /school/kibali/... rewrite
+//   Layer 0 — Subdomain → tenant rewrite
+//     kibali.yourdomain.com → internal /school/kibali/... rewrite
 //
-//  Layer 1 — Base-role portal gating
-//    app_metadata.role gates whole portal sections (/admin, /teacher, etc.)
-//    Roles: super_admin | admin | staff | parent | student
+//   Layer 1 — Accessible portal array gating
+//     app_metadata.accessible_portals gates structural prefixes (/admin, /teacher, /parent)
 //
-//  Layer 2 — Admin sub-route path gating
-//    app_metadata.admin_paths lists URL prefixes this admin role may access.
-//    super_admin always has ["/admin"] — covers every sub-route.
-//    Skipped entirely for super_admin and is_dev.
+//   Layer 2 — Admin sub-route path gating
+//     app_metadata.admin_paths lists URL prefixes this admin role may access.
 //
-//  Layer 3 — Domain-action permission token gating
-//    app_metadata.permissions is the resolved token array.
-//    Maps pathname → required token via ROUTE_PERMISSION_MAP.
-//    Skipped entirely for super_admin and is_dev.
+//   Layer 3 — Domain-action permission token gating
+//     app_metadata.permissions maps pathname → required token via ROUTE_PERMISSION_MAP.
 
 import {
   PROTECTED_PREFIXES,
@@ -29,7 +24,6 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 // ── Route → permission token map ─────────────────────────────────────────────
-
 const ROUTE_PERMISSION_MAP: [string, string | null][] = [
   ["/admin/security",       "security:roles:manage"],
   ["/admin/fees",           "finance:fees:read"],
@@ -84,7 +78,6 @@ function hasTokenInArray(permissions: string[], required: string): boolean {
 }
 
 // ── Route classifications ─────────────────────────────────────────────────────
-
 const PUBLIC_ROUTES = [
   "/login",
   "/auth/forgot-password",
@@ -93,6 +86,7 @@ const PUBLIC_ROUTES = [
   "/auth/confirm",
 ];
 
+// Routes that authenticated users are allowed to access directly
 const AUTH_BYPASS_ROUTES = [
   "/auth/confirm",
   "/auth/reset-password",
@@ -101,7 +95,6 @@ const AUTH_BYPASS_ROUTES = [
 ];
 
 // ── Middleware ────────────────────────────────────────────────────────────────
-
 export async function middleware(request: NextRequest) {
   const { pathname, hostname } = request.nextUrl;
   let response = NextResponse.next({ request: { headers: request.headers } });
@@ -131,7 +124,7 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  // ── Supabase session (cookie-based, no DB call) ───────────────────────────
+  // ── Supabase session configuration ────────────────────────────────────────
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -154,7 +147,7 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   const isPublicRoute = PUBLIC_ROUTES.some((r) => pathname.startsWith(r));
 
-  // ── Unauthenticated ───────────────────────────────────────────────────────
+  // ── Unauthenticated Redirect Traffic ──────────────────────────────────────
   if (!user) {
     if (isPublicRoute) return response;
     const loginUrl = request.nextUrl.clone();
@@ -163,35 +156,46 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // ── Read JWT claims ───────────────────────────────────────────────────────
-  const meta         = user.app_metadata ?? {};
-  const primaryRole  = meta.role          as UserRole | undefined;
-  const userRoles    = (meta.roles ?? []) as UserRole[];
-  const adminPaths   = (meta.admin_paths  ?? []) as string[];
-  const permissions  = (meta.permissions  ?? []) as string[];
-  const isSuperAdmin = (meta.is_super_admin ?? false) as boolean;
-  const isDev        = (meta.is_dev         ?? false) as boolean;
+  // ── Read JWT Claims (Updated with your custom multi-portal architecture) ──
+  const meta              = user.app_metadata ?? {};
+  const baseRole          = meta.base_role            as UserRole | undefined;
+  const accessiblePortals = (meta.accessible_portals ?? []) as string[];
+  const adminPaths        = (meta.admin_paths         ?? []) as string[];
+  const permissions       = (meta.permissions         ?? []) as string[];
+  const isSuperAdmin      = (meta.is_super_admin      ?? false) as boolean;
+  const isDev             = (meta.is_dev              ?? false) as boolean;
 
-  // Privileged users bypass Layers 2 and 3 entirely
   const isPrivileged = isSuperAdmin || isDev;
 
-  // New user — JWT not synced yet, let through
-  if (!primaryRole) return response;
+  // New user — JWT claims payload not fully populated yet
+  if (!baseRole) return response;
 
-  // ── Root redirect ─────────────────────────────────────────────────────────
-  if (pathname === "/") {
-    return NextResponse.redirect(
-      new URL(ROLE_ROUTES[primaryRole] ?? "/login", request.url)
-    );
+  // ── Compute Multi-Portal Routing Rules ────────────────────────────────────
+  let targetFallbackRoute = ROLE_ROUTES[baseRole] ?? "/login";
+
+  if (accessiblePortals.length > 1) {
+    const roleSelectorUrl = request.nextUrl.clone();
+    roleSelectorUrl.pathname = "/auth/choose-role";
+    roleSelectorUrl.searchParams.set("roles", accessiblePortals.join(","));
+    
+    // Only capture target redirectTo context if it is a valid non-root workspace destination
+    if (pathname !== "/" && !isPublicRoute) {
+      roleSelectorUrl.searchParams.set("redirectTo", pathname);
+    }
+    
+    targetFallbackRoute = roleSelectorUrl.pathname + roleSelectorUrl.search;
   }
 
-  // ── Authenticated user on a public route ──────────────────────────────────
+  // ── Root route redirect logic ─────────────────────────────────────────────
+  if (pathname === "/") {
+    return NextResponse.redirect(new URL(targetFallbackRoute, request.url));
+  }
+
+  // ── Authenticated user targeting a public login route ─────────────────────
   if (isPublicRoute) {
     const isBypass = AUTH_BYPASS_ROUTES.some((p) => pathname.startsWith(p));
     if (!isBypass) {
-      return NextResponse.redirect(
-        new URL(ROLE_ROUTES[primaryRole] ?? "/login", request.url)
-      );
+      return NextResponse.redirect(new URL(targetFallbackRoute, request.url));
     }
     return response;
   }
@@ -202,48 +206,41 @@ export async function middleware(request: NextRequest) {
     .sort((a, b) => b.length - a.length)[0];
 
   if (matchingPrefix) {
-    const allowedRoles    = PROTECTED_PREFIXES[matchingPrefix]!;
-    const effectiveRoles  = Array.from(new Set([primaryRole, ...userRoles]));
-    const hasPortalAccess = effectiveRoles.some((r) => allowedRoles.includes(r));
+    const allowedRoles = PROTECTED_PREFIXES[matchingPrefix]!;
+    
+    // Validate if any of their active accessible portals match the requested path prefix entry
+    const hasPortalAccess = isPrivileged || accessiblePortals.some((portal) => allowedRoles.includes(portal as UserRole));
 
     if (!hasPortalAccess) {
-      return NextResponse.redirect(
-        new URL(ROLE_ROUTES[primaryRole] ?? "/login", request.url)
-      );
+      return NextResponse.redirect(new URL(targetFallbackRoute, request.url));
     }
 
     // ── Layer 2: Admin sub-route path gating ─────────────────────────────
-    // Only for non-privileged admin/super_admin users on /admin routes
     const isAdminPortal = pathname.startsWith("/admin");
-    const isAdminRole   = primaryRole === "admin" || primaryRole === "super_admin";
+    const hasAdminClaim = accessiblePortals.includes("admin");
 
     if (
       !isPrivileged &&
       isAdminPortal &&
-      isAdminRole &&
+      hasAdminClaim &&
       adminPaths.length > 0 &&
       pathname !== "/admin/dashboard" &&
       pathname !== "/admin"
     ) {
       const hasPathAccess = adminPaths.some((p) => pathname.startsWith(p));
       if (!hasPathAccess) {
-        return NextResponse.redirect(
-          new URL("/admin/dashboard", request.url)
-        );
+        return NextResponse.redirect(new URL("/admin/dashboard", request.url));
       }
     }
 
     // ── Layer 3: Domain-action permission token gating ────────────────────
-    // Only for non-privileged users on /admin routes
-    if (!isPrivileged && isAdminPortal && isAdminRole) {
+    if (!isPrivileged && isAdminPortal && hasAdminClaim) {
       const requiredToken = resolveRoutePermission(pathname);
 
       if (requiredToken !== undefined && requiredToken !== null) {
         const hasPermission = hasTokenInArray(permissions, requiredToken);
         if (!hasPermission) {
-          return NextResponse.redirect(
-            new URL(ACCESS_DENIED_ROUTE, request.url)
-          );
+          return NextResponse.redirect(new URL(ACCESS_DENIED_ROUTE, request.url));
         }
       }
     }

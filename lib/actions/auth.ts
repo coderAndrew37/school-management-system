@@ -189,30 +189,32 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
     return { success: false, message: "Session error. Please try again." };
   }
 
-  let primaryRole = authUser.app_metadata?.role as BaseRole | undefined;
-  let allRoles:     BaseRole[] = (authUser.app_metadata?.roles as BaseRole[]) ?? (primaryRole ? [primaryRole] : []);
+  // Modern multi-portal claims architecture parsing base_role and accessible_portals
+  let baseRole          = authUser.app_metadata?.base_role as BaseRole | undefined;
+  let accessiblePortals = (authUser.app_metadata?.accessible_portals as BaseRole[]) ?? 
+                          (baseRole ? [baseRole] : []);
 
-  if (!primaryRole) {
+  if (!baseRole) {
     const { data: profileRow } = await supabase
       .from("profiles")
       .select("role, roles")
       .eq("id", authUser.id)
       .maybeSingle();
 
-    primaryRole = (profileRow?.role as BaseRole | undefined) ?? "staff";
+    baseRole = (profileRow?.role as BaseRole | undefined) ?? "staff";
     
     if (profileRow?.roles && Array.isArray(profileRow.roles)) {
-      allRoles = profileRow.roles as BaseRole[];
+      accessiblePortals = profileRow.roles as BaseRole[];
     } else {
-      allRoles = [primaryRole];
+      accessiblePortals = [baseRole];
     }
   }
 
-  if (primaryRole && !allRoles.includes(primaryRole)) {
-    allRoles = [primaryRole, ...allRoles];
+  if (baseRole && !accessiblePortals.includes(baseRole)) {
+    accessiblePortals = [baseRole, ...accessiblePortals];
   }
 
-  if (allRoles.includes("parent")) {
+  if (accessiblePortals.includes("parent")) {
     try {
       const { data: parentRow } = await supabaseAdmin
         .from("student_parents")
@@ -221,7 +223,7 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
         .limit(1)
         .maybeSingle();
 
-      if (!parentRow && allRoles.length === 1) {
+      if (!parentRow && accessiblePortals.length === 1) {
         await supabase.auth.signOut();
         return {
           success: false,
@@ -236,19 +238,19 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
 
   revalidatePath("/", "layout");
 
-  if (allRoles.length > 1) {
+  if (accessiblePortals.length > 1) {
     return {
       success:    true,
       message:    "Signed in successfully.",
       redirectTo: CHOOSE_ROLE_ROUTE,
-      roles:      allRoles,
+      roles:      accessiblePortals,
     };
   }
 
   return {
     success:    true,
     message:    "Signed in successfully.",
-    redirectTo: ROLE_ROUTES[primaryRole] ?? "/admin/dashboard",
+    redirectTo: ROLE_ROUTES[baseRole] ?? "/admin/dashboard",
   };
 }
 
@@ -392,7 +394,7 @@ export async function resetPasswordAction(
   } catch { /* non-blocking */ }
 
   const roleFromJwt =
-    (user.app_metadata?.role as BaseRole | undefined) ?? "parent";
+    (user.app_metadata?.base_role as BaseRole | undefined) ?? "parent";
 
   revalidatePath("/", "layout");
 

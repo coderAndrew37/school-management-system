@@ -126,18 +126,22 @@ export const BASELINE_ROLE_CAPABILITIES: Record<string, readonly string[]> = {
 } as const;
 
 // ── JWT App Metadata Schema ──────────────────────────────────────────────────
-
 export interface UserAppMetadata {
-  provider?:      string;
-  providers?:     string[];
-  role:           BaseRole;
-  roles?:         BaseRole[];
-  admin_role?:    string;
-  admin_paths?:   string[];
-  permissions?:   string[];
-  is_super_admin?: boolean;
-  is_dev?:        boolean;
-  school_id?:     string;
+  provider?:          string;
+  providers?:         string[];
+  base_role:          BaseRole; // The new structural source of truth
+  accessible_portals?: string[]; // Array compiled by the trigger function: ['parent', 'staff', 'admin']
+  admin_role?:        string;
+  admin_paths?:       string[];
+  permissions?:       string[];
+  is_super_admin?:    boolean;
+  is_dev?:            boolean;
+  school_id?:         string;
+  
+  /** @deprecated Use base_role instead */
+  role?:              BaseRole;
+  /** @deprecated Use accessible_portals instead */
+  roles?:             BaseRole[];
 }
 
 // ── Profile (maps directly to public.profiles row) ───────────────────────────
