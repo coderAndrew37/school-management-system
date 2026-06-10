@@ -4,13 +4,14 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getSession } from "@/lib/actions/auth";
+import { verifyUserPermission } from "./permissions";
 import { z } from "zod";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Types & Action Interfaces ───────────────────────────────────────────────────
 
 export interface SchoolSettings {
-  school_id: string; // Migrated from id: number to multi-tenant school_id UUID
+  id: string; // Internal system UUID primary key
+  school_id: string; // Tenant reference constraint linked to schools table
   school_name: string;
   school_motto: string | null;
   school_address: string | null;
@@ -19,9 +20,15 @@ export interface SchoolSettings {
   logo_url: string | null;
   current_term: 1 | 2 | 3;
   current_academic_year: number;
-  term_start_date: string | null;
-  term_end_date: string | null;
-  next_term_opening_date: string | null;
+  
+  // Explicit structural multi-term calendar milestones mapping layout
+  term1_start: string | null;
+  term1_end: string | null;
+  term2_start: string | null;
+  term2_end: string | null;
+  term3_start: string | null;
+  term3_end: string | null;
+  
   sms_notifications_enabled: boolean;
   email_notifications_enabled: boolean;
   updated_at: string;
@@ -33,204 +40,221 @@ export interface SettingsActionResult {
   message: string;
 }
 
-// ── Internal Auth Guard Helper ────────────────────────────────────────────────
-
-async function verifyAdminContext() {
-  const session = await getSession();
-  if (!session || !session.profile?.school_id) return null;
-
-  // Align clearance matching exactly with user_role structure
-  const isAuthorized = session.profile.base_role === "admin" || session.profile.is_super_admin;
-  if (!isAuthorized) return null;
-
-  return {
-    schoolId: session.profile.school_id as string,
-    userId: session.profile.id as string,
-  };
-}
-
-// ── Read ──────────────────────────────────────────────────────────────────────
-
-// ── Read ──────────────────────────────────────────────────────────────────────
-
-export async function fetchSchoolSettings(): Promise<SchoolSettings | null> {
-  const session = await getSession();
-  if (!session || !session.profile?.school_id) return null;
-
-  const schoolId = session.profile.school_id as string;
-  const supabase = await createSupabaseServerClient();
-
-  const { data, error } = await supabase
-    .from("system_settings")
-    .select("*")
-    .eq("school_id", schoolId)
-    .maybeSingle();
-
-  if (error) {
-    console.error("[fetchSchoolSettings] error:", error.message);
-    return null;
-  }
-
-  // ── Auto-provision defaults for freshly onboarded schools ────────────────
-  if (!data) {
-    const defaults = {
-      school_id: schoolId,
-      school_name: "Kibali Academy",
-      current_term: 1,
-      current_academic_year: new Date().getFullYear(),
-      sms_notifications_enabled: true,
-      email_notifications_enabled: true,
-    };
-
-    // FIX: Execute the system auto-provisioning step using the service role admin client
-    const { data: provisioned, error: insertError } = await supabaseAdmin
-      .from("system_settings")
-      .insert(defaults)
-      .select()
-      .single();
-
-    if (insertError) {
-      console.error("[fetchSchoolSettings] auto-provision failed:", insertError.message);
-      return null;
-    }
-
-    return provisioned as SchoolSettings;
-  }
-
-  return data as SchoolSettings;
-}
-
-// ── Validation Schema ─────────────────────────────────────────────────────────
-
-const settingsSchema = z.object({
+// ── Strict Validation Schema ─────────────────────────────────────────────────
+const schoolSettingsSchema = z.object({
   school_name: z.string().min(1, "School name is required").max(120),
-  school_motto: z.string().max(200).optional().nullable(),
-  school_address: z.string().max(300).optional().nullable(),
-  school_phone: z.string().max(30).optional().nullable(),
-  school_email: z
-    .string()
-    .email("Invalid email")
-    .optional()
-    .nullable()
-    .or(z.literal("")),
+  school_motto: z.string().max(200).nullable().or(z.literal("").transform(() => null)),
+  school_address: z.string().max(300).nullable().or(z.literal("").transform(() => null)),
+  school_phone: z.string().max(30).nullable().or(z.literal("").transform(() => null)),
+  school_email: z.string().email("Invalid institutional email structure").nullable().or(z.literal("").transform(() => null)),
+  
   current_term: z.coerce.number().int().min(1).max(3),
   current_academic_year: z.coerce.number().int().min(2020).max(2040),
-  term_start_date: z.string().optional().nullable(),
-  term_end_date: z.string().optional().nullable(),
-  next_term_opening_date: z.string().optional().nullable(),
+  
+  term1_start: z.string().nullable().or(z.literal("").transform(() => null)),
+  term1_end: z.string().nullable().or(z.literal("").transform(() => null)),
+  term2_start: z.string().nullable().or(z.literal("").transform(() => null)),
+  term2_end: z.string().nullable().or(z.literal("").transform(() => null)),
+  term3_start: z.string().nullable().or(z.literal("").transform(() => null)),
+  term3_end: z.string().nullable().or(z.literal("").transform(() => null)),
+  
   sms_notifications_enabled: z.boolean().default(true),
   email_notifications_enabled: z.boolean().default(true),
 });
 
-// ── Update Settings ───────────────────────────────────────────────────────────
+// ── Read ──────────────────────────────────────────────────────────────────────
+export async function fetchSchoolSettings(): Promise<SchoolSettings | null> {
+  const supabase = await createSupabaseServerClient();
+  const { data: profileData } = await supabase.auth.getUser();
+  if (!profileData.user) return null;
 
-export async function updateSchoolSettings(
-  formData: FormData,
-): Promise<SettingsActionResult> {
-  const adminContext = await verifyAdminContext();
-  if (!adminContext) return { success: false, message: "Unauthorised access attempt." };
+  // Pull profile information to fetch school identifier link
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("school_id")
+    .eq("id", profileData.user.id)
+    .single();
 
-  const { schoolId, userId } = adminContext;
+  if (!profile?.school_id) return null;
 
-  const raw = {
-    school_name:                 formData.get("school_name"),
-    school_motto:                formData.get("school_motto")                 || null,
-    school_address:              formData.get("school_address")               || null,
-    school_phone:                formData.get("school_phone")                 || null,
-    school_email:                formData.get("school_email")                 || null,
-    current_term:                formData.get("current_term"),
-    current_academic_year:       formData.get("current_academic_year"),
-    term_start_date:             formData.get("term_start_date")              || null,
-    term_end_date:               formData.get("term_end_date")                || null,
-    next_term_opening_date:      formData.get("next_term_opening_date")       || null,
-    sms_notifications_enabled:   formData.get("sms_notifications_enabled")   === "true",
-    email_notifications_enabled: formData.get("email_notifications_enabled")  === "true",
-  };
+  const { data, error } = await supabase
+    .from("school_settings")
+    .select("*")
+    .eq("school_id", profile.school_id)
+    .maybeSingle();
 
-  const parsed = settingsSchema.safeParse(raw);
-  if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return { success: false, message: first?.message ?? "Invalid configuration parameters." };
+  if (error) {
+    console.error("[fetchSchoolSettings] operational read failure:", error.message);
+    return null;
   }
 
+  // Safe provisioning wrapper using bypassing client token layers
+  if (!data) {
+    const defaults = {
+      school_id: profile.school_id,
+      school_name: "Kibali Academy",
+      current_term: 1,
+      current_academic_year: 2026,
+    };
+
+    const { data: fallbackRow } = await supabaseAdmin
+      .from("school_settings")
+      .insert(defaults)
+      .select()
+      .single();
+
+    return fallbackRow;
+  }
+
+  return data;
+}
+
+// ── Update Action ────────────────────────────────────────────────────────────
+export async function updateSchoolSettings(
+  formData: FormData
+): Promise<SettingsActionResult> {
+  // Determine which specific layout operational segment is submitting parameters
+  const targetFormType = formData.get("__form_type") as "identity" | "calendar" | "notifications";
+  const catalogKey = `settings.${targetFormType}.write`;
+
+  // Verify access token clear paths via calculated hierarchy
+  const { hasAccess, schoolId, userId } = await verifyUserPermission(catalogKey);
+  if (!hasAccess) return { success: false, message: "Unauthorized resource access." };
+
   const supabase = await createSupabaseServerClient();
+  const { data: current } = await supabase
+    .from("school_settings")
+    .select("*")
+    .eq("school_id", schoolId)
+    .maybeSingle();
+
+  // Route active input dates cleanly to their mapped columns based on the form configuration
+  const formTerm = formData.get("current_term") ? Number(formData.get("current_term")) : (current?.current_term ?? 1);
   
-  // Using upsert ensures safety for freshly provisioned schools without initial settings entries
-  const { error } = await supabase
-    .from("system_settings")
+  const raw = {
+    school_name:    formData.get("school_name") ?? current?.school_name ?? "Kibali Academy",
+    school_motto:   formData.get("school_motto") ?? current?.school_motto ?? "",
+    school_address: formData.get("school_address") ?? current?.school_address ?? "",
+    school_phone:   formData.get("school_phone") ?? current?.school_phone ?? "",
+    school_email:   formData.get("school_email") ?? current?.school_email ?? "",
+    
+    current_term:   formTerm,
+    current_academic_year: formData.get("current_academic_year") ?? current?.current_academic_year ?? "2026",
+
+    // Contextual distribution checks: Preserve unsubmitted term data fields completely intact
+    term1_start:    targetFormType === "calendar" && formTerm === 1 ? (formData.get("term_start_date") ?? "") : (current?.term1_start ?? ""),
+    term1_end:      targetFormType === "calendar" && formTerm === 1 ? (formData.get("term_end_date") ?? "") : (current?.term1_end ?? ""),
+    
+    term2_start:    targetFormType === "calendar" && formTerm === 2 ? (formData.get("term_start_date") ?? "") : (current?.term2_start ?? ""),
+    term2_end:      targetFormType === "calendar" && formTerm === 2 ? (formData.get("term_end_date") ?? "") : (current?.term2_end ?? ""),
+    
+    term3_start:    targetFormType === "calendar" && formTerm === 3 ? (formData.get("term_start_date") ?? "") : (current?.term3_start ?? ""),
+    term3_end:      targetFormType === "calendar" && formTerm === 3 ? (formData.get("term_end_date") ?? "") : (current?.term3_end ?? ""),
+
+    sms_notifications_enabled: formData.has("sms_notifications_enabled")
+      ? formData.get("sms_notifications_enabled") === "true"
+      : current?.sms_notifications_enabled ?? true,
+    email_notifications_enabled: formData.has("email_notifications_enabled")
+      ? formData.get("email_notifications_enabled") === "true"
+      : current?.email_notifications_enabled ?? true,
+  };
+
+  const parsed = schoolSettingsSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { success: false, message: parsed.error.issues[0]?.message ?? "Validation failed." };
+  }
+
+  // Update via administrative security client context to safely sidestep upsert loops
+  const { error } = await supabaseAdmin
+    .from("school_settings")
     .upsert({
       school_id: schoolId,
       ...parsed.data,
       updated_by: userId,
-    });
+      updated_at: new Date().toISOString()
+    }, { onConflict: "school_id" });
 
   if (error) {
-    console.error("[updateSchoolSettings] mutation error:", error.message);
-    return { success: false, message: "Failed to save operational parameters." };
+    console.error("[updateSchoolSettings] database write crash:", error.message);
+    return { success: false, message: "Failed to persist operational details." };
   }
 
   revalidatePath("/admin/settings");
   revalidatePath("/admin");
-  return { success: true, message: "Settings saved and synchronized successfully." };
+  return { success: true, message: "Global configurations synchronized successfully." };
 }
 
-// ── Upload Logo ───────────────────────────────────────────────────────────────
-
+// ── Logo Upload Action ────────────────────────────────────────────────────────
 export async function uploadSchoolLogo(
-  formData: FormData,
-): Promise<SettingsActionResult & { logo_url?: string }> {
-  const adminContext = await verifyAdminContext();
-  if (!adminContext) return { success: false, message: "Unauthorised access attempt." };
-
-  const { schoolId, userId } = adminContext;
+  formData: FormData
+): Promise<SettingsActionResult> {
+  // 1. Authorize file execution through the identity catalog domain write permissions
+  const { hasAccess, schoolId } = await verifyUserPermission("settings.identity.write");
+  if (!hasAccess) return { success: false, message: "Unauthorized asset access." };
 
   const file = formData.get("logo") as File | null;
   if (!file || file.size === 0) {
-    return { success: false, message: "No file provided" };
+    return { success: false, message: "No valid image file detected in form payload." };
   }
 
-  if (file.size > 2 * 1024 * 1024) {
-    return { success: false, message: "Logo must be under 2 MB" };
+  // 2. Enforce structural limits (Max 2MB)
+  const MAX_FILE_SIZE = 2 * 1024 * 1024;
+  if (file.size > MAX_FILE_SIZE) {
+    return { success: false, message: "Asset file payload exceeds structural limit of 2MB." };
   }
 
-  if (!["image/png", "image/jpeg", "image/webp", "image/svg+xml"].includes(file.type)) {
-    return { success: false, message: "Logo must be PNG, JPEG, WEBP, or SVG" };
+  // Enforce explicit safe MIME boundaries
+  const ALLOWED_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+  if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+    return { success: false, message: "Invalid asset format. Only PNG, JPEG, WEBP, or SVG are permitted." };
   }
 
-  const ext = file.name.split(".").pop() ?? "png";
+  const supabase = await createSupabaseServerClient();
   
-  // FIX: Isolated tenant storage bucket subpath to prevent image cross-contamination
-  const path = `schools/${schoolId}/logo.${ext}`;
-  const buffer = Buffer.from(await file.arrayBuffer());
+  // 3. Isolate the storage path by multi-tenant school_id reference matching
+  // Using a clean extension resolver fallback
+  const fileExtension = file.name.split(".").pop() ?? "png";
+  const isolatedFilePath = `${schoolId}/logo-${Date.now()}.${fileExtension}`;
 
-  const { error: uploadError } = await supabaseAdmin.storage
-    .from("school-assets")
-    .upload(path, buffer, {
+  // Execute storage upload to your bucket (assumed bucket identifier name: "school-logos")
+  const { data: storageData, error: storageError } = await supabase.storage
+    .from("school-logos")
+    .upload(isolatedFilePath, file, {
       contentType: file.type,
       upsert: true,
     });
 
-  if (uploadError) {
-    console.error("[uploadSchoolLogo] storage error:", uploadError.message);
-    return { success: false, message: "Logo asset upload failed." };
+  if (storageError) {
+    console.error("[uploadSchoolLogo] Supabase storage upload failure:", storageError.message);
+    return { success: false, message: "Failed to persist media asset to remote cloud pipeline." };
   }
 
-  const supabase = await createSupabaseServerClient();
-  const { error: updateError } = await supabase
-    .from("system_settings")
-    .update({ logo_url: path, updated_by: userId })
+  // 4. Resolve the newly generated public URL link asset destination path cleanly
+  const { data: linkResolution } = supabase.storage
+    .from("school-logos")
+    .getPublicUrl(isolatedFilePath);
+
+  if (!linkResolution?.publicUrl) {
+    return { success: false, message: "Failed to compute resource link layout references safely." };
+  }
+
+  const resolvedPublicUrl = linkResolution.publicUrl;
+
+  // 5. Commit public URL path changes onto your public.school_settings schema configuration row
+  const { error: dbError } = await supabaseAdmin
+    .from("school_settings")
+    .update({
+      logo_url: resolvedPublicUrl,
+      updated_at: new Date().toISOString()
+    })
     .eq("school_id", schoolId);
 
-  if (updateError) {
-    console.error("[uploadSchoolLogo] settings update error:", updateError.message);
-    return { success: false, message: "Logo saved to storage but database tracking link failed." };
+  if (dbError) {
+    console.error("[uploadSchoolLogo] Database field link updates collapsed:", dbError.message);
+    return { success: false, message: "Asset uploaded, but synchronization to school profiles failed." };
   }
 
   revalidatePath("/admin/settings");
   revalidatePath("/admin");
-  return {
-    success: true,
-    message: "Logo updated successfully.",
-    logo_url: path,
-  };
+  return { success: true, message: "Institutional branding logo updated successfully." };
 }

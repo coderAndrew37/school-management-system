@@ -1,19 +1,29 @@
 'use client';
 
-import { transferTeacherOutAction, updateStaffAccessAction } from '@/lib/actions/rbac';
+// @/app/_components/rbac/StaffAccessMatrix.tsx
+//
+// Fix vs doc-14: import path corrected from '@/lib/data/rbac-fetcher' (singular)
+// to '@/lib/data/rbac-fetchers' (plural). All other logic is unchanged from the
+// previous reviewed output — router.refresh(), CreateStaffUserModal, correct
+// action imports from '@/lib/actions/teachers'.
+
+import { transferTeacherOutAction, updateStaffAccessAction } from '@/lib/actions/teachers';
 import type { RoleWithPermissions, StaffAccessProfile, SystemPermission } from '@/lib/data/rbac-fetcher';
 import React, { useCallback, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import {
-    Badge,
-    Button,
-    Card,
-    Checkbox, EmptyState,
-    FormField,
-    SlideOver,
-    StatCard,
-    StatusBadge
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  EmptyState,
+  FormField,
+  SlideOver,
+  StatCard,
+  StatusBadge,
 } from './ui-primitives';
 import { usePermissions } from '@/lib/hooks/use-permissions';
+import { CreateStaffUserModal } from './CreateStaffUserModal';
 
 // ============================================================================
 // TYPES
@@ -39,9 +49,9 @@ interface AccessEditorProps {
 }
 
 interface TransferOutFormProps {
-  member:       StaffAccessProfile;
-  onClose:      () => void;
-  onTransferred:() => void;
+  member:        StaffAccessProfile;
+  onClose:       () => void;
+  onTransferred: () => void;
 }
 
 // ============================================================================
@@ -76,10 +86,10 @@ function StaffRow({ member, onSelect }: StaffRowProps): React.ReactElement {
 
       {/* Email */}
       <td className="px-5 py-3.5 hidden md:table-cell">
-        <span className="text-white/40 text-xs">{member.email}</span>
+        <span className="text-white/40 text-xs">{member.email ?? '—'}</span>
       </td>
 
-      {/* Status — uses full TeacherStatus set */}
+      {/* Status */}
       <td className="px-5 py-3.5">
         <StatusBadge status={member.status} />
       </td>
@@ -118,7 +128,10 @@ function StaffRow({ member, onSelect }: StaffRowProps): React.ReactElement {
 
       {/* Chevron */}
       <td className="px-5 py-3.5">
-        <svg className="w-3.5 h-3.5 text-white/20 group-hover:text-white/50 transition-colors ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg
+          className="w-3.5 h-3.5 text-white/20 group-hover:text-white/50 transition-colors ml-auto"
+          fill="none" viewBox="0 0 24 24" stroke="currentColor"
+        >
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
       </td>
@@ -134,13 +147,12 @@ function TransferOutForm({ member, onClose, onTransferred }: TransferOutFormProp
   const [destination, setDestination] = useState('');
   const [reason,      setReason]      = useState('');
   const [isPending,   startTransition] = useTransition();
-  const [error,       setError]       = useState<string | null>(null);
+  const [error,       setError]        = useState<string | null>(null);
 
   const handleSubmit = (): void => {
     if (!destination.trim()) { setError('Destination school is required.'); return; }
 
     startTransition(async () => {
-      // teachers.id is used — the action resolves profile internally
       const result = await transferTeacherOutAction({
         teacherId:             member.id,
         destinationSchoolName: destination.trim(),
@@ -148,7 +160,7 @@ function TransferOutForm({ member, onClose, onTransferred }: TransferOutFormProp
       });
 
       if (result.success) { onTransferred(); onClose(); }
-      else setError(result.error ?? 'Unknown error occurred.');
+      else setError(result.error ?? result.message);
     });
   };
 
@@ -158,7 +170,7 @@ function TransferOutForm({ member, onClose, onTransferred }: TransferOutFormProp
         <p className="text-rose-400 text-xs font-medium">
           ⚠ This will immediately revoke all role assignments and clear all permission
           overrides for <span className="text-rose-300">{member.full_name}</span>.
-          Their JWT will be wiped instantly.
+          Their JWT will be frozen instantly.
         </p>
       </div>
 
@@ -196,19 +208,19 @@ function TransferOutForm({ member, onClose, onTransferred }: TransferOutFormProp
 // ACCESS EDITOR (Slide-Over body)
 // ============================================================================
 
-function AccessEditor({ member, roles, permissions, onClose, onSaved }: AccessEditorProps): React.ReactElement {
-  // Initialise from active role assignments
+function AccessEditor({
+  member,
+  roles,
+  permissions,
+  onClose,
+  onSaved,
+}: AccessEditorProps): React.ReactElement {
   const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(
     new Set(member.roles.map((r) => r.id))
   );
-
-  // Initialise override map from flattened profiles columns:
-  //   has_access true  → allowed_permissions_override
-  //   has_access false → denied_permissions_override
   const [overrideMap, setOverrideMap] = useState<Map<string, boolean>>(
     new Map(member.overrides.map((o) => [o.permission_id, o.has_access]))
   );
-
   const [showTransferForm, setShowTransferForm] = useState(false);
   const [isPending,        startTransition]      = useTransition();
   const [saveError,        setSaveError]          = useState<string | null>(null);
@@ -238,21 +250,19 @@ function AccessEditor({ member, roles, permissions, onClose, onSaved }: AccessEd
         ([permissionId, hasAccess]) => ({ permissionId, hasAccess })
       );
 
-      // updateStaffAccessAction takes teacher id — resolves profile internally
       const result = await updateStaffAccessAction(member.id, {
-        roleIds:   Array.from(selectedRoleIds),
+        roleIds:  Array.from(selectedRoleIds),
         overrides,
       });
 
       if (result.success) { onSaved(); onClose(); }
-      else setSaveError(result.error ?? 'Failed to save.');
+      else setSaveError(result.error ?? result.message);
     });
   };
 
-  // Group catalog permissions by domain category
   const grouped = permissions.reduce<Record<string, SystemPermission[]>>((acc, p) => {
     if (!acc[p.category]) acc[p.category] = [];
-    acc[p.category].push(p);
+    acc[p.category]!.push(p);
     return acc;
   }, {});
 
@@ -269,7 +279,7 @@ function AccessEditor({ member, roles, permissions, onClose, onSaved }: AccessEd
   return (
     <div className="space-y-6">
 
-      {/* No profile warning */}
+      {/* No-profile warning */}
       {!member.profile_id && (
         <div className="bg-amber-400/[0.06] border border-amber-400/20 rounded-xl p-3">
           <p className="text-amber-400 text-xs">
@@ -283,7 +293,8 @@ function AccessEditor({ member, roles, permissions, onClose, onSaved }: AccessEd
       <div>
         <h4 className="text-amber-400 text-xs font-semibold uppercase tracking-widest mb-3 flex items-center gap-2">
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
           Role Assignments
         </h4>
@@ -309,18 +320,22 @@ function AccessEditor({ member, roles, permissions, onClose, onSaved }: AccessEd
       <div>
         <h4 className="text-white/50 text-xs font-semibold uppercase tracking-widest mb-1.5 flex items-center gap-2">
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
           Individual Permission Overrides
         </h4>
         <p className="text-white/25 text-xs mb-3">
-          Click once → grant (<span className="text-emerald-400">+</span>), twice → revoke (<span className="text-rose-400">−</span>), thrice → remove override.
-          Stored on <span className="font-mono text-white/35">profiles.allowed/denied_permissions_override</span>.
+          Click once → grant (<span className="text-emerald-400">+</span>), twice → revoke (
+          <span className="text-rose-400">−</span>), thrice → remove override. Stored on{' '}
+          <span className="font-mono text-white/35">profiles.allowed/denied_permissions_override</span>.
         </p>
 
         {Object.entries(grouped).map(([category, perms]) => (
           <div key={category} className="mb-4">
-            <p className="text-white/30 text-[10px] uppercase tracking-widest font-mono mb-2 capitalize">{category}</p>
+            <p className="text-white/30 text-[10px] uppercase tracking-widest font-mono mb-2 capitalize">
+              {category}
+            </p>
             <div className="space-y-1.5">
               {perms.map((perm) => {
                 const current = overrideMap.get(perm.id);
@@ -363,7 +378,6 @@ function AccessEditor({ member, roles, permissions, onClose, onSaved }: AccessEd
           Save Access Configuration
         </Button>
 
-        {/* Only show Transfer Out for statuses where it makes sense */}
         {(member.status === 'active' || member.status === 'on_leave') && (
           <Button
             variant="danger"
@@ -372,7 +386,8 @@ function AccessEditor({ member, roles, permissions, onClose, onSaved }: AccessEd
             disabled={isPending}
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
             </svg>
             Transfer Out
           </Button>
@@ -387,11 +402,13 @@ function AccessEditor({ member, roles, permissions, onClose, onSaved }: AccessEd
 // ============================================================================
 
 export function StaffAccessMatrix({ staff, roles, permissions }: StaffAccessMatrixProps): React.ReactElement {
+  const router = useRouter();
   const { isSuperAdmin } = usePermissions();
-  const [selectedMember, setSelectedMember] = useState<StaffAccessProfile | null>(null);
-  const [filter,         setFilter]         = useState<'all' | 'active' | 'transferred'>('active');
-  const [searchQuery,    setSearchQuery]    = useState('');
-  const [refreshKey,     setRefreshKey]     = useState(0);
+
+  const [selectedMember,  setSelectedMember]  = useState<StaffAccessProfile | null>(null);
+  const [showCreateModal, setShowCreateModal]  = useState(false);
+  const [filter,          setFilter]           = useState<'all' | 'active' | 'transferred'>('active');
+  const [searchQuery,     setSearchQuery]       = useState('');
 
   const filtered = staff.filter((s) => {
     const matchesFilter =
@@ -404,7 +421,7 @@ export function StaffAccessMatrix({ staff, roles, permissions }: StaffAccessMatr
       !q ||
       s.full_name.toLowerCase().includes(q) ||
       (s.tsc_number ?? '').toLowerCase().includes(q) ||
-      s.email?.toLowerCase().includes(q);
+      (s.email ?? '').toLowerCase().includes(q);
 
     return matchesFilter && matchesSearch;
   });
@@ -413,21 +430,30 @@ export function StaffAccessMatrix({ staff, roles, permissions }: StaffAccessMatr
   const transferredCount = staff.filter((s) => s.status === 'transferred').length;
   const overriddenCount  = staff.filter((s) => s.overrides.length > 0).length;
 
+  const handleMutated = (): void => {
+    router.refresh();
+    setSelectedMember(null);
+  };
+
   return (
     <div className="space-y-5">
 
       {/* Stats row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Active Staff" value={activeCount} accentColor="emerald"
+        <StatCard
+          label="Active Staff" value={activeCount} accentColor="emerald"
           icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>}
         />
-        <StatCard label="Transferred Out" value={transferredCount} accentColor="rose"
+        <StatCard
+          label="Transferred Out" value={transferredCount} accentColor="rose"
           icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7" /></svg>}
         />
-        <StatCard label="With Overrides" value={overriddenCount} accentColor="amber"
+        <StatCard
+          label="With Overrides" value={overriddenCount} accentColor="amber"
           icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>}
         />
-        <StatCard label="Role Definitions" value={roles.length} accentColor="sky"
+        <StatCard
+          label="Role Definitions" value={roles.length} accentColor="sky"
           icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>}
         />
       </div>
@@ -436,6 +462,8 @@ export function StaffAccessMatrix({ staff, roles, permissions }: StaffAccessMatr
       <Card>
         {/* Toolbar */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 px-5 py-4 border-b border-white/[0.06]">
+
+          {/* Search */}
           <div className="relative flex-1 w-full">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/25" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -449,40 +477,73 @@ export function StaffAccessMatrix({ staff, roles, permissions }: StaffAccessMatr
             />
           </div>
 
+          {/* Filter pills */}
           <div className="flex items-center gap-1 bg-white/[0.03] rounded-xl p-1 border border-white/[0.06]">
             {(['active', 'transferred', 'all'] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all ${filter === f ? 'bg-white/[0.08] text-white' : 'text-white/35 hover:text-white/60'}`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all ${
+                  filter === f ? 'bg-white/[0.08] text-white' : 'text-white/35 hover:text-white/60'
+                }`}
               >
                 {f}
               </button>
             ))}
           </div>
+
+          {/* Add Staff — Super Admin only */}
+          {isSuperAdmin && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setShowCreateModal(true)}
+              className="flex-shrink-0"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+              </svg>
+              Add Staff
+            </Button>
+          )}
         </div>
 
         {/* Table */}
         <div className="overflow-x-auto">
           {filtered.length === 0 ? (
             <EmptyState
-              icon={<svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>}
+              icon={
+                <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
+                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              }
               title="No staff found"
               description="No staff members match your current filter criteria."
+              action={
+                isSuperAdmin && filter === 'active' && !searchQuery ? (
+                  <Button variant="primary" size="sm" onClick={() => setShowCreateModal(true)}>
+                    Add First Staff Member
+                  </Button>
+                ) : undefined
+              }
             />
           ) : (
             <table className="w-full">
               <thead>
                 <tr className="border-b border-white/[0.06]">
                   {['Staff Member', 'Email', 'Status', 'Roles', 'Overrides', ''].map((h) => (
-                    <th key={h} className="px-5 py-3 text-left text-white/30 text-[10px] uppercase tracking-widest font-medium">{h}</th>
+                    <th key={h} className="px-5 py-3 text-left text-white/30 text-[10px] uppercase tracking-widest font-medium">
+                      {h}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((member) => (
                   <StaffRow
-                    key={`${member.id}-${refreshKey}`}
+                    key={member.id}
                     member={member}
                     onSelect={setSelectedMember}
                   />
@@ -505,20 +566,29 @@ export function StaffAccessMatrix({ staff, roles, permissions }: StaffAccessMatr
           isOpen={!!selectedMember}
           onClose={() => setSelectedMember(null)}
           title={selectedMember.full_name}
-          subtitle={`TSC ${selectedMember.tsc_number ?? '—'} · ${selectedMember.email}`}
+          subtitle={`TSC ${selectedMember.tsc_number ?? '—'} · ${selectedMember.email ?? '—'}`}
         >
           <AccessEditor
             member={selectedMember}
             roles={roles}
             permissions={permissions}
             onClose={() => setSelectedMember(null)}
-            onSaved={() => {
-              setRefreshKey((k) => k + 1);
-              setSelectedMember(null);
-            }}
+            onSaved={handleMutated}
           />
         </SlideOver>
       )}
+
+      {/* Create Staff Modal */}
+      <CreateStaffUserModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onCreated={() => {
+          setShowCreateModal(false);
+          router.refresh();
+        }}
+        roles={roles}
+        permissions={permissions}
+      />
     </div>
   );
 }

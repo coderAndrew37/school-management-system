@@ -28,23 +28,12 @@ export function NotificationsPanel({
   function handleSubmit() {
     const fd = new FormData();
 
-    // Identity fields — preserved so they are not wiped on partial save
-    fd.set("school_name", settings.school_name);
-    fd.set("school_motto", settings.school_motto ?? "");
-    fd.set("school_address", settings.school_address ?? "");
-    fd.set("school_phone", settings.school_phone ?? "");
-    fd.set("school_email", settings.school_email ?? "");
+    // 1. CRITICAL: Inject the execution target layout token for permission routing
+    fd.set("__form_type", "notifications");
 
-    // Academic period
-    fd.set("current_term", String(settings.current_term));
-    fd.set("current_academic_year", String(settings.current_academic_year));
-
-    // Temporal milestone fields (normalized schema)
-    fd.set("term_start_date", settings.term_start_date ?? "");
-    fd.set("term_end_date", settings.term_end_date ?? "");
-    fd.set("next_term_opening_date", settings.next_term_opening_date ?? "");
-
-    // Notification toggles (controlled state)
+    // 2. Clear payload requirements: Since our updated updateSchoolSettings action 
+    // pulls baseline fallbacks straight from the database row, we ONLY need 
+    // to append the explicit values this panel manages.
     fd.set("sms_notifications_enabled", String(smsEnabled));
     fd.set("email_notifications_enabled", String(emailEnabled));
 

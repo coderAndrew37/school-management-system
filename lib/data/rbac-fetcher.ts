@@ -17,6 +17,32 @@
 //   Query 1: teachers + profiles (FK hop via profiles.teacher_id)
 //   Query 2: staff_role_assignments + admin_role_definitions for the resolved profile IDs
 //   Merge in TypeScript.
+//
+// ── Auth-layer split ──────────────────────────────────────────────────────────
+// resolveSchoolId   (lib/data/teachers.ts) — used by teacher fetchers; requires
+//   only a valid authenticated session, not super-admin. Regular admins can read
+//   their own school's teacher list.
+//
+// resolveTenantContext (this file) — used by RBAC fetchers; requires super-admin
+//   because it touches role definitions, permission overrides, and audit logs.
+//   The two helpers intentionally stay in separate files with separate auth gates.
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ── PostgREST back-reference join — critical type note ───────────────────────
+// The FK `profiles_teacher_id_fkey` is defined ON the `profiles` table:
+//   profiles.teacher_id → teachers.id
+//
+// When querying FROM `teachers`, the profiles join is a REVERSE / BACK-REFERENCE.
+// PostgREST therefore always returns profiles as an ARRAY, even though exactly
+// one profile exists per teacher in practice.
+//
+// RawTeacherRow.profiles is therefore typed as RawProfileJoin[] | null, and every
+// consumer must call Array.isArray and take index [0] — identical to the pattern
+// in lib/data/teachers.ts mapTeacherRow().
+//
+// The previous version typed profiles as RawProfileJoin | null (object), which
+// silently produced undefined for every joined field.
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
@@ -53,8 +79,8 @@ export interface SystemPermission {
 }
 
 export interface StaffAccessProfile {
-  id:                          string;         // teachers.id
-  profile_id:                  string | null;  // profiles.id
+  id:                          string;        // teachers.id
+  profile_id:                  string | null; // profiles.id
   staff_id:                    string | null;
   full_name:                   string;
   tsc_number:                  string | null;
@@ -115,6 +141,10 @@ interface RawRoleAssignment {
   } | null;
 }
 
+/**
+ * Shape of a single profiles row as returned by the back-reference join.
+ * Includes the RBAC-specific override columns not needed by teacher fetchers.
+ */
 interface RawProfileJoin {
   id:                           string;
   full_name:                    string;
@@ -124,6 +154,15 @@ interface RawProfileJoin {
   denied_permissions_override:  string[];
 }
 
+/**
+ * FIX: profiles is RawProfileJoin[] | null, NOT RawProfileJoin | null.
+ *
+ * The FK profiles_teacher_id_fkey is defined on the profiles table, making this
+ * a back-reference join when querying from teachers. PostgREST always returns an
+ * array for back-reference joins — identical to the behaviour documented and
+ * handled in lib/data/teachers.ts. Typing it as a plain object caused every
+ * joined field (full_name, email, etc.) to silently resolve to undefined.
+ */
 interface RawTeacherRow {
   id:                          string;
   school_id:                   string;
@@ -133,7 +172,7 @@ interface RawTeacherRow {
   transfer_destination_school: string | null;
   transfer_date:               string | null;
   created_at:                  string;
-  profiles:                    RawProfileJoin | null;
+  profiles:                    RawProfileJoin[] | null; // ← array, not object
 }
 
 interface RawAuditRow {
@@ -153,26 +192,31 @@ interface RawAuditRow {
 // ============================================================================
 
 interface TenantContext {
-  userId:      string;
-  schoolId:    string;
+  userId:       string;
+  schoolId:     string;
   isSuperAdmin: boolean;
 }
 
+/**
+ * Resolves school context for RBAC operations.
+ * Enforces super-admin — contrast with resolveSchoolId() in lib/data/teachers.ts
+ * which only requires a valid session (regular admins can read their teacher list).
+ */
 async function resolveTenantContext(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>
 ): Promise<TenantContext> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Unauthenticated access attempt.');
 
-  // JWT fast path (zero extra DB call after first sync)
-  const jwtSchoolId    = user.app_metadata?.school_id     as string  | undefined;
-  const jwtSuperAdmin  = user.app_metadata?.is_super_admin as boolean | undefined;
+  // JWT fast path — zero extra DB call once the trigger has synced
+  const jwtSchoolId   = user.app_metadata?.school_id     as string  | undefined;
+  const jwtSuperAdmin = user.app_metadata?.is_super_admin as boolean | undefined;
 
   if (jwtSchoolId && jwtSuperAdmin) {
     return { userId: user.id, schoolId: jwtSchoolId, isSuperAdmin: true };
   }
 
-  // Fallback: profiles table (first login before JWT synced)
+  // Fallback: profiles table (first login, before JWT trigger has fired)
   const { data: profile, error } = await supabase
     .from('profiles')
     .select('school_id, is_super_admin')
@@ -182,11 +226,7 @@ async function resolveTenantContext(
   if (error || !profile?.school_id) throw new Error('Unauthorized: Tenant resolution failed.');
   if (!profile.is_super_admin) throw new Error('Unauthorized: Super Admin access required.');
 
-  return {
-    userId:      user.id,
-    schoolId:    profile.school_id as string,
-    isSuperAdmin: true,
-  };
+  return { userId: user.id, schoolId: profile.school_id as string, isSuperAdmin: true };
 }
 
 // ============================================================================
@@ -195,7 +235,7 @@ async function resolveTenantContext(
 
 /**
  * All active admin_role_definitions for the current school.
- * admin_role_definitions has a composite PK (school_id, id) — always scope by school_id.
+ * Composite PK (school_id, id) — always scope by school_id.
  */
 export async function getSchoolRoles(): Promise<RoleWithPermissions[]> {
   const supabase = await createSupabaseServerClient();
@@ -204,7 +244,7 @@ export async function getSchoolRoles(): Promise<RoleWithPermissions[]> {
   const { data, error } = await supabase
     .from('admin_role_definitions')
     .select('id, label, description, baseline_permissions, created_at')
-    .eq('school_id', schoolId)          // composite key scope — mandatory
+    .eq('school_id', schoolId)
     .eq('is_active', true)
     .order('sort_order', { ascending: true });
 
@@ -227,7 +267,7 @@ export async function getSchoolRoles(): Promise<RoleWithPermissions[]> {
 }
 
 /**
- * All roles for this school including inactive — used by role configurator.
+ * All roles for this school including inactive — used by the role configurator.
  */
 export async function getAllSchoolRoles(): Promise<RoleWithPermissions[]> {
   const supabase = await createSupabaseServerClient();
@@ -259,6 +299,7 @@ export async function getAllSchoolRoles(): Promise<RoleWithPermissions[]> {
 
 /**
  * Full permission_catalog — every valid domain-action token.
+ * Used to render the permission picker UI.
  */
 export async function getSystemPermissionsCatalog(): Promise<SystemPermission[]> {
   const supabase = await createSupabaseServerClient();
@@ -281,6 +322,7 @@ export async function getSystemPermissionsCatalog(): Promise<SystemPermission[]>
 
 // ============================================================================
 // FETCHERS: STAFF ACCESS DIRECTORY
+// Two-query strategy — see file header for rationale.
 // ============================================================================
 
 export async function getStaffAccessDirectory(
@@ -325,11 +367,12 @@ export async function getStaffAccessDirectory(
 
   const rawTeachers = (teachers ?? []) as unknown as RawTeacherRow[];
 
+  // Collect profile IDs for the second query — pluck index [0] from the array join
   const profileIds = rawTeachers
-    .map((t) => t.profiles?.id)
+    .map((t) => (Array.isArray(t.profiles) ? t.profiles[0]?.id : undefined))
     .filter((id): id is string => Boolean(id));
 
-  // ── Query 2: active role assignments ─────────────────────────────────────
+  // ── Query 2: active role assignments for those profiles ───────────────────
   const assignmentMap: Record<string, RawRoleAssignment[]> = {};
 
   if (profileIds.length > 0) {
@@ -358,9 +401,12 @@ export async function getStaffAccessDirectory(
     }
   }
 
-  return rawTeachers.map((teacher) =>
-    normalizeStaffRow(teacher, assignmentMap[teacher.profiles?.id ?? ''] ?? [])
-  );
+  // ── Merge ─────────────────────────────────────────────────────────────────
+  return rawTeachers.map((teacher) => {
+    const profile   = Array.isArray(teacher.profiles) ? teacher.profiles[0] ?? null : null;
+    const profileId = profile?.id ?? '';
+    return normalizeStaffRow(teacher, profile, assignmentMap[profileId] ?? []);
+  });
 }
 
 /**
@@ -399,8 +445,12 @@ export async function getStaffSecurityProfile(
     return null;
   }
 
-  const raw       = teacher as unknown as RawTeacherRow;
-  const profileId = raw.profiles?.id;
+  const raw = teacher as unknown as RawTeacherRow;
+
+  // FIX: back-reference join returns array — take index [0]
+  const profile = Array.isArray(raw.profiles) ? raw.profiles[0] ?? null : null;
+  const profileId = profile?.id;
+
   let assignments: RawRoleAssignment[] = [];
 
   if (profileId) {
@@ -425,16 +475,18 @@ export async function getStaffSecurityProfile(
     }
   }
 
-  return normalizeStaffRow(raw, assignments);
+  return normalizeStaffRow(raw, profile, assignments);
 }
 
 // ── Shared normalizer ─────────────────────────────────────────────────────────
+// Profile is passed in already resolved (index [0] taken by callers above),
+// so this function receives RawProfileJoin | null — not the raw array.
 
 function normalizeStaffRow(
   teacher:     RawTeacherRow,
+  profile:     RawProfileJoin | null,
   assignments: RawRoleAssignment[]
 ): StaffAccessProfile {
-  const profile = teacher.profiles ?? null;
   const allowed = profile?.allowed_permissions_override ?? [];
   const denied  = profile?.denied_permissions_override  ?? [];
 
