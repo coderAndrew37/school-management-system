@@ -4,20 +4,20 @@ import { fetchAllChildData, fetchMyChildren } from "@/lib/data/parent";
 import type { ChildWithAssessments } from "@/lib/types/parent";
 import { redirect } from "next/navigation";
 
-import { UrgentAnnouncementBanner } from "./_components/UrgentAnnouncementBanner";
-import { ParentPortalHeader } from "./_components/ParentPortalHeader";
-import { ChildHeroCard } from "./_components/ChildHeroCard";
-import { QuickNavTiles } from "./_components/QuickNavTiles";
+import { UrgentAnnouncementBanner } from "../_components/UrgentAnnouncementBanner";
+import { ParentPortalHeader } from "../_components/ParentPortalHeader";
+import { ChildHeroCard } from "../_components/ChildHeroCard";
+import { QuickNavTiles } from "../_components/QuickNavTiles";
 
 import {
   LatestDiaryCard,
   RecentGradesCard,
   MessagesCard,
   GalleryCard,
-} from "./_components/InfoGridCards";
-import { FeeSummaryCard } from "./_components/FeeSummaryCard";
-import { MyChildTodayWidget } from "./_components/ParentOverviewWidget";
-import { SchoolNoticesStrip, UpcomingEventsStrip } from "./_components/NoticeandEvents";
+} from "../_components/InfoGridCards";
+import { FeeSummaryCard } from "../_components/FeeSummaryCard";
+import { MyChildTodayWidget } from "../_components/ParentOverviewWidget";
+import { SchoolNoticesStrip, UpcomingEventsStrip } from "../_components/NoticeandEvents";
 
 export const metadata = { title: "Parent Portal | Kibali Academy" };
 export const revalidate = 0;

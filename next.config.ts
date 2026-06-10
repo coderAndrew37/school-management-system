@@ -46,7 +46,13 @@ const nextConfig: NextConfig = {
         source: "/teacher",
         destination:'/teacher/dashboard',
         permanent: false,
+      },
+      {
+        source:'/parent',
+        destination:'/parent/dashboard',
+        permanent:false
       }
+
       // If you eventually create a student dashboard, add it here:
       // { source: "/student", destination: "/student/portal", permanent: false },
     ];
