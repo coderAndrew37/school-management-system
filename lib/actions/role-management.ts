@@ -45,14 +45,20 @@ async function getVerifiedSuperAdmin(): Promise<VerifiedAdmin> {
 
   const { data: actor } = await supabase
     .from("profiles")
-    .select("base_role, admin_role, school_id")
+    .select("base_role, school_id")
     .eq("id", user.id)
     .single();
 
+  // admin_role lives in JWT app_metadata (synced from staff_role_assignments),
+  // not in the profiles table.
+  const admin_role = (user.app_metadata?.admin_role as string | null) ?? null;
+
   return {
     supabase,
-    user: isSuperAdmin(actor) ? user : null,
-    actor: actor as VerifiedAdmin["actor"],
+    user: isSuperAdmin({ ...actor, admin_role }) ? user : null,
+    actor: actor
+      ? { base_role: actor.base_role as string, admin_role, school_id: actor.school_id as string | null }
+      : null,
   };
 }
 
@@ -81,10 +87,10 @@ export async function getAllStaffWithRoles(): Promise<StaffMember[] | null> {
   const { supabase, user, actor } = await getVerifiedSuperAdmin();
   if (!user || !actor?.school_id) return null;
 
-  const [profilesResult, defsResult] = await Promise.all([
+  const [profilesResult, defsResult, assignmentsResult] = await Promise.all([
     supabase
       .from("profiles")
-      .select("id, full_name, avatar_url, base_role, admin_role, created_at, updated_at")
+      .select("id, full_name, avatar_url, base_role, created_at, updated_at")
       .eq("school_id", actor.school_id)
       .order("full_name", { ascending: true }),
     supabase
@@ -92,6 +98,11 @@ export async function getAllStaffWithRoles(): Promise<StaffMember[] | null> {
       .select("*")
       .eq("school_id", actor.school_id)
       .eq("is_active", true),
+    supabase
+      .from("staff_role_assignments")
+      .select("profile_id, role_id")
+      .eq("school_id", actor.school_id)
+      .is("revoked_at", null),
   ]);
 
   if (profilesResult.error) {
@@ -102,11 +113,20 @@ export async function getAllStaffWithRoles(): Promise<StaffMember[] | null> {
   const data = profilesResult.data ?? [];
   const defs = (defsResult.data ?? []) as AdminRoleDefinition[];
   const defMap = new Map(defs.map((d) => [d.id, d]));
+
+  // Build a map of profile_id → active role_id from staff_role_assignments
+  const assignmentMap = new Map<string, string>(
+    (assignmentsResult.data ?? []).map((a) => [
+      a.profile_id as string,
+      a.role_id as string,
+    ])
+  );
+
   const emailMap = await buildEmailMap(data.map((r) => String(r.id)));
 
   return data.map((row): StaffMember => {
-    const baseRole  = (row.base_role  as BaseRole) || "staff";
-    const adminRole = (row.admin_role as string)   || null;
+    const baseRole  = (row.base_role as BaseRole) || "staff";
+    const adminRole = assignmentMap.get(String(row.id)) ?? null;
 
     return {
       id:                    String(row.id),
@@ -127,16 +147,24 @@ export async function getAllStaffWithRoles(): Promise<StaffMember[] | null> {
 export async function getStaffMemberById(id: string): Promise<StaffMember | null> {
   const supabase = await createSupabaseServerClient();
 
-  const [profileResult, defsResult] = await Promise.all([
+  const [profileResult, defsResult, assignmentResult] = await Promise.all([
     supabase
       .from("profiles")
-      .select("id, full_name, avatar_url, base_role, admin_role, school_id, created_at, updated_at")
+      .select("id, full_name, avatar_url, base_role, school_id, created_at, updated_at")
       .eq("id", id)
       .single(),
     supabase
       .from("admin_role_definitions")
       .select("*")
       .eq("is_active", true),
+    supabase
+      .from("staff_role_assignments")
+      .select("role_id")
+      .eq("profile_id", id)
+      .is("revoked_at", null)
+      .order("assigned_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   if (profileResult.error || !profileResult.data) return null;
@@ -150,8 +178,8 @@ export async function getStaffMemberById(id: string): Promise<StaffMember | null
   const defMap   = new Map(defs.map((d) => [d.id, d]));
   const emailMap = await buildEmailMap([id]);
 
-  const baseRole  = (row.base_role  as BaseRole) || "staff";
-  const adminRole = (row.admin_role as string)   || null;
+  const baseRole  = (row.base_role as BaseRole) || "staff";
+  const adminRole = (assignmentResult.data?.role_id as string | null) ?? null;
 
   return {
     id:                    String(row.id),
@@ -173,26 +201,33 @@ export async function getRoleStatistics(): Promise<RoleStatistics> {
   if (!user || !actor?.school_id) return { total: 0, byBaseRole: {}, byAdminRole: {} };
 
   const supabase = await createSupabaseServerClient();
-  const { data }  = await supabase
-    .from("profiles")
-    .select("base_role, admin_role")
-    .eq("school_id", actor.school_id);
+  const [{ data: profileData }, { data: assignmentData }] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("base_role")
+      .eq("school_id", actor.school_id),
+    supabase
+      .from("staff_role_assignments")
+      .select("role_id")
+      .eq("school_id", actor.school_id)
+      .is("revoked_at", null),
+  ]);
 
   const empty: RoleStatistics = { total: 0, byBaseRole: {}, byAdminRole: {} };
-  if (!data) return empty;
+  if (!profileData) return empty;
 
-  const byBaseRole = data.reduce<Partial<Record<BaseRole, number>>>((acc, r) => {
+  const byBaseRole = profileData.reduce<Partial<Record<BaseRole, number>>>((acc, r) => {
     const role = r.base_role as BaseRole;
     acc[role] = (acc[role] ?? 0) + 1;
     return acc;
   }, {});
 
-  const byAdminRole = data.reduce<Record<string, number>>((acc, r) => {
-    if (r.admin_role) acc[r.admin_role] = (acc[r.admin_role] ?? 0) + 1;
+  const byAdminRole = (assignmentData ?? []).reduce<Record<string, number>>((acc, r) => {
+    if (r.role_id) acc[r.role_id] = (acc[r.role_id] ?? 0) + 1;
     return acc;
   }, {});
 
-  return { total: data.length, byBaseRole, byAdminRole };
+  return { total: profileData.length, byBaseRole, byAdminRole };
 }
 
 // UPDATE — assign or revoke a role
@@ -233,11 +268,23 @@ export async function assignRoleAction(payload: AssignRolePayload): Promise<Acti
   }
 
   try {
-    const { data: before } = await supabase
-      .from("profiles")
-      .select("full_name, base_role, admin_role")
-      .eq("id", targetUserId)
-      .single();
+    const [{ data: before }, { data: beforeAssignment }] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("full_name, base_role")
+        .eq("id", targetUserId)
+        .single(),
+      supabase
+        .from("staff_role_assignments")
+        .select("role_id")
+        .eq("profile_id", targetUserId)
+        .is("revoked_at", null)
+        .order("assigned_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+    const beforeAdminRole = (beforeAssignment?.role_id as string | null) ?? null;
 
     const { error } = await supabase
       .from("profiles")
@@ -257,7 +304,7 @@ export async function assignRoleAction(payload: AssignRolePayload): Promise<Acti
       actor_id:        user.id,
       target_id:       targetUserId,
       action:          admin_role ? "role_assigned" : "role_revoked",
-      previous_values: { base_role: before?.base_role, admin_role: before?.admin_role },
+      previous_values: { base_role: before?.base_role, admin_role: beforeAdminRole },
       new_values:      { base_role, admin_role: admin_role ?? null },
       reason:          reason || "Role change by Super Admin",
     }).then(({ error: e }) => { if (e) console.warn("[audit]", e.message); });

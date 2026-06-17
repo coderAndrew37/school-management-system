@@ -72,7 +72,6 @@ export async function getSession(): Promise<SessionResult | null> {
         email,
         avatar_url,
         base_role,
-        admin_role,
         is_super_admin,
         is_dev,
         teacher_id,
@@ -94,7 +93,10 @@ export async function getSession(): Promise<SessionResult | null> {
       return null;
     }
 
-    // Canonical mapping for everything except portal set.
+    // admin_role is NOT a profiles column — it lives in staff_role_assignments
+    // and is synced into JWT app_metadata.admin_role by sync_user_jwt_claims.
+    const meta = user.app_metadata ?? {};
+
     const typedProfile: Profile = {
       id: profile.id as string,
       school_id: (profile.school_id as string | null) ?? null,
@@ -103,7 +105,7 @@ export async function getSession(): Promise<SessionResult | null> {
       email: (profile.email as string | null) ?? null,
       avatar_url: (profile.avatar_url as string | null) ?? null,
       base_role: (isBaseRole(profile.base_role) ? profile.base_role : "parent") as BaseRole,
-      admin_role: (profile.admin_role as string | null) ?? null,
+      admin_role: (meta.admin_role as string | null) ?? null,
       teacher_id: (profile.teacher_id as string | null) ?? null,
       is_super_admin: (profile.is_super_admin as boolean) ?? false,
       is_dev: (profile.is_dev as boolean) ?? false,
@@ -116,7 +118,6 @@ export async function getSession(): Promise<SessionResult | null> {
     };
 
     // ── Portal set: base_role + JWT accessible_portals (sync_user_jwt_claims) ──
-    const meta = user.app_metadata ?? {};
     const allRoles = resolveAllRoles({
       base_role: typedProfile.base_role,
       accessible_portals: toBaseRoleArray(meta.accessible_portals),
