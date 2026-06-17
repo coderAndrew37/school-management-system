@@ -1,76 +1,58 @@
 "use client";
 
-import { ROLE_ROUTES, type UserRole } from "@/lib/types/auth";
-import { GraduationCap, ShieldCheck, BookOpen, Users } from "lucide-react";
+import { type BaseRole } from "@/lib/types/auth";
 import { useRouter } from "next/navigation";
 import { AuthLayout } from "./AuthLayout";
-
-// Changing from Record to Partial layout handles missing keys cleanly
-const ROLE_META: Partial<Record<UserRole, {
-  label: string;
-  description: string;
-  icon: React.ReactNode;
-  accent: string;
-  bg: string;
-}>> = {
-  admin: {
-    label: "Administrator",
-    description: "School management & reports",
-    icon: <ShieldCheck className="h-5 w-5" />,
-    accent: "border-amber-300 text-amber-700",
-    bg: "bg-amber-50 hover:bg-amber-100/60",
-  },
-  staff: {
-    label: "Teacher",
-    description: "CBC assessments & timetable",
-    icon: <BookOpen className="h-5 w-5" />,
-    accent: "border-emerald-300 text-emerald-700",
-    bg: "bg-emerald-50 hover:bg-emerald-100/60",
-  },
-  parent: {
-    label: "Parent / Guardian",
-    description: "Child results & communication",
-    icon: <Users className="h-5 w-5" />,
-    accent: "border-sky-300 text-sky-700",
-    bg: "bg-sky-50 hover:bg-sky-100/60",
-  },
-};
+import {
+  PORTAL_META,
+  PORTAL_BRAND_ICON,
+  getDisplayablePortals,
+  getPortalDestination,
+} from "@/lib/auth/portal-meta";
 
 interface Props {
-  roles: UserRole[];
+  roles: BaseRole[];
   redirectTo?: string;
 }
 
 export function ChooseRoleForm({ roles, redirectTo }: Props) {
   const router = useRouter();
 
-  if (roles.length === 0) {
+  // Filter to roles we actually have UI metadata for BEFORE any length checks,
+  // so super_admin/student in the array can't cause an inconsistent count
+  // vs. what middleware computed.
+  const displayableRoles = getDisplayablePortals(roles);
+
+  // If no roles are presentable, bounce to login safely.
+  if (displayableRoles.length === 0) {
     router.replace("/login");
     return null;
   }
 
-  if (roles.length === 1) {
-    router.replace(redirectTo ?? ROLE_ROUTES[roles[0]]);
+  // If only one presentable option exists, bypass the choice interface entirely.
+  if (displayableRoles.length === 1) {
+    const destination = redirectTo ?? getPortalDestination(displayableRoles[0]);
+    router.replace(destination);
     return null;
   }
 
-  const handleChoose = (role: UserRole) => {
-    router.push(redirectTo ?? ROLE_ROUTES[role]);
+  const handleChoose = (role: BaseRole) => {
+    const destination = redirectTo ?? getPortalDestination(role);
+    router.push(destination);
   };
 
   return (
     <AuthLayout>
+      {/* Header Context Banner */}
       <div className="flex items-center gap-3 mb-8">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 border border-amber-100">
-          <GraduationCap className="h-5 w-5 text-amber-700" />
+          {PORTAL_BRAND_ICON}
         </div>
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-amber-700/70">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-amber-700/70">
             Kibali Academy
           </p>
-          <h1 className="text-lg font-semibold text-slate-900 leading-tight">
-            Choose portal
-          </h1>
+          <h1 className="text-lg font-bold text-slate-900 leading-tight">Choose portal</h1>
         </div>
       </div>
 
@@ -78,11 +60,10 @@ export function ChooseRoleForm({ roles, redirectTo }: Props) {
         Your account has access to multiple portals. Where would you like to go?
       </p>
 
+      {/* Select Portal Card Matrix */}
       <div className="space-y-3">
-        {roles.map((role) => {
-          const meta = ROLE_META[role];
-          
-          // Defensive fallback step in case an undefined role is listed
+        {displayableRoles.map((role) => {
+          const meta = PORTAL_META[role];
           if (!meta) return null;
 
           return (
@@ -91,17 +72,23 @@ export function ChooseRoleForm({ roles, redirectTo }: Props) {
               type="button"
               onClick={() => handleChoose(role)}
               className={[
-                "w-full flex items-center gap-4 px-4 py-3.5 rounded-xl border-2 text-left transition-all",
+                "w-full flex items-center gap-4 px-4 py-3.5 rounded-xl border transition-all text-left group",
                 meta.bg,
                 meta.accent,
               ].join(" ")}
             >
-              <span className="shrink-0">{meta.icon}</span>
-              <div>
-                <p className="font-semibold text-sm">{meta.label}</p>
-                <p className="text-xs text-slate-400">{meta.description}</p>
+              <div className="shrink-0 p-2 bg-white rounded-lg shadow-sm border border-slate-100">
+                {meta.icon}
               </div>
-              <span className="ml-auto text-slate-300">→</span>
+              <div className="flex-1">
+                <p className="font-bold text-sm text-slate-800">{meta.label}</p>
+                <p className="text-xs text-slate-400 group-hover:text-slate-500 transition-colors">
+                  {meta.description}
+                </p>
+              </div>
+              <span className="text-slate-300 group-hover:text-slate-500 group-hover:translate-x-0.5 transition-all font-bold pr-1">
+                →
+              </span>
             </button>
           );
         })}
@@ -110,6 +97,14 @@ export function ChooseRoleForm({ roles, redirectTo }: Props) {
       <p className="mt-6 text-xs text-slate-400 text-center">
         You can switch portals any time from your account menu.
       </p>
+
+      {/* Signature Branding Footer */}
+      <div className="mt-12 pt-6 border-t border-slate-100 flex items-center justify-center">
+        <p className="text-xs text-slate-400 font-medium tracking-wide">
+          Built with precision by{" "}
+          <span className="font-bold text-amber-600">SleekSites</span>
+        </p>
+      </div>
     </AuthLayout>
   );
 }

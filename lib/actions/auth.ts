@@ -4,11 +4,11 @@
 // Kibali Academy — Auth Server Actions (hardened)
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { supabaseAdmin }           from "@/lib/supabase/admin";
-import { revalidatePath }          from "next/cache";
-import { redirect }                 from "next/navigation";
-import { sendPasswordResetEmail }     from "@/lib/mail";
-import { getAuthConfirmUrl }          from "@/lib/utils/site-url";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { sendPasswordResetEmail } from "@/lib/mail";
+import { getAuthConfirmUrl } from "@/lib/utils/site-url";
 
 import {
   loginSchema,
@@ -16,26 +16,26 @@ import {
   resetPasswordSchema,
   ROLE_ROUTES,
   CHOOSE_ROLE_ROUTE,
+  toBaseRoleArray,
+  isBaseRole,
   type BaseRole,
   type Profile,
+  type SessionResult,
   type AuthActionResult,
 } from "@/lib/types/auth";
 
-import {
-  resolvePrimaryRole,
-  resolveAllRoles,
-} from "@/lib/actions/auth-utils";
+import { resolveAllRoles } from "@/lib/actions/auth-utils";
 
 // ── Rate limiter ───────────────────────────────────────────────────────────
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
 function checkRateLimit(
-  key:      string,
-  limit     = 5,
-  windowMs  = 15 * 60 * 1000
+  key: string,
+  limit = 5,
+  windowMs = 15 * 60 * 1000
 ): boolean {
-  const now    = Date.now();
+  const now = Date.now();
   const record = rateLimitMap.get(key);
   if (!record || now > record.resetTime) {
     rateLimitMap.set(key, { count: 1, resetTime: now + windowMs });
@@ -44,17 +44,6 @@ function checkRateLimit(
   if (record.count >= limit) return false;
   record.count++;
   return true;
-}
-
-// ============================================================================
-// SESSION RESULT TYPE
-// ============================================================================
-
-export interface SessionResult {
-  user:        { id: string; email: string };
-  profile:     Profile;
-  primaryRole: BaseRole;
-  allRoles:    BaseRole[];
 }
 
 // ============================================================================
@@ -74,15 +63,16 @@ export async function getSession(): Promise<SessionResult | null> {
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select(`
+      .select(
+        `
         id,
         school_id,
         full_name,
         phone_number,
         email,
         avatar_url,
-        role,
-        roles,
+        base_role,
+        admin_role,
         is_super_admin,
         is_dev,
         teacher_id,
@@ -90,43 +80,62 @@ export async function getSession(): Promise<SessionResult | null> {
         denied_permissions_override,
         created_at,
         updated_at
-      `)
+      `
+      )
       .eq("id", user.id)
       .single();
 
     if (profileError || !profile) {
-      console.warn("[getSession] profile not found for uid:", user.id, profileError?.message);
+      console.warn(
+        "[getSession] profile not found for uid:",
+        user.id,
+        profileError?.message
+      );
       return null;
     }
 
-    // Aligned to conform explicitly with the structural definitions inside types/auth.ts
+    // Canonical mapping for everything except portal set.
     const typedProfile: Profile = {
-      id:                           profile.id as string,
-      school_id:                    (profile.school_id        as string | null) ?? null,
-      full_name:                    (profile.full_name         as string | null) ?? null,
-      phone_number:                 (profile.phone_number      as string | null) ?? null,
-      email:                        (profile.email             as string | null) ?? null,
-      avatar_url:                   (profile.avatar_url        as string | null) ?? null,
-      base_role:                    (profile.role              as BaseRole) ?? "staff",
-      admin_role:                   null,
-      roles:                        (profile.roles             as string[] | null) ?? null,
-      teacher_id:                   (profile.teacher_id        as string | null) ?? null,
-      is_super_admin:               (profile.is_super_admin    as boolean) ?? false,
-      is_dev:                       (profile.is_dev            as boolean) ?? false,
-      allowed_permissions_override: (profile.allowed_permissions_override as string[] | null) ?? null,
-      denied_permissions_override:  (profile.denied_permissions_override  as string[] | null) ?? null,
-      created_at:                   profile.created_at as string,
-      updated_at:                   profile.updated_at as string,
+      id: profile.id as string,
+      school_id: (profile.school_id as string | null) ?? null,
+      full_name: (profile.full_name as string | null) ?? null,
+      phone_number: (profile.phone_number as string | null) ?? null,
+      email: (profile.email as string | null) ?? null,
+      avatar_url: (profile.avatar_url as string | null) ?? null,
+      base_role: (isBaseRole(profile.base_role) ? profile.base_role : "parent") as BaseRole,
+      admin_role: (profile.admin_role as string | null) ?? null,
+      teacher_id: (profile.teacher_id as string | null) ?? null,
+      is_super_admin: (profile.is_super_admin as boolean) ?? false,
+      is_dev: (profile.is_dev as boolean) ?? false,
+      allowed_permissions_override:
+        (profile.allowed_permissions_override as string[] | null) ?? [],
+      denied_permissions_override:
+        (profile.denied_permissions_override as string[] | null) ?? [],
+      created_at: profile.created_at as string,
+      updated_at: profile.updated_at as string,
     };
 
+    // ── Portal set: base_role + JWT accessible_portals (sync_user_jwt_claims) ──
+    const meta = user.app_metadata ?? {};
+    const allRoles = resolveAllRoles({
+      base_role: typedProfile.base_role,
+      accessible_portals: toBaseRoleArray(meta.accessible_portals),
+      is_super_admin: typedProfile.is_super_admin,
+    });
+
+    const primaryRole = allRoles[0] ?? "parent";
+
     return {
-      user:        { id: user.id, email: user.email ?? "" },
-      profile:     typedProfile,
-      primaryRole: resolvePrimaryRole(typedProfile),
-      allRoles:    resolveAllRoles(typedProfile),
+      user: { id: user.id, email: user.email ?? "" },
+      profile: typedProfile,
+      primaryRole,
+      allRoles,
     };
   } catch (err: unknown) {
-    console.error("[getSession] unexpected error:", err instanceof Error ? err.message : err);
+    console.error(
+      "[getSession] unexpected error:",
+      err instanceof Error ? err.message : err
+    );
     return null;
   }
 }
@@ -137,7 +146,7 @@ export async function getSession(): Promise<SessionResult | null> {
 
 export async function loginAction(formData: FormData): Promise<AuthActionResult> {
   const rawEmail = (formData.get("email") as string | null) ?? "";
-  const email    = rawEmail.toLowerCase().trim();
+  const email = rawEmail.toLowerCase().trim();
 
   if (!checkRateLimit(`login:${email}`, 6, 10 * 60 * 1000)) {
     return {
@@ -147,7 +156,7 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
   }
 
   const parsed = loginSchema.safeParse({
-    email:    formData.get("email"),
+    email: formData.get("email"),
     password: formData.get("password"),
   });
 
@@ -162,7 +171,7 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
 
   const { data: signInData, error: signInError } =
     await supabase.auth.signInWithPassword({
-      email:    parsed.data.email,
+      email: parsed.data.email,
       password: parsed.data.password,
     });
 
@@ -189,31 +198,60 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
     return { success: false, message: "Session error. Please try again." };
   }
 
-  // Modern multi-portal claims architecture parsing base_role and accessible_portals
-  let baseRole          = authUser.app_metadata?.base_role as BaseRole | undefined;
-  let accessiblePortals = (authUser.app_metadata?.accessible_portals as BaseRole[]) ?? 
-                          (baseRole ? [baseRole] : []);
+  // ── Resolve base_role + accessible_portals ────────────────────────────────
+  // 1. Primary source: fresh JWT app_metadata custom claims (just issued, always current).
+  const meta = authUser.app_metadata ?? {};
 
-  if (!baseRole) {
+  let baseRole: BaseRole | undefined = isBaseRole(meta.base_role)
+    ? (meta.base_role as BaseRole)
+    : undefined;
+
+  let accessiblePortals: BaseRole[] = toBaseRoleArray(meta.accessible_portals);
+
+  // 2. Legacy claim fallback (deprecated keys, in case trigger hasn't migrated yet).
+  if (!baseRole && isBaseRole(meta.role)) {
+    baseRole = meta.role as BaseRole;
+  }
+  if (accessiblePortals.length === 0) {
+    accessiblePortals = toBaseRoleArray(meta.roles);
+  }
+
+  // 3. Full DB fallback — base_role + is_super_admin only.
+  //    profiles.roles is legacy/deprecated and is NOT a reliable superset source;
+  //    if accessible_portals is missing from the JWT at this point, the safest
+  //    fallback is a single-portal session (the user can re-login once
+  //    sync_user_jwt_claims has run to populate the full claim).
+  if (!baseRole || accessiblePortals.length === 0) {
     const { data: profileRow } = await supabase
       .from("profiles")
-      .select("role, roles")
+      .select("base_role, is_super_admin")
       .eq("id", authUser.id)
       .maybeSingle();
 
-    baseRole = (profileRow?.role as BaseRole | undefined) ?? "staff";
-    
-    if (profileRow?.roles && Array.isArray(profileRow.roles)) {
-      accessiblePortals = profileRow.roles as BaseRole[];
-    } else {
+    if (!baseRole) {
+      baseRole = isBaseRole(profileRow?.base_role)
+        ? (profileRow.base_role as BaseRole)
+        : "parent";
+    }
+
+    if (accessiblePortals.length === 0) {
       accessiblePortals = [baseRole];
+    }
+
+    if (profileRow?.is_super_admin === true && !accessiblePortals.includes("super_admin")) {
+      accessiblePortals = ["super_admin", ...accessiblePortals];
     }
   }
 
-  if (baseRole && !accessiblePortals.includes(baseRole)) {
+  // 4. Always ensure baseRole is itself represented in accessiblePortals.
+  if (!accessiblePortals.includes(baseRole)) {
     accessiblePortals = [baseRole, ...accessiblePortals];
   }
 
+  // De-duplicate while preserving order.
+  accessiblePortals = Array.from(new Set(accessiblePortals));
+
+  // 5. Parent-setup integrity check — only block if "parent" is the SOLE accessible portal.
   if (accessiblePortals.includes("parent")) {
     try {
       const { data: parentRow } = await supabaseAdmin
@@ -223,7 +261,7 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
         .limit(1)
         .maybeSingle();
 
-      if (!parentRow && accessiblePortals.length === 1) {
+      if (!parentRow && accessiblePortals.length === 1 && accessiblePortals[0] === "parent") {
         await supabase.auth.signOut();
         return {
           success: false,
@@ -232,25 +270,29 @@ export async function loginAction(formData: FormData): Promise<AuthActionResult>
         };
       }
     } catch (err: unknown) {
-      console.warn("[loginAction] parent check failed:", err instanceof Error ? err.message : err);
+      console.warn(
+        "[loginAction] parent check failed:",
+        err instanceof Error ? err.message : err
+      );
     }
   }
 
   revalidatePath("/", "layout");
 
+  // ── Multi-portal routing ───────────────────────────────────────────────────
   if (accessiblePortals.length > 1) {
     return {
-      success:    true,
-      message:    "Signed in successfully.",
+      success: true,
+      message: "Signed in successfully.",
       redirectTo: CHOOSE_ROLE_ROUTE,
-      roles:      accessiblePortals,
+      roles: accessiblePortals,
     };
   }
 
   return {
-    success:    true,
-    message:    "Signed in successfully.",
-    redirectTo: ROLE_ROUTES[baseRole] ?? "/admin/dashboard",
+    success: true,
+    message: "Signed in successfully.",
+    redirectTo: ROLE_ROUTES[baseRole] ?? ROLE_ROUTES.parent,
   };
 }
 
@@ -288,23 +330,20 @@ export async function forgotPasswordAction(
   if (!checkRateLimit(`forgot:${email}`, 3, 15 * 60 * 1000)) {
     return {
       success: true,
-      message:
-        "If an account with that email exists, you will receive a reset link shortly.",
+      message: "If an account with that email exists, you will receive a reset link shortly.",
     };
   }
 
   const SAFE_RESPONSE: AuthActionResult = {
     success: true,
-    message:
-      "If an account with that email exists, you will receive a reset link shortly.",
+    message: "If an account with that email exists, you will receive a reset link shortly.",
   };
 
-  const { data: linkData, error: linkError } =
-    await supabaseAdmin.auth.admin.generateLink({
-      type:    "recovery",
-      email,
-      options: { redirectTo: getAuthConfirmUrl() },
-    });
+  const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+    type: "recovery",
+    email,
+    options: { redirectTo: getAuthConfirmUrl() },
+  });
 
   if (linkError || !linkData?.properties?.action_link) {
     if (linkError) console.error("[forgotPassword]", linkError.message);
@@ -319,15 +358,20 @@ export async function forgotPasswordAction(
       .eq("id", linkData.user.id)
       .maybeSingle();
     if (p?.full_name) recipientName = p.full_name as string;
-  } catch { /* non-blocking */ }
+  } catch {
+    /* non-blocking */
+  }
 
   await sendPasswordResetEmail({
     recipientEmail: email,
     recipientName,
-    resetLink:      linkData.properties.action_link,
-    isFirstSetup:   false,
+    resetLink: linkData.properties.action_link,
+    isFirstSetup: false,
   }).catch((err: unknown) =>
-    console.error("[forgotPassword] email send failed:", err instanceof Error ? err.message : err)
+    console.error(
+      "[forgotPassword] email send failed:",
+      err instanceof Error ? err.message : err
+    )
   );
 
   return SAFE_RESPONSE;
@@ -341,7 +385,7 @@ export async function resetPasswordAction(
   formData: FormData
 ): Promise<AuthActionResult> {
   const parsed = resetPasswordSchema.safeParse({
-    password:        formData.get("password"),
+    password: formData.get("password"),
     confirmPassword: formData.get("confirmPassword"),
   });
 
@@ -362,8 +406,7 @@ export async function resetPasswordAction(
   if (userError || !user) {
     return {
       success: false,
-      message:
-        "Session expired. Please click the setup link in your email again.",
+      message: "Session expired. Please click the setup link in your email again.",
     };
   }
 
@@ -385,22 +428,19 @@ export async function resetPasswordAction(
     };
   }
 
-  try {
-    await supabaseAdmin
-      .from("profiles")
-      .update({ role: "parent" })
-      .eq("id", user.id)
-      .eq("role", "parent");
-  } catch { /* non-blocking */ }
+  // No longer forcibly overwrite role here — base_role/roles are managed via
+  // the RBAC admin flows, not implicitly on password reset.
 
-  const roleFromJwt =
-    (user.app_metadata?.base_role as BaseRole | undefined) ?? "parent";
+  const meta = user.app_metadata ?? {};
+  const roleFromJwt: BaseRole = isBaseRole(meta.base_role)
+    ? (meta.base_role as BaseRole)
+    : "parent";
 
   revalidatePath("/", "layout");
 
   return {
-    success:    true,
-    message:    "Password set successfully! Welcome to Kibali Academy.",
-    redirectTo: ROLE_ROUTES[roleFromJwt] ?? "/parent/dashboard",
+    success: true,
+    message: "Password set successfully! Welcome to Kibali Academy.",
+    redirectTo: ROLE_ROUTES[roleFromJwt] ?? ROLE_ROUTES.parent,
   };
 }

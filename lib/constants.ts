@@ -5,7 +5,7 @@
 // The AdminSidebar server component filters this array through hasPermission()
 // before passing it to the client shell — unauthorized links never reach the DOM.
 //
-// Icons are defined as plain string tokens matching Lucide icon names to safely 
+// Icons are defined as plain string tokens matching Lucide icon names to safely
 // cross the Next.js Server-to-Client component serialization boundary.
 
 import type { Profile } from "@/lib/types/auth";
@@ -14,7 +14,7 @@ import { hasPermission, isSuperAdmin } from "@/lib/actions/auth-utils";
 export interface NavLink {
   label:              string;
   href:               string;
-  icon:               string; // Changed from LucideIcon component type to serializable string string token
+  icon:               string; // Changed from LucideIcon component type to serializable string token
   group?:             string;
   permissionRequired: string | null;
 }

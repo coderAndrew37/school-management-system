@@ -1,22 +1,88 @@
-// lib/services/auth-utils.ts
-// Kibali Academy — Domain-Action Permission Evaluator
+// lib/actions/auth-utils.ts
+// Kibali Academy — Auth & Permission Helpers
 //
-// Core evaluation pipeline for the three-layer permission system:
-//   1. Super-Admin bypass  →  full access, no further checks
-//   2. Denied override     →  explicit block, always wins
-//   3. Allowed override    →  explicit grant, expands past baseline
-//   4. Baseline role       →  default capabilities for this admin_role
-//   5. Default deny        →  everything else is blocked
+// This single file covers two related but distinct concerns:
 //
-// Domain-action matching supports both exact tokens ("finance:fees:read")
-// and wildcard domain segments ("finance:*" or "finance:fees:*").
+//   1. Portal/role resolution (resolveAllRoles, resolvePrimaryRole)
+//      `profiles.roles` is a legacy column being phased out. The single
+//      source of truth for "what portals can this user reach" is:
+//        - profiles.base_role   (single canonical role, DB)
+//        - JWT app_metadata.accessible_portals (superset, computed by
+//          sync_user_jwt_claims from teacher_id / staff_role_assignments)
+//      These operate ONLY on base_role + accessible_portals + is_super_admin.
+//
+//   2. Domain-action permission evaluation (isSuperAdmin, isAdmin,
+//      hasPermission, hasAnyPermission, hasAllPermissions,
+//      resolveEffectivePermissions)
+//      Core evaluation pipeline for the three-layer permission system:
+//        1. Super-Admin bypass  →  full access, no further checks
+//        2. Denied override     →  explicit block, always wins
+//        3. Allowed override    →  explicit grant, expands past baseline
+//        4. Baseline role       →  default capabilities for this admin_role
+//        5. Default deny        →  everything else is blocked
+//      Domain-action matching supports both exact tokens ("finance:fees:read")
+//      and wildcard segments ("finance:*" or "finance:fees:*").
 
 import {
-  BASE_ROLES,
+  ROLE_PRIORITY,
+  toBaseRoleArray,
   BASELINE_ROLE_CAPABILITIES,
   type BaseRole,
   type Profile,
 } from "@/lib/types/auth";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 1 — Portal / Role Resolution (base_role + accessible_portals)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface RoleResolutionFragment {
+  base_role?: string | null;
+  accessible_portals?: readonly string[] | null;
+  is_super_admin?: boolean | null;
+}
+
+/**
+ * Compiles a prioritized, deduplicated array of all BaseRoles linked to this account.
+ * Always includes base_role even if accessible_portals is empty or missing.
+ * Sorted by ROLE_PRIORITY: super_admin → admin → staff → parent → student
+ */
+export function resolveAllRoles(
+  p: RoleResolutionFragment | null | undefined
+): BaseRole[] {
+  if (!p) return ["parent"];
+
+  const collected = new Set<BaseRole>();
+
+  const baseRole = toBaseRoleArray([p.base_role])[0];
+  if (baseRole) collected.add(baseRole);
+
+  for (const r of toBaseRoleArray(p.accessible_portals)) {
+    collected.add(r);
+  }
+
+  if (p.is_super_admin === true) {
+    collected.add("super_admin");
+  }
+
+  if (collected.size === 0) return ["parent"];
+
+  return ROLE_PRIORITY.filter((role) => collected.has(role));
+}
+
+/**
+ * Resolves the single primary BaseRole for portal routing purposes.
+ * Enforces strict prioritization sequence: super_admin → admin → staff → parent → student
+ */
+export function resolvePrimaryRole(
+  p: RoleResolutionFragment | null | undefined
+): BaseRole {
+  const all = resolveAllRoles(p);
+  return all[0] ?? "parent";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 2 — Domain-Action Permission Evaluator
+// ═══════════════════════════════════════════════════════════════════════════
 
 // ── Internal fragment type ────────────────────────────────────────────────────
 // Used broadly across helpers that accept either a full Profile or a JWT
@@ -25,7 +91,6 @@ import {
 export interface ProfileOrMetadataFragment {
   base_role?: string | null;
   admin_role?: string | null;
-  roles?: string[] | null;
   role?: string | null;
   admin_paths?: string[] | null;
   permissions?: string[] | null;
@@ -130,59 +195,6 @@ export function isAdmin(
   return resolvedRole === "admin" || resolvedRole === "super_admin";
 }
 
-// ── Role Resolution Helpers ───────────────────────────────────────────────────
-
-/**
- * Resolves the single primary BaseRole for portal routing purposes.
- * Enforces strict prioritization sequence: super_admin → admin → staff → parent → student
- */
-export function resolvePrimaryRole(
-  p: ProfileOrMetadataFragment | null | undefined
-): BaseRole {
-  if (!p) return "parent";
-
-  // Build an optimized lookup list of roles tied directly to the profile context
-  const structuralRoles: string[] = [];
-  
-  if (p.base_role) structuralRoles.push(p.base_role);
-  if (p.role) structuralRoles.push(p.role);
-  if (p.roles && Array.isArray(p.roles)) structuralRoles.push(...p.roles);
-
-  // Structural strict priority checklist iteration block
-  const priorityChecklist: BaseRole[] = ["super_admin", "admin", "staff", "parent", "student"];
-
-  for (const candidateRole of priorityChecklist) {
-    if (structuralRoles.includes(candidateRole)) {
-      return candidateRole;
-    }
-  }
-
-  return "parent";
-}
-
-/**
- * Compiles a prioritized, deduplicated array of all BaseRoles linked to this account.
- * Sorted matching priority order: super_admin → admin → staff → parent → student
- */
-export function resolveAllRoles(
-  p: ProfileOrMetadataFragment | null | undefined
-): BaseRole[] {
-  if (!p) return ["parent"];
-
-  const collectedRoles = new Set<string>();
-
-  if (p.base_role) collectedRoles.add(p.base_role);
-  if (p.role) collectedRoles.add(p.role);
-  if (p.roles && Array.isArray(p.roles)) {
-    p.roles.forEach((r) => collectedRoles.add(r));
-  }
-
-  const priorityOrder: BaseRole[] = ["super_admin", "admin", "staff", "parent", "student"];
-  const compiledResult = priorityOrder.filter((role) => collectedRoles.has(role));
-
-  return compiledResult.length > 0 ? compiledResult : ["parent"];
-}
-
 // ── Core Domain-Action Evaluator ──────────────────────────────────────────────
 
 /**
@@ -224,7 +236,7 @@ export function hasPermission(
   } else {
     const fragment = profile as ProfileOrMetadataFragment;
     jwtPermissions = fragment.permissions ?? null;
-    // Note: client token fragments do not carry separate denied lists; 
+    // Note: client token fragments do not carry separate denied lists;
     // exclusions are pre-computed during JWT synchronization steps.
   }
 
@@ -306,7 +318,7 @@ export function resolveEffectivePermissions(profile: Profile): string[] {
   // Remove explicitly denied tokens (exact match checks for explicit targets)
   for (const token of denied) {
     merged.delete(token);
-    
+
     // Also strip out any wildcard matches that fall under the umbrella of a denied rule
     for (const existing of merged) {
       if (tokenMatchesRequired(token, existing)) {

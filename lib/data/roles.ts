@@ -9,7 +9,6 @@ export interface StaffMember {
   phone_number: string | null;
   base_role: BaseRole;
   admin_role: AdminRole | null;
-  roles: BaseRole[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -17,6 +16,10 @@ export interface StaffMember {
 /**
  * Get all staff members with their current roles
  * Only accessible by Super Admin
+ *
+ * NOTE: profiles.roles removed. Multi-portal access (accessible_portals) is
+ * derived by sync_user_jwt_claims from base_role + teacher_id +
+ * staff_role_assignments, not from a profiles array column.
  */
 export async function getAllStaffMembers(): Promise<StaffMember[] | null> {
   const supabase = await createSupabaseServerClient();
@@ -43,7 +46,6 @@ export async function getAllStaffMembers(): Promise<StaffMember[] | null> {
       avatar_url,
       base_role,
       admin_role,
-      roles,
       created_at,
       updated_at,
       users (
@@ -73,7 +75,6 @@ export async function getAllStaffMembers(): Promise<StaffMember[] | null> {
       phone_number: userRelation?.phone_number ?? null,
       base_role: item.base_role,
       admin_role: item.admin_role,
-      roles: item.roles,
       created_at: item.created_at,
       updated_at: item.updated_at,
     };
@@ -94,7 +95,6 @@ export async function getStaffMemberById(id: string): Promise<StaffMember | null
       avatar_url,
       base_role,
       admin_role,
-      roles,
       created_at,
       updated_at,
       users (
@@ -118,7 +118,6 @@ export async function getStaffMemberById(id: string): Promise<StaffMember | null
     phone_number: userRelation?.phone_number ?? null,
     base_role: data.base_role,
     admin_role: data.admin_role,
-    roles: data.roles,
     created_at: data.created_at,
     updated_at: data.updated_at,
   };

@@ -1,4 +1,4 @@
-// app/(admin)/layout.tsx
+// app/(admin)/admin/layout.tsx
 // Kibali Academy — Admin Route Group Layout (Server Component)
 //
 // This layout executes on every navigation to any /admin/* route.
@@ -22,7 +22,9 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { getSession } from "@/lib/actions/auth";
 import { ADMIN_LINKS, getAuthorizedLinks } from "@/lib/constants";
-// ✅ FIXED: Imported hasPermission from the updated single source of truth in services
+// hasPermission/isSuperAdmin live in lib/actions/auth-utils.ts alongside the
+// JWT/portal-set resolution helpers (resolveAllRoles, resolvePrimaryRole) —
+// this is the single auth-utils file for the project.
 import { hasPermission } from "@/lib/actions/auth-utils";
 import { ACCESS_DENIED_ROUTE } from "@/lib/types/auth";
 import { AdminLayoutShell } from "@/app/_components/nav/AdminLayoutShell";
@@ -76,15 +78,16 @@ export default async function AdminLayout({
     redirect("/login");
   }
 
-  // ✅ FIXED: Updated role evaluation to support "super_admin" and bypass checks for is_dev
-  const isAuthorizedAdmin = 
-    session.primaryRole === "admin" || 
-    session.primaryRole === "super_admin" || 
+  // super_admin / is_dev get full bypass (super_admin: full access within their
+  // school; is_dev: full access across the whole system — both handled
+  // identically at the layout-guard level via hasPermission's isSuperAdmin check).
+  const isAuthorizedAdmin =
+    session.primaryRole === "admin" ||
+    session.primaryRole === "super_admin" ||
     session.profile.is_dev;
 
   if (!isAuthorizedAdmin) {
     // Wrong portal — send to their correct landing page
-    // ✅ FIXED: Replaced legacy "teacher" route mapping key with standardized "staff"
     const destination = {
       super_admin: "/admin/dashboard",
       admin: "/admin/dashboard",

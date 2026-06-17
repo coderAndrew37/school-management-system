@@ -54,17 +54,16 @@ export type AdminRole = SeededAdminRole | string;
 // ── Admin Role Definition (from admin_role_definitions table) ────────────────
 
 export interface AdminRoleDefinition {
-  id:                   string;
-  label:                string;
-  description:          string;
-  allowed_paths:        string[];
+  id: string;
+  label: string;
+  description: string;
+  allowed_paths: string[];
   baseline_permissions: string[];
-  is_active:            boolean;
-  sort_order:           number;
-  created_at:           string;
-  updated_at:           string;
-  school_id:            string;
-
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  school_id: string;
 }
 
 // ── Baseline Role Capability Map ─────────────────────────────────────────────
@@ -127,66 +126,64 @@ export const BASELINE_ROLE_CAPABILITIES: Record<string, readonly string[]> = {
 
 // ── JWT App Metadata Schema ──────────────────────────────────────────────────
 export interface UserAppMetadata {
-  provider?:          string;
-  providers?:         string[];
-  base_role:          BaseRole; // The new structural source of truth
-  accessible_portals?: string[]; // Array compiled by the trigger function: ['parent', 'staff', 'admin']
-  admin_role?:        string;
-  admin_paths?:       string[];
-  permissions?:       string[];
-  is_super_admin?:    boolean;
-  is_dev?:            boolean;
-  school_id?:         string;
-  
+  provider?: string;
+  providers?: string[];
+  base_role: BaseRole; // The structural source of truth, synced from profiles.base_role
+  accessible_portals?: BaseRole[]; // Compiled by the trigger function: ['parent', 'staff', 'admin']
+  admin_role?: string;
+  admin_paths?: string[];
+  permissions?: string[];
+  is_super_admin?: boolean;
+  is_dev?: boolean;
+  school_id?: string;
+
   /** @deprecated Use base_role instead */
-  role?:              BaseRole;
+  role?: BaseRole;
   /** @deprecated Use accessible_portals instead */
-  roles?:             BaseRole[];
+  roles?: BaseRole[];
 }
 
 // ── Profile (maps directly to public.profiles row) ───────────────────────────
 
 export interface Profile {
-  id:                           string;
-  school_id:                    string | null;
-  base_role:                    BaseRole;
-  admin_role:                   string | null;
-  roles:                        string[] | null;
-  full_name:                    string | null;
-  avatar_url:                   string | null;
-  email?:                       string | null;
-  phone_number?:                string | null;
-  teacher_id:                   string | null;
-  is_super_admin:               boolean;
-  is_dev:                       boolean;
-  created_at:                   string;
-  updated_at:                   string;
-  allowed_permissions_override: string[] | null;
-  denied_permissions_override:  string[] | null;
+  id: string;
+  school_id: string | null;
+  base_role: BaseRole;
+  admin_role: string | null;
+  full_name: string | null;
+  avatar_url: string | null;
+  email: string | null;
+  phone_number: string | null;
+  teacher_id: string | null;
+  is_super_admin: boolean;
+  is_dev: boolean;
+  created_at: string;
+  updated_at: string;
+  allowed_permissions_override: string[];
+  denied_permissions_override: string[];
 }
 
 // ── Enriched Staff Member ────────────────────────────────────────────────────
 
 export interface StaffMember {
-  id:                    string;
-  full_name:             string | null;
-  avatar_url:            string | null;
-  email:                 string | null;
-  base_role:             BaseRole;
-  admin_role:            string | null;
+  id: string;
+  full_name: string | null;
+  avatar_url: string | null;
+  email: string | null;
+  base_role: BaseRole;
+  admin_role: string | null;
   admin_role_definition: AdminRoleDefinition | null;
-  roles:                 string[] | null;
-  is_super_admin:        boolean;
-  is_dev:                boolean;
-  created_at:            string;
-  updated_at:            string;
+  is_super_admin: boolean;
+  is_dev: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 // ── Role Statistics ──────────────────────────────────────────────────────────
 
 export interface RoleStatistics {
-  total:       number;
-  byBaseRole:  Partial<Record<BaseRole, number>>;
+  total: number;
+  byBaseRole: Partial<Record<BaseRole, number>>;
   byAdminRole: Record<string, number>;
 }
 
@@ -194,88 +191,106 @@ export interface RoleStatistics {
 
 export interface AssignRolePayload {
   targetUserId: string;
-  base_role:    BaseRole;
-  admin_role:   string | null;
-  reason:       string;
+  base_role: BaseRole;
+  admin_role: string | null;
+  reason: string;
 }
 
 export interface UpdatePermissionOverridesPayload {
-  targetUserId:                 string;
+  targetUserId: string;
   allowed_permissions_override: string[];
-  denied_permissions_override:  string[];
-  reason:                       string;
+  denied_permissions_override: string[];
+  reason: string;
 }
 
 export interface RoleDefinitionPayload {
-  id:                   string;
-  label:                string;
-  description:          string;
-  allowed_paths:        string[];
+  id: string;
+  label: string;
+  description: string;
+  allowed_paths: string[];
   baseline_permissions: string[];
-  sort_order:           number;
+  sort_order: number;
 }
 
-// ── Auth Result ──────────────────────────────────────────────────────────────
+// ── Session / Auth Result ─────────────────────────────────────────────────────
+
+export interface SessionResult {
+  user: { id: string; email: string };
+  profile: Profile;
+  primaryRole: BaseRole;
+  allRoles: BaseRole[];
+}
 
 export interface AuthUser {
-  id:      string;
-  email:   string;
+  id: string;
+  email: string;
   profile: Profile;
 }
 
 export interface AuthActionResult {
-  success:     boolean;
-  message:     string;
+  success: boolean;
+  message: string;
   redirectTo?: string;
-  roles?:      BaseRole[];
+  roles?: BaseRole[];
 }
 
 // ── Route Constants ──────────────────────────────────────────────────────────
 
-export const CHOOSE_ROLE_ROUTE  = "/auth/choose-role";
+export const CHOOSE_ROLE_ROUTE = "/auth/choose-role";
 export const ACCESS_DENIED_ROUTE = "/admin/access-denied";
 
 // Where each base role lands after login
 export const ROLE_ROUTES: Record<BaseRole, string> = {
   super_admin: "/admin/dashboard",
-  admin:       "/admin/dashboard",
-  staff:       "/teacher/dashboard",
-  parent:      "/parent/dashboard",
-  student:     "/student/dashboard",
+  admin: "/admin/dashboard",
+  staff: "/teacher/dashboard",
+  parent: "/parent/dashboard",
+  student: "/student/dashboard",
 };
 
 // Maps route prefixes to the base roles that may access them.
 // Layer 1 middleware check. Domain-action tokens are Layer 2+.
 export const PROTECTED_PREFIXES: Record<string, BaseRole[]> = {
-  "/admin":   ["admin", "super_admin"],
+  "/admin": ["admin", "super_admin"],
   "/teacher": ["staff"],
-  "/parent":  ["parent"],
+  "/parent": ["parent"],
   "/student": ["student"],
 };
 
 // ── Static Labels ────────────────────────────────────────────────────────────
 
 export const SEEDED_ROLE_LABELS: Record<string, string> = {
-  headteacher:        "Headteacher",
+  headteacher: "Headteacher",
   deputy_headteacher: "Deputy Headteacher",
-  bursar:             "Bursar",
-  dos:                "Director of Studies",
-  school_doctor:      "School Doctor",
-  librarian:          "Librarian",
+  bursar: "Bursar",
+  dos: "Director of Studies",
+  school_doctor: "School Doctor",
+  librarian: "Librarian",
 };
 
 export const BASE_ROLE_LABELS: Record<BaseRole, string> = {
   super_admin: "Super Administrator",
-  admin:       "Administrator",
-  staff:       "Teacher / Staff",
-  parent:      "Parent / Guardian",
-  student:     "Student",
+  admin: "Administrator",
+  staff: "Teacher / Staff",
+  parent: "Parent / Guardian",
+  student: "Student",
 };
+
+// ── Role Priority (used for resolving primary role from multiple roles) ──────
+// Order matters: earlier entries win when a user holds multiple roles.
+
+export const ROLE_PRIORITY: readonly BaseRole[] = [
+  "super_admin",
+  "admin",
+  "staff",
+  "parent",
+  "student",
+] as const;
 
 // ── Zod Auth Form Schemas ────────────────────────────────────────────────────
 
 export const loginSchema = z.object({
-  email:    z.string().email("Enter a valid email address"),
+  email: z.string().email("Enter a valid email address"),
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
@@ -295,12 +310,23 @@ export const resetPasswordSchema = z
   })
   .refine((d) => d.password === d.confirmPassword, {
     message: "Passwords do not match",
-    path:    ["confirmPassword"],
+    path: ["confirmPassword"],
   });
 
-export type LoginFormValues         = z.infer<typeof loginSchema>;
+export type LoginFormValues = z.infer<typeof loginSchema>;
 export type ForgotPasswordFormValues = z.infer<typeof forgotPasswordSchema>;
-export type ResetPasswordFormValues  = z.infer<typeof resetPasswordSchema>;
+export type ResetPasswordFormValues = z.infer<typeof resetPasswordSchema>;
+
+// ── Type Guards ──────────────────────────────────────────────────────────────
+
+export function isBaseRole(value: unknown): value is BaseRole {
+  return typeof value === "string" && (BASE_ROLES as readonly string[]).includes(value);
+}
+
+export function toBaseRoleArray(value: unknown): BaseRole[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isBaseRole);
+}
 
 // ── Legacy alias ─────────────────────────────────────────────────────────────
 // Kept for backward compatibility with middleware import

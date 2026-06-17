@@ -10,9 +10,9 @@
 //  3. Promise.all rollback wraps — Supabase PostgREST builders are Thenables, not
 //     native Promises. All parallel cleanup arrays wrap builders in async IIFEs.
 //  4. Zero `any` — strict types throughout.
-//  5. base_role / admin_role duality — base_role is preserved as legacy field;
-//     admin_role drives the functional role assignment. Both kept in sync until
-//     the legacy column is dropped.
+//  5. profiles.roles removed — base_role + JWT accessible_portals (via
+//     sync_user_jwt_claims / staff_role_assignments) are now the sole source
+//     of truth for portal membership. StaffMember no longer carries `roles`.
 
 import { createSupabaseServerClient }         from "@/lib/supabase/server";
 import { supabaseAdmin }                       from "@/lib/supabase/admin";
@@ -84,7 +84,7 @@ export async function getAllStaffWithRoles(): Promise<StaffMember[] | null> {
   const [profilesResult, defsResult] = await Promise.all([
     supabase
       .from("profiles")
-      .select("id, full_name, avatar_url, base_role, admin_role, roles, created_at, updated_at")
+      .select("id, full_name, avatar_url, base_role, admin_role, created_at, updated_at")
       .eq("school_id", actor.school_id)
       .order("full_name", { ascending: true }),
     supabase
@@ -116,7 +116,6 @@ export async function getAllStaffWithRoles(): Promise<StaffMember[] | null> {
       base_role:             baseRole,
       admin_role:            adminRole,
       admin_role_definition: adminRole ? (defMap.get(adminRole) ?? null) : null,
-      roles:                 (row.roles as string[]) ?? [],
       is_super_admin:        baseRole === "admin" && adminRole === "super_admin",
       is_dev:                adminRole === "dev"   || adminRole === "developer",
       created_at:            String(row.created_at),
@@ -131,7 +130,7 @@ export async function getStaffMemberById(id: string): Promise<StaffMember | null
   const [profileResult, defsResult] = await Promise.all([
     supabase
       .from("profiles")
-      .select("id, full_name, avatar_url, base_role, admin_role, roles, school_id, created_at, updated_at")
+      .select("id, full_name, avatar_url, base_role, admin_role, school_id, created_at, updated_at")
       .eq("id", id)
       .single(),
     supabase
@@ -162,7 +161,6 @@ export async function getStaffMemberById(id: string): Promise<StaffMember | null
     base_role:             baseRole,
     admin_role:            adminRole,
     admin_role_definition: adminRole ? (defMap.get(adminRole) ?? null) : null,
-    roles:                 (row.roles as string[]) ?? [],
     is_super_admin:        baseRole === "admin" && adminRole === "super_admin",
     is_dev:                adminRole === "dev"   || adminRole === "developer",
     created_at:            String(row.created_at),
@@ -237,7 +235,7 @@ export async function assignRoleAction(payload: AssignRolePayload): Promise<Acti
   try {
     const { data: before } = await supabase
       .from("profiles")
-      .select("full_name, base_role, admin_role, roles")
+      .select("full_name, base_role, admin_role")
       .eq("id", targetUserId)
       .single();
 
@@ -246,7 +244,6 @@ export async function assignRoleAction(payload: AssignRolePayload): Promise<Acti
       .update({
         base_role,
         admin_role: base_role === "admin" ? (admin_role ?? null) : null,
-        roles:      [base_role],
       })
       .eq("id", targetUserId);
 
@@ -531,6 +528,12 @@ export async function getRoleAuditLog(targetUserId: string): Promise<AuditLogEnt
 //
 // FIX: rollback Promise.all wraps PostgREST builders in async IIFEs so they
 //      evaluate as native Promise<void>, not raw Thenables.
+//
+// NOTE: profiles.roles is no longer written. accessible_portals is derived
+// entirely by sync_user_jwt_claims from base_role + teacher_id +
+// staff_role_assignments — assigning teacher_id (Step 2/4) and admin_role
+// (via assignRoleAction or this insert) is sufficient to grant multi-portal
+// access; no separate `roles` array write is needed or performed.
 
 export async function createStaffUserAction(formData: FormData): Promise<ActionResult> {
   const { user } = await getVerifiedSuperAdmin();
@@ -625,7 +628,6 @@ export async function createStaffUserAction(formData: FormData): Promise<ActionR
         phone_number,
         base_role,
         admin_role:  base_role === "admin" ? admin_role : null,
-        roles:       [base_role],
         school_id:   schoolId,
         teacher_id:  newTeacher.id,   // structural bridge — the whole point
         updated_at:  new Date().toISOString(),
